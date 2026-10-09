@@ -31,7 +31,7 @@ export interface ActionRule {
 }
 
 export interface ReviewRules {
-  /** Records at this mastery are finished and never enter the queue. */
+  /** Records at or above this mastery are finished and never enter the queue. */
   retiredAtMastery: number;
   /** Definition/example style details are withheld above this mastery. */
   hideDetailsAboveMastery: number;
@@ -78,7 +78,7 @@ export function checkEligibility(
 ): Eligibility {
   const mastery = resolveMastery(record.mastery, rules);
   if (mastery === null) return { eligible: false, reason: 'missing_mastery' };
-  if (mastery === rules.retiredAtMastery) return { eligible: false, reason: 'retired' };
+  if (mastery >= rules.retiredAtMastery) return { eligible: false, reason: 'retired' };
   if (record.nextReview === null || !isIsoDate(record.nextReview)) {
     return rules.includeMissingDueDate
       ? { eligible: true }

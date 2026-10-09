@@ -3,61 +3,72 @@
  * properties to read and what the review buttons do.
  *
  * Status of each value is tracked in docs/review-logic.md. Markers used here:
- *   STATED      — taken from the project brief, not yet checked against Notion.
- *   PLACEHOLDER — a guess at a name so the app has something to look for. The
- *                 server validates these against the real schema on first use
- *                 and reports exactly which ones are wrong.
- *   UNCONFIRMED — unknown. While either action rule is `null` the app stays a
- *                 read-only preview and never writes to Notion.
+ *   VERIFIED    — read from the Notion database itself (schema, formulas, the
+ *                 "Need review" view) on 2026-10-10.
+ *   STATED      — taken from the project brief, consistent with Notion so far.
+ *   UNCONFIRMED — still unknown. While either action rule is `null` the app
+ *                 stays a read-only preview and never writes to Notion.
  */
 import type { ReviewRules } from '../shared/review-logic.js';
 import type { CardFieldConfig, NotionPropertyConfig } from '../shared/vocabulary.js';
 
+// VERIFIED: property names and types.
 export const notionProperties: NotionPropertyConfig = {
-  word: 'Word', // PLACEHOLDER — the title property
-  mastery: 'Mastery', // PLACEHOLDER — number
-  nextReview: 'Next Review', // PLACEHOLDER — date
+  word: 'Word', // title
+  mastery: 'Mastery', // number
+  nextReview: 'Review Date', // date (every existing value is date-only)
 };
 
 export const cardFields: CardFieldConfig[] = [
-  // PLACEHOLDER names. Fields whose property does not exist are dropped with a warning.
-  { key: 'partOfSpeech', property: 'Part of Speech', label: 'Part of speech', side: 'front', visibility: 'always' },
-  { key: 'pronunciation', property: 'Pronunciation', label: 'Pronunciation', side: 'front', visibility: 'always' },
-  // STATED: definition and example are hidden when mastery > 5.
-  { key: 'definition', property: 'Definition', label: 'Definition', side: 'back', visibility: 'details' },
-  { key: 'example', property: 'Example', label: 'Example', side: 'back', visibility: 'details' },
+  // UNCONFIRMED placement: assumed to be the answer revealed by "Hiện đáp án".
+  { key: 'meaning', property: 'Vietnamese Meaning', label: 'Vietnamese meaning', side: 'back', visibility: 'always' },
+  // VERIFIED: "Review Definition" = if(Mastery <= 5, Definition, "") and
+  // "Review Example" = if(Mastery <= 5, Example Sentences, ""). Reading the
+  // formulas means Notion itself decides what is hidden; `details` makes the
+  // server apply the same threshold again, so the stricter of the two wins.
+  { key: 'definition', property: 'Review Definition', label: 'Definition', side: 'back', visibility: 'details' },
+  { key: 'example', property: 'Review Example', label: 'Example', side: 'back', visibility: 'details' },
 ];
 
+/**
+ * VERIFIED against the "Due for Review" formula, which the "Need review" view
+ * filters on:
+ *   prop("Mastery") < 10 and (empty(prop("Review Date")) or dateStart(prop("Review Date")) <= today())
+ * and against that view's sort (Review Date, ascending).
+ *
+ * The app applies this rule itself instead of reading the formula's value,
+ * because through the API Notion evaluates today() in UTC, while in the Notion
+ * app it follows your own clock. See docs/review-logic.md, section 2.
+ */
 export const reviewRules: ReviewRules = {
-  retiredAtMastery: 10, // STATED: mastery 10 never enters the queue.
-  hideDetailsAboveMastery: 5, // STATED: mastery > 5 hides definition and example.
-  includeDueToday: true, // STATED ("due or overdue"); exact date comparison UNCONFIRMED.
-  includeMissingDueDate: false, // UNCONFIRMED: are rows without a due date reviewable?
-  missingMastery: 'exclude', // UNCONFIRMED: is an empty mastery treated as 0?
-  sortDirection: 'ascending', // UNCONFIRMED: most-overdue first is assumed.
+  retiredAtMastery: 10, // VERIFIED: Mastery < 10
+  hideDetailsAboveMastery: 5, // VERIFIED: Mastery <= 5 shows definition and example
+  includeDueToday: true, // VERIFIED: Review Date <= today()
+  includeMissingDueDate: true, // VERIFIED: empty(Review Date) counts as due
+  missingMastery: 'exclude', // UNCONFIRMED, and currently moot: no row has an empty Mastery
+  sortDirection: 'ascending', // VERIFIED: "Need review" sorts Review Date ascending
 
-  // UNCONFIRMED — what the "Remember" button does. Example shape only:
+  // UNCONFIRMED — what the "Nhớ" button does. The stored data is consistent
+  // with "Mastery + 1, Review Date = today + (old Mastery) days", but that is
+  // an inference, not something Notion's API can show. Awaiting confirmation:
   //   remember: {
-  //     masteryAfter: (mastery) => Math.min(mastery + 1, 10),
-  //     schedule: { base: 'today', intervalDays: ({ masteryAfter }) => /* your rule */ },
+  //     masteryAfter: (mastery) => mastery + 1,
+  //     schedule: { base: 'today', intervalDays: ({ masteryBefore }) => masteryBefore },
   //   },
   remember: null,
 
-  // UNCONFIRMED — what the "Not Remember" button does. The brief says "move the
-  // next review date forward by one day" without raising mastery, but not
-  // whether the day is counted from today or from the existing due date:
+  // UNCONFIRMED — what the "Không nhớ" button does. Awaiting confirmation:
   //   notRemember: {
   //     masteryAfter: (mastery) => mastery,
-  //     schedule: { base: 'today' /* or 'currentDueDate' */, intervalDays: () => 1 },
+  //     schedule: { base: 'today', intervalDays: () => 1 },
   //   },
   notRemember: null,
 };
 
-/** Shown by the health endpoint and the inspect script until resolved. */
+/** Shown by the inspect script until resolved. */
 export const pendingConfirmation: string[] = [
-  'Remember: mastery change and next-review-date formula',
-  'Not Remember: whether +1 day counts from today or from the existing due date',
-  'Property names for word, mastery, next review date and the card fields',
-  'Queue: sort direction, due-today comparison, rows with empty date or mastery',
-  'Any other property the review buttons update (e.g. a last-reviewed date)',
+  '"Nhớ": the exact steps (Mastery change, Review Date formula, anything else it edits)',
+  '"Không nhớ": the exact steps (does Mastery stay the same? is the date today + 1?)',
+  '"Hiện đáp án" and the "Answer Shown" checkbox: what they do, and whether the two answer buttons reset it',
+  'Card layout: is "Vietnamese Meaning" the answer, and do definition and example belong on the back?',
 ];

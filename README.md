@@ -5,11 +5,11 @@ time: flip it, answer **Remember** or **Not remember**, and the result is saved
 back to Notion. Notion stays the source of truth; this app only replaces the
 review screen.
 
-> **Current state:** the interface, server and safety logic are complete and
-> tested against sample data. The app has **not yet been connected to a real
-> Notion database**, and it will not write to one until the two review rules
-> are confirmed. See [docs/review-logic.md](docs/review-logic.md) for what is
-> known and what is still needed.
+> **Current state:** the app reads the real review queue from Notion, using the
+> same rule and order as the "Need review" view. It is a **read-only preview**:
+> it will not write until what the "Nhớ" and "Không nhớ" buttons do has been
+> confirmed. See [docs/review-logic.md](docs/review-logic.md) for what has been
+> verified and what is still needed.
 
 ## Try it now (sample data, no Notion)
 
@@ -38,15 +38,17 @@ under the card do the same as the keys and swipes.
 
 ## Connect it to Notion
 
-### 1. Create an integration with the least access it needs
+### 1. Create a connection with the least access it needs
 
-1. Go to https://www.notion.so/profile/integrations and create an **internal**
-   integration in your workspace.
-2. Under Capabilities, enable **Read content** and **Update content** only.
+1. In Notion open **Developer tools → Connections → New connection** (also
+   reachable at https://www.notion.so/profile/integrations) and choose
+   **API token**. OAuth is for apps other people sign in to.
+2. Under its capabilities, enable **Read content** and **Update content** only.
    Leave *Insert content*, comments and user information off. The app never
    creates pages, deletes anything, or changes the database schema.
-3. Open the vocabulary database in Notion, then `•••` → **Connections** → add
-   the integration. Share only this database with it, not a parent page.
+3. Give the connection access to the vocabulary database and nothing else:
+   open the database as a full page, then `•••` → **Connections** → add it.
+   Until this is done the API reports the database as "not found".
 
 ### 2. Configure
 
@@ -77,9 +79,11 @@ npm run notion:inspect
 
 This is read-only. It prints every property with its type and formula, each
 view's stored filter and sort, and whether the names in
-`config/review.config.ts` match. Correct the property names in that file until
-it reports no problems. It cannot show what the review buttons do; Notion does
-not expose button steps through its API.
+`config/review.config.ts` match. It cannot show what the review buttons do;
+Notion does not expose button steps through its API.
+
+In Windows PowerShell, if `npm` is blocked by the script execution policy, use
+`npm.cmd` instead (for example `npm.cmd run notion:inspect`).
 
 ### 4. Verify the queue in read-only mode
 
@@ -253,8 +257,10 @@ Swipe distance and tap tolerance are set in `src/config.ts`.
   the app is a read-only preview.
 - Each answer makes two Notion requests (read, then write) and waits for both,
   so advancing takes roughly as long as Notion takes to respond.
-- Dates are written as date-only values. If your buttons store a time of day,
-  resolve that before enabling writes.
+- Dates are written as date-only values, which is how every review date in
+  the database is stored today.
+- Words that share a review date may appear in a different order than in the
+  Notion table.
 - A session is a snapshot. Words that become due, or that are edited in
   Notion, appear after Refresh.
 - Notion allows about three requests per second. The SDK retries rate-limited

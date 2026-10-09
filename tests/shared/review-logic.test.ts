@@ -46,6 +46,13 @@ describe('checkEligibility', () => {
     });
   });
 
+  it('also excludes a mastery above 10', () => {
+    expect(checkEligibility({ mastery: 11, nextReview: TODAY }, TODAY, sampleRules)).toEqual({
+      eligible: false,
+      reason: 'retired',
+    });
+  });
+
   it('keeps mastery 9 in the queue', () => {
     expect(checkEligibility({ mastery: 9, nextReview: TODAY }, TODAY, sampleRules).eligible).toBe(true);
   });

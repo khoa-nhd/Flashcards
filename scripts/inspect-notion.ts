@@ -22,6 +22,7 @@ try {
 }
 
 const propertySchema = z.looseObject({
+  id: z.string().optional(),
   type: z.string(),
   formula: z.looseObject({ expression: z.string().optional() }).optional(),
 });
@@ -31,10 +32,26 @@ const viewSchema = z.looseObject({
   name: z.string().optional(),
   type: z.string().optional(),
   filter: z.unknown().optional(),
+  // Filters added from the view's filter bar are stored here, not in `filter`.
+  quick_filters: z.unknown().optional(),
   sorts: z.unknown().optional(),
 });
 
 const heading = (title: string) => console.log(`\n=== ${title} ===`);
+
+/** Views refer to properties by id; this rewrites those references as names. */
+function withPropertyNames(value: unknown, nameById: Map<string, string>): unknown {
+  if (Array.isArray(value)) return value.map((item) => withPropertyNames(item, nameById));
+  if (value === null || typeof value !== 'object') return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([key, inner]) => [
+      nameById.get(key) ?? key,
+      key === 'property' && typeof inner === 'string'
+        ? (nameById.get(inner) ?? inner)
+        : withPropertyNames(inner, nameById),
+    ]),
+  );
+}
 
 async function main() {
   const config = loadConfig({ ...process.env, DATA_MODE: 'notion' });
@@ -66,6 +83,17 @@ async function main() {
 
   heading('Properties');
   const schema = schemaResponse.parse(await api.retrieveDataSource(dataSourceId));
+  const nameById = new Map<string, string>();
+  for (const [name, property] of Object.entries(schema.properties)) {
+    if (property.id === undefined) continue;
+    nameById.set(property.id, name);
+    // The schema reports ids URL-encoded; views use them decoded.
+    try {
+      nameById.set(decodeURIComponent(property.id), name);
+    } catch {
+      // Not URL-encoded after all.
+    }
+  }
   for (const [name, property] of Object.entries(schema.properties)) {
     let note = '';
     if (property.type === 'formula' && property.formula?.expression) note = `  =  ${property.formula.expression}`;
@@ -82,9 +110,11 @@ async function main() {
       if (!listed.success) continue;
       const view = viewSchema.safeParse(await api.retrieveView(listed.data.id));
       const detail = view.success ? view.data : listed.data;
+      const show = (value: unknown) => JSON.stringify(withPropertyNames(value ?? null, nameById));
       console.log(`- ${detail.name ?? 'Untitled'} (${detail.type ?? 'unknown type'})`);
-      console.log(`    filter: ${JSON.stringify(detail.filter ?? null)}`);
-      console.log(`    sorts:  ${JSON.stringify(detail.sorts ?? null)}`);
+      console.log(`    filter:        ${show(detail.filter)}`);
+      console.log(`    quick filters: ${show(detail.quick_filters)}`);
+      console.log(`    sorts:         ${show(detail.sorts)}`);
     }
   } catch (error) {
     const reason = error instanceof NotionRequestError ? error.message : 'unexpected error';

@@ -152,7 +152,7 @@ export class NotionVocabularyRepository implements VocabularyRepository {
       clauses.push(rules.includeMissingDueDate ? { or: [due, empty] } : due);
     }
 
-    const notRetired = condition(properties.mastery, 'number', { does_not_equal: rules.retiredAtMastery });
+    const notRetired = condition(properties.mastery, 'number', { less_than: rules.retiredAtMastery });
     if (notRetired !== null) {
       // Rows with an empty mastery are fetched too, so they can be reported instead of vanishing.
       clauses.push({ or: [notRetired, condition(properties.mastery, 'number', { is_empty: true })] });

@@ -136,7 +136,7 @@ describe('listDueCandidates', () => {
         { property: 'Next Review', date: { on_or_before: '2026-10-10' } },
         {
           or: [
-            { property: 'Mastery', number: { does_not_equal: 10 } },
+            { property: 'Mastery', number: { less_than: 10 } },
             { property: 'Mastery', number: { is_empty: true } },
           ],
         },
