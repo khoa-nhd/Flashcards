@@ -1,0 +1,106 @@
+import type { QueueResponse, ReviewCard } from '../../shared/api.js';
+import type { ReviewState } from '../../shared/review-logic.js';
+import type { VocabularyRecord } from '../../shared/vocabulary.js';
+import type { SetupReport, VocabularyRepository } from '../../server/vocabulary-repository.js';
+
+/** The fixed "today" used throughout the tests. */
+export const TODAY = '2026-10-09';
+export const TIME_ZONE = 'Asia/Ho_Chi_Minh';
+/** An instant that falls on TODAY in TIME_ZONE (noon local time). */
+export const NOW = new Date('2026-10-09T05:00:00Z');
+
+export const pageId = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+
+export function record(n: number, overrides: Partial<VocabularyRecord> = {}): VocabularyRecord {
+  return {
+    id: pageId(n),
+    word: `word-${n}`,
+    mastery: 3,
+    nextReview: TODAY,
+    fields: {
+      partOfSpeech: 'noun',
+      pronunciation: null,
+      definition: `definition of word-${n}`,
+      example: `example for word-${n}`,
+    },
+    ...overrides,
+  };
+}
+
+export function card(n: number, overrides: Partial<ReviewCard> = {}): ReviewCard {
+  return {
+    id: pageId(n),
+    word: `word-${n}`,
+    mastery: 3,
+    nextReview: TODAY,
+    front: [{ key: 'partOfSpeech', label: 'Part of speech', value: 'noun' }],
+    back: [{ key: 'definition', label: 'Definition', value: `definition of word-${n}` }],
+    detailsHidden: false,
+    ...overrides,
+  };
+}
+
+export function queueResponse(cards: ReviewCard[], overrides: Partial<QueueResponse> = {}): QueueResponse {
+  return { cards, today: TODAY, timeZone: TIME_ZONE, mode: 'mock', writesEnabled: true, skipped: [], ...overrides };
+}
+
+export interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+}
+
+export function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** An in-memory repository that records every write, standing in for Notion. */
+export class FakeRepository implements VocabularyRepository {
+  readonly mode = 'notion' as const;
+  readonly updates: Array<{ pageId: string; changes: Partial<ReviewState> }> = [];
+  setup: SetupReport = { readIssues: [], writeIssues: [], warnings: [] };
+  /** Lets a test corrupt what the "database" reports back after a write. */
+  afterUpdate: (record: VocabularyRecord) => VocabularyRecord = (updated) => updated;
+  private readonly records: Map<string, VocabularyRecord>;
+
+  constructor(
+    records: VocabularyRecord[],
+    private readonly listed: VocabularyRecord[] = records,
+  ) {
+    this.records = new Map(records.map((item) => [item.id, { ...item }]));
+  }
+
+  async checkSetup() {
+    return this.setup;
+  }
+
+  async listDueCandidates() {
+    return { records: this.listed.map((item) => ({ ...item })), invalid: [] };
+  }
+
+  async getRecord(id: string) {
+    const found = this.records.get(id);
+    return found ? { ...found } : null;
+  }
+
+  async updateReviewState(id: string, changes: Partial<ReviewState>) {
+    const existing = this.records.get(id);
+    if (!existing) throw new Error('unknown record');
+    this.updates.push({ pageId: id, changes });
+    const updated = { ...existing, ...changes };
+    this.records.set(id, updated);
+    return this.afterUpdate({ ...updated });
+  }
+
+  /** Simulates an edit made directly in Notion. */
+  editInNotion(id: string, changes: Partial<VocabularyRecord>) {
+    const existing = this.records.get(id);
+    if (existing) this.records.set(id, { ...existing, ...changes });
+  }
+}

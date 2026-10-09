@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-server/
+coverage/
+*.tsbuildinfo
+
+# Credentials — never commit these
+.env
+.env.*
+!.env.example
+
+.vercel/
+.DS_Store
+*.log

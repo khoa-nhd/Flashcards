@@ -1,0 +1,158 @@
+@import 'tailwindcss';
+
+/* Shown only where a physical keyboard is likely (hover + fine pointer). */
+@custom-variant keyboard (@media (hover: hover) and (pointer: fine));
+
+:root {
+  color-scheme: light dark;
+
+  --paper: #f4f2ec;
+  --surface: #ffffff;
+  --surface-back: #eef1fb;
+  --ink: #1c2029;
+  --muted: #5d6675;
+  --line: #e2dfd5;
+  --accent: #4453c7;
+  --accent-soft: #e4e8fa;
+
+  --good: #17794f;
+  --good-soft: #e1f3ea;
+  --good-ink: #0d5a3a;
+  --bad: #b93a25;
+  --bad-soft: #fbe9e5;
+  --bad-ink: #8c2817;
+  --warn-soft: #fbf1d9;
+  --warn-ink: #73500a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #15171c;
+    --surface: #1f232b;
+    --surface-back: #222943;
+    --ink: #eceef2;
+    --muted: #a3abb9;
+    --line: #333945;
+    --accent: #9aa6f5;
+    --accent-soft: #2b3257;
+
+    --good: #45c08a;
+    --good-soft: #17382b;
+    --good-ink: #8fe0b8;
+    --bad: #f0806a;
+    --bad-soft: #43201a;
+    --bad-ink: #f6b0a2;
+    --warn-soft: #3d3215;
+    --warn-ink: #f0d58e;
+  }
+}
+
+@theme inline {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, ui-serif, serif;
+
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-back: var(--surface-back);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+  --color-accent-soft: var(--accent-soft);
+  --color-good: var(--good);
+  --color-good-soft: var(--good-soft);
+  --color-good-ink: var(--good-ink);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-bad-ink: var(--bad-ink);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-ink: var(--warn-ink);
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -webkit-tap-highlight-color: transparent;
+  /* The review screen is a fixed stage; nothing should rubber-band behind it. */
+  overscroll-behavior: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+kbd {
+  font-family: inherit;
+}
+
+/* ---- Flashcard flip ---- */
+
+.card-scene {
+  perspective: 1400px;
+}
+
+.card-flipper {
+  display: grid;
+  transform-style: preserve-3d;
+  transition: transform 420ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.card-flipper[data-flipped='true'] {
+  transform: rotateY(180deg);
+}
+
+/* Both faces share one grid cell, so the card is as tall as the taller face. */
+.card-face {
+  grid-area: 1 / 1;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+.card-face-back {
+  transform: rotateY(180deg);
+}
+
+.card-enter {
+  animation: card-enter 220ms ease-out;
+}
+
+@keyframes card-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+.spinner {
+  animation: spin 700ms linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .card-flipper {
+    transition: none;
+  }
+
+  .card-enter {
+    animation: none;
+  }
+
+  .spinner {
+    animation-duration: 2s;
+  }
+}
