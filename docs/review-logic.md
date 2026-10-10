@@ -155,7 +155,7 @@ and then answered *in the app* would keep the tick.
 | Word | title | The word. |
 | Mastery | number | Read and written. Values today: 1 to 8, whole numbers. |
 | Review Date | date | Read and written. All 43 values are date-only. |
-| Vietnamese Meaning | text | Back of the card. |
+| Vietnamese Meaning | text | Back of the card; editable in the bank. |
 | Review Definition | formula | Back of the card, when Notion leaves it non-empty. |
 | Review Example | formula | Back of the card, when Notion leaves it non-empty. |
 | Definition, Example Sentences | text | Not read directly; the two formulas above are. |
@@ -165,8 +165,9 @@ and then answered *in the app* would keep the tick.
 | Date Added | date | Not used. |
 | Nhớ, Không nhớ, Hiện đáp án | button | Cannot be read. |
 
-The app writes **only** Mastery and Review Date, and only whichever of the two
-actually changes.
+A review answer writes **only** Mastery and Review Date, and only whichever of
+the two actually changes. Adding and editing words is a separate path with its
+own allow-list; see [database-schema.md](database-schema.md).
 
 Views: "All Vocabulary" (no filter, Date Added descending), "Mastered Words"
 (Mastery = 10, Word ascending), "Need review" (Due for Review is checked,

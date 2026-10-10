@@ -3,7 +3,12 @@
  * of the server (and the tests) never depend on the SDK, and so the integration
  * token never leaves this module.
  */
-import { Client, type QueryDataSourceParameters, type UpdatePageParameters } from '@notionhq/client';
+import {
+  Client,
+  type CreatePageParameters,
+  type QueryDataSourceParameters,
+  type UpdatePageParameters,
+} from '@notionhq/client';
 import { toNotionRequestError } from './notion-errors.js';
 
 /**
@@ -30,6 +35,10 @@ export interface NotionApi {
   queryDataSource(query: DataSourceQuery): Promise<unknown>;
   retrievePage(pageId: string): Promise<unknown>;
   updatePage(pageId: string, properties: Record<string, unknown>): Promise<unknown>;
+  /** Creates a row in the data source. Needs the connection's "Insert content" capability. */
+  createPage(dataSourceId: string, properties: Record<string, unknown>): Promise<unknown>;
+  /** Moves a page to Notion's trash, or takes it back out. */
+  setPageTrashed(pageId: string, trashed: boolean): Promise<unknown>;
   listViews(dataSourceId: string, startCursor?: string): Promise<unknown>;
   retrieveView(viewId: string): Promise<unknown>;
 }
@@ -69,6 +78,15 @@ export function createNotionApi(apiKey: string): NotionApi {
           properties: properties as UpdatePageParameters['properties'],
         }),
       ),
+    createPage: (dataSourceId, properties) =>
+      call(() =>
+        client.pages.create({
+          parent: { type: 'data_source_id', data_source_id: dataSourceId },
+          properties: properties as CreatePageParameters['properties'],
+        }),
+      ),
+    setPageTrashed: (pageId, trashed) =>
+      call(() => client.pages.update({ page_id: pageId, in_trash: trashed })),
     listViews: (dataSourceId, startCursor) =>
       call(() => client.views.list({ data_source_id: dataSourceId, start_cursor: startCursor })),
     retrieveView: (viewId) => call(() => client.views.retrieve({ view_id: viewId })),

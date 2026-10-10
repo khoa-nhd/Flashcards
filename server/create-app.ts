@@ -3,7 +3,14 @@ import { bodyLimit } from 'hono/body-limit';
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { ZodType } from 'zod';
-import { loginRequestSchema, reviewActionRequestSchema, type ApiErrorBody } from '../shared/api.js';
+import {
+  createEntryRequestSchema,
+  loginRequestSchema,
+  pageIdSchema,
+  reviewActionRequestSchema,
+  updateEntryRequestSchema,
+  type ApiErrorBody,
+} from '../shared/api.js';
 import {
   LoginThrottle,
   SESSION_COOKIE,
@@ -17,11 +24,14 @@ import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
 import { NotionRequestError, notionErrorToHttp } from './notion/notion-errors.js';
 import type { ReviewService } from './review-service.js';
+import type { VocabularyService } from './vocabulary-service.js';
 
 export interface AppDependencies {
   config: AppConfig;
   /** `null` when configuration problems prevent building the service. */
   service: ReviewService | null;
+  /** Whole-record operations; `null` under the same conditions as `service`. */
+  vocabulary?: VocabularyService | null;
   now?: () => Date;
 }
 
@@ -51,16 +61,22 @@ async function parseBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
   return parsed.data;
 }
 
-export function createApp({ config, service, now = () => new Date() }: AppDependencies): Hono {
+export function createApp({ config, service, vocabulary = null, now = () => new Date() }: AppDependencies): Hono {
   const app = new Hono();
   const access = accessMode(config);
   const throttle = new LoginThrottle();
 
+  const notConfigured = () =>
+    new HttpError(503, 'setup_incomplete', `The server is not configured yet. ${config.issues.join(' ')}`);
+
   const requireService = (): ReviewService => {
-    if (service === null) {
-      throw new HttpError(503, 'setup_incomplete', `The server is not configured yet. ${config.issues.join(' ')}`);
-    }
+    if (service === null) throw notConfigured();
     return service;
+  };
+
+  const requireVocabulary = (): VocabularyService => {
+    if (vocabulary === null) throw notConfigured();
+    return vocabulary;
   };
 
   app.onError((error, c) => {
@@ -96,7 +112,8 @@ export function createApp({ config, service, now = () => new Date() }: AppDepend
   app.use(
     '/api/*',
     bodyLimit({
-      maxSize: 8 * 1024,
+      // Three free-text fields of up to 6,000 characters each, in UTF-8.
+      maxSize: 96 * 1024,
       onError: () => {
         throw new HttpError(413, 'payload_too_large', 'The request body is too large.');
       },
@@ -175,6 +192,36 @@ export function createApp({ config, service, now = () => new Date() }: AppDepend
     const request = await parseBody(c, reviewActionRequestSchema);
     return c.json(await requireService().submitAction(request));
   });
+
+  // ---- Vocabulary bank. Every write goes through VocabularyService's allow-list. ----
+
+  const entryId = (c: Context): string => {
+    const parsed = pageIdSchema.safeParse(c.req.param('id'));
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', 'That is not a valid word id.');
+    return parsed.data;
+  };
+
+  app.get('/api/vocabulary', async (c) => c.json(await requireVocabulary().list()));
+
+  app.get('/api/vocabulary/:id', async (c) => c.json({ entry: await requireVocabulary().get(entryId(c)) }));
+
+  app.post('/api/vocabulary', async (c) => {
+    const request = await parseBody(c, createEntryRequestSchema);
+    const { entry, created } = await requireVocabulary().create(request);
+    return c.json({ entry }, created ? 201 : 200);
+  });
+
+  app.patch('/api/vocabulary/:id', async (c) => {
+    const id = entryId(c);
+    const request = await parseBody(c, updateEntryRequestSchema);
+    return c.json({ entry: await requireVocabulary().update(id, request) });
+  });
+
+  app.delete('/api/vocabulary/:id', async (c) => c.json(await requireVocabulary().trash(entryId(c))));
+
+  app.post('/api/vocabulary/:id/restore', async (c) =>
+    c.json({ entry: await requireVocabulary().restore(entryId(c)) }),
+  );
 
   return app;
 }

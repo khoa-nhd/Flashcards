@@ -1,8 +1,15 @@
 import { normalizeId, type SkippedRecord, type VocabularyStatus } from '../../shared/api.js';
 import { addDays, type IsoDate } from '../../shared/dates.js';
 import type { ReviewRules, ReviewState } from '../../shared/review-logic.js';
-import type { CardFieldConfig, NotionPropertyConfig, VocabularyRecord } from '../../shared/vocabulary.js';
+import { normalizeWord, tidyWord } from '../../shared/text.js';
+import type {
+  CardFieldConfig,
+  NotionPropertyConfig,
+  VocabularyFieldConfig,
+  VocabularyRecord,
+} from '../../shared/vocabulary.js';
 import { HttpError } from '../errors.js';
+import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
 import type { SetupReport, VocabularyRepository } from '../vocabulary-repository.js';
 import type { NotionApi } from './notion-client.js';
 import { NotionRequestError } from './notion-errors.js';
@@ -12,8 +19,14 @@ import {
   TEXT_TYPES,
   dataSourceSchema,
   databaseSchema,
+  dateValue,
+  mapPageToEntry,
   mapPageToRecord,
+  numberValue,
   pageSchema,
+  richTextValue,
+  titleValue,
+  type NotionPage,
 } from './notion-mappers.js';
 import { collectPaginated, listPageSchema } from './pagination.js';
 
@@ -21,6 +34,7 @@ export interface NotionRepositoryOptions {
   databaseId: string | null;
   dataSourceId: string | null;
   properties: NotionPropertyConfig;
+  vocabularyFields: VocabularyFieldConfig;
   cardFields: readonly CardFieldConfig[];
   rules: ReviewRules;
   timeZone: string;
@@ -31,12 +45,21 @@ interface ResolvedSchema extends SetupReport {
   types: Map<string, string>;
   /** Card fields whose property exists and can be read as text. */
   fields: CardFieldConfig[];
+  /** Problems that stop whole records from being created or edited (reviews are unaffected). */
+  entryWriteIssues: string[];
 }
 
 const includes = (types: readonly string[], type: string | undefined) =>
   type !== undefined && types.includes(type);
 
-export class NotionVocabularyRepository implements VocabularyRepository {
+const isTrashed = (page: NotionPage) => page.in_trash === true || page.archived === true;
+
+function belongsTo(page: NotionPage, dataSourceId: string): boolean {
+  const parentId = page.parent.data_source_id;
+  return page.parent.type === 'data_source_id' && parentId !== undefined && normalizeId(parentId) === dataSourceId;
+}
+
+export class NotionVocabularyRepository implements VocabularyRepository, VocabularyCatalog {
   readonly mode = 'notion' as const;
   private schema: Promise<ResolvedSchema> | null = null;
 
@@ -46,8 +69,8 @@ export class NotionVocabularyRepository implements VocabularyRepository {
   ) {}
 
   async checkSetup(): Promise<SetupReport> {
-    const { readIssues, writeIssues, warnings } = await this.resolveSchema();
-    return { readIssues, writeIssues, warnings };
+    const { readIssues, writeIssues, warnings, entryWriteIssues } = await this.resolveSchema();
+    return { readIssues, writeIssues, warnings, entryWriteIssues };
   }
 
   async listDueCandidates(today: IsoDate) {
@@ -133,14 +156,151 @@ export class NotionVocabularyRepository implements VocabularyRepository {
     return record;
   }
 
+  // ---- VocabularyCatalog: whole records for the bank, dashboard and calendar ----
+
+  async listEntries() {
+    const schema = await this.readableSchema();
+    const raw = await collectPaginated((startCursor) =>
+      this.api.queryDataSource({ dataSourceId: schema.dataSourceId, startCursor }),
+    );
+    const entries: EntryData[] = [];
+    const invalid: SkippedRecord[] = [];
+    for (const item of raw) {
+      const page = pageSchema.safeParse(item);
+      if (!page.success) continue;
+      const mapped = mapPageToEntry(page.data, this.entryMapping());
+      if (mapped.ok) entries.push(mapped.entry);
+      else invalid.push(mapped.skipped);
+    }
+    return { entries, invalid };
+  }
+
+  async getEntry(id: string): Promise<EntryData | null> {
+    const schema = await this.readableSchema();
+    const page = await this.retrieveOwnPage(id, schema);
+    if (page === null || isTrashed(page)) return null;
+    return this.toEntry(page);
+  }
+
+  async findEntriesByWord(word: string): Promise<EntryData[]> {
+    const schema = await this.readableSchema();
+    const { properties } = this.options;
+    const type = schema.types.get(properties.word);
+    // Notion narrows the candidates; the exact, normalised comparison is done here.
+    const filter =
+      type === 'title' || type === 'rich_text'
+        ? { property: properties.word, [type]: { contains: tidyWord(word) } }
+        : undefined;
+    const raw = await collectPaginated((startCursor) =>
+      this.api.queryDataSource({ dataSourceId: schema.dataSourceId, filter, startCursor }),
+    );
+    const wanted = normalizeWord(word);
+    const matches: EntryData[] = [];
+    for (const item of raw) {
+      const page = pageSchema.safeParse(item);
+      if (!page.success) continue;
+      const mapped = mapPageToEntry(page.data, this.entryMapping());
+      if (mapped.ok && normalizeWord(mapped.entry.word) === wanted) matches.push(mapped.entry);
+    }
+    return matches;
+  }
+
+  async createEntry(entry: NewEntry): Promise<EntryData> {
+    const schema = await this.writableSchema();
+    const { properties, vocabularyFields } = this.options;
+    const values: Record<string, unknown> = {
+      [properties.word]: titleValue(entry.word),
+      [properties.mastery]: numberValue(entry.mastery),
+    };
+    // Empty values are left unset rather than written as blanks.
+    if (entry.meaning !== null) values[vocabularyFields.meaning] = richTextValue(entry.meaning);
+    if (entry.definition !== null) values[vocabularyFields.definition] = richTextValue(entry.definition);
+    if (entry.example !== null) values[vocabularyFields.example] = richTextValue(entry.example);
+    if (entry.dateAdded !== null) values[vocabularyFields.dateAdded] = dateValue(entry.dateAdded);
+    if (entry.reviewDate !== null) values[properties.nextReview] = dateValue(entry.reviewDate);
+
+    return this.confirmed(await this.api.createPage(schema.dataSourceId, values), schema);
+  }
+
+  async updateEntry(id: string, changes: EntryChanges): Promise<EntryData> {
+    const schema = await this.writableSchema();
+    const { properties, vocabularyFields } = this.options;
+    const values: Record<string, unknown> = {};
+    if (changes.word !== undefined) values[properties.word] = titleValue(changes.word);
+    if (changes.meaning !== undefined) values[vocabularyFields.meaning] = richTextValue(changes.meaning);
+    if (changes.definition !== undefined) values[vocabularyFields.definition] = richTextValue(changes.definition);
+    if (changes.example !== undefined) values[vocabularyFields.example] = richTextValue(changes.example);
+    if (changes.dateAdded !== undefined) values[vocabularyFields.dateAdded] = dateValue(changes.dateAdded);
+    if (changes.mastery !== undefined) values[properties.mastery] = numberValue(changes.mastery);
+    if (changes.reviewDate !== undefined) values[properties.nextReview] = dateValue(changes.reviewDate);
+
+    return this.confirmed(await this.api.updatePage(id, values), schema);
+  }
+
+  async trashEntry(id: string): Promise<boolean> {
+    const schema = await this.writableSchema();
+    const page = await this.retrieveOwnPage(id, schema);
+    if (page === null) return false;
+    if (!isTrashed(page)) await this.api.setPageTrashed(id, true);
+    return true;
+  }
+
+  async restoreEntry(id: string): Promise<EntryData | null> {
+    const schema = await this.writableSchema();
+    const page = await this.retrieveOwnPage(id, schema);
+    if (page === null) return null;
+    if (!isTrashed(page)) return this.toEntry(page);
+    return this.confirmed(await this.api.setPageTrashed(id, false), schema);
+  }
+
+  /** The page, trashed or not, provided it belongs to the configured data source. */
+  private async retrieveOwnPage(id: string, schema: ResolvedSchema): Promise<NotionPage | null> {
+    let raw: unknown;
+    try {
+      raw = await this.api.retrievePage(id);
+    } catch (error) {
+      if (error instanceof NotionRequestError && error.failure === 'not_found') return null;
+      throw error;
+    }
+    const page = pageSchema.safeParse(raw);
+    return page.success && belongsTo(page.data, schema.dataSourceId) ? page.data : null;
+  }
+
+  private toEntry(page: NotionPage): EntryData {
+    const mapped = mapPageToEntry(page, this.entryMapping());
+    if (!mapped.ok) throw new HttpError(409, 'invalid_record', mapped.skipped.reason);
+    return mapped.entry;
+  }
+
+  /** What Notion says it stored after a write; anything else is treated as a failed write. */
+  private confirmed(raw: unknown, schema: ResolvedSchema): EntryData {
+    const page = pageSchema.safeParse(raw);
+    if (!page.success || isTrashed(page.data) || !belongsTo(page.data, schema.dataSourceId)) {
+      throw new HttpError(502, 'unconfirmed_write', 'Notion returned an unexpected response to the change.');
+    }
+    return this.toEntry(page.data);
+  }
+
+  private entryMapping() {
+    return {
+      properties: this.options.properties,
+      fields: this.options.vocabularyFields,
+      timeZone: this.options.timeZone,
+    };
+  }
+
+  private async writableSchema(): Promise<ResolvedSchema> {
+    const schema = await this.readableSchema();
+    const issues = [...schema.writeIssues, ...schema.entryWriteIssues];
+    if (issues.length > 0) throw new HttpError(409, 'read_only', issues.join(' '));
+    return schema;
+  }
+
   /** A page counts only if it is a live row of the configured data source. */
   private toLiveRecord(raw: unknown, schema: ResolvedSchema): VocabularyRecord | null {
     const page = pageSchema.safeParse(raw);
     if (!page.success) return null;
-    if (page.data.in_trash === true || page.data.archived === true) return null;
-    const parentId = page.data.parent.data_source_id;
-    if (page.data.parent.type !== 'data_source_id' || parentId === undefined) return null;
-    if (normalizeId(parentId) !== schema.dataSourceId) return null;
+    if (isTrashed(page.data) || !belongsTo(page.data, schema.dataSourceId)) return null;
 
     const mapped = mapPageToRecord(page.data, this.mapping(schema));
     if (!mapped.ok) throw new HttpError(409, 'invalid_record', mapped.skipped.reason);
@@ -259,7 +419,21 @@ export class NotionVocabularyRepository implements VocabularyRepository {
       }
     }
 
-    return { dataSourceId, types, fields, readIssues, writeIssues, warnings };
+    // Creating and editing whole records writes plain text and dates, so the types must match exactly.
+    const { vocabularyFields } = this.options;
+    const entryWriteIssues: string[] = [];
+    const requireWritable = (name: string, wanted: string) => {
+      const type = types.get(name);
+      if (type === undefined) entryWriteIssues.push(`No property named "${name}".`);
+      else if (type !== wanted) entryWriteIssues.push(`"${name}" is a ${type}, not a ${wanted} property.`);
+    };
+    requireWritable(properties.word, 'title');
+    requireWritable(vocabularyFields.meaning, 'rich_text');
+    requireWritable(vocabularyFields.definition, 'rich_text');
+    requireWritable(vocabularyFields.example, 'rich_text');
+    requireWritable(vocabularyFields.dateAdded, 'date');
+
+    return { dataSourceId, types, fields, readIssues, writeIssues, warnings, entryWriteIssues };
   }
 
   private async resolveDataSourceId(): Promise<string> {

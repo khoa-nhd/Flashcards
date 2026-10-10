@@ -14,10 +14,16 @@ function apiDevServer(): Plugin {
     name: 'flashcard-api-dev-server',
     apply: (_config, env) => env.command === 'serve' && env.mode !== 'test',
     configureServer(server) {
-      try {
-        process.loadEnvFile();
-      } catch {
-        // No .env file: mock mode with defaults.
+      if (server.config.mode === 'mock') {
+        // `npm run dev:mock`: built-in sample words, never Notion, whatever .env says.
+        process.env.DATA_MODE = 'mock';
+        process.env.APP_ACCESS_PASSWORD = '';
+      } else {
+        try {
+          process.loadEnvFile();
+        } catch {
+          // No .env file: mock mode with defaults.
+        }
       }
       server.middlewares.use(async (req, res, next) => {
         if (!req.url?.startsWith('/api/')) return next();

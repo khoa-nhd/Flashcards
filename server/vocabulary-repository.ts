@@ -10,6 +10,8 @@ export interface SetupReport {
   writeIssues: string[];
   /** Non-blocking notes, e.g. an optional field that could not be found. */
   warnings: string[];
+  /** Problems that only prevent creating and editing whole records; reviews still save. */
+  entryWriteIssues?: string[];
 }
 
 /** Where vocabulary lives. Implemented by Notion and by in-memory sample data. */

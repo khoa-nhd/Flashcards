@@ -30,7 +30,11 @@ export interface SessionController {
 const messageOf = (error: unknown) =>
   error instanceof ApiError ? error.message : 'Something unexpected went wrong.';
 
-export function createSessionController(api: Pick<ReviewApi, 'fetchQueue' | 'submitAction'>): SessionController {
+export function createSessionController(
+  api: Pick<ReviewApi, 'fetchQueue' | 'submitAction'>,
+  /** Called once Notion has confirmed an answer, so other views know their data has changed. */
+  onSaved: () => void = () => {},
+): SessionController {
   let state = initialSessionState;
   let loadSequence = 0;
   const listeners = new Set<() => void>();
@@ -54,6 +58,7 @@ export function createSessionController(api: Pick<ReviewApi, 'fetchQueue' | 'sub
         expected: { mastery: card.mastery, nextReview: card.nextReview },
       });
       dispatch({ type: 'SAVE_SUCCEEDED' });
+      onSaved();
     } catch (error) {
       if (error instanceof ApiError && error.code === 'conflict') {
         dispatch({ type: 'SAVE_CONFLICT', message: error.message });

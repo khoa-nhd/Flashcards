@@ -100,7 +100,7 @@ describe('POST /api/review-action', () => {
 
   it('rejects an oversized body', async () => {
     const { app } = setup();
-    const response = await app.request('/api/review-action', post({ ...validAction, padding: 'x'.repeat(20_000) }));
+    const response = await app.request('/api/review-action', post({ ...validAction, padding: 'x'.repeat(200_000) }));
     expect(response.status).toBe(413);
   });
 

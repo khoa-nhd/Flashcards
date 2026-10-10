@@ -1,96 +1,100 @@
-import { CompletionScreen } from './components/CompletionScreen.js';
-import { ReviewScreen } from './components/ReviewScreen.js';
-import { Spinner } from './components/Spinner.js';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { pageIdSchema } from '../shared/api.js';
+import { AppProvider, createAppServices, useApp, useSettings } from './app-context.js';
+import { AppShell } from './components/AppShell.js';
+import { Link } from './components/Link.js';
+import { Toasts } from './components/Toasts.js';
 import { UnlockScreen } from './components/UnlockScreen.js';
-import { useReviewSession } from './hooks/useReviewSession.js';
-import { reviewApi, type ReviewApi } from './lib/api-client.js';
-import type { SessionMeta } from './lib/session-machine.js';
+import { WordDetailPanel } from './components/WordDetailPanel.js';
+import { BUTTON_PRIMARY } from './components/ui.js';
+import { appApi, type AppApi } from './lib/api-client.js';
+import { ROUTES, closeWord, matchRoute, useLocation, wordInQuery, type RouteKey } from './lib/router.js';
+import type { SettingsStore } from './lib/settings.js';
+import { AddPage } from './pages/AddPage.js';
+import { BankPage } from './pages/BankPage.js';
+import { CalendarPage } from './pages/CalendarPage.js';
+import { DashboardPage } from './pages/DashboardPage.js';
+import { InsightsPage } from './pages/InsightsPage.js';
+import { ReviewPage } from './pages/ReviewPage.js';
+import { SettingsPage } from './pages/SettingsPage.js';
 
-function ModeBadge({ meta }: { meta: SessionMeta | null }) {
-  if (meta === null) return null;
-  if (meta.mode === 'mock') {
-    return (
-      <span className="rounded-full bg-accent-soft px-2.5 py-1 text-xs font-medium text-accent">
-        Sample data
-      </span>
-    );
-  }
-  if (!meta.writesEnabled) {
-    return (
-      <span
-        className="rounded-full bg-warn-soft px-2.5 py-1 text-xs font-medium text-warn-ink"
-        title="Answers are checked against Notion but nothing is written."
-      >
-        Preview · not saving
-      </span>
-    );
-  }
-  return null;
+const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
+  dashboard: { title: 'Dashboard', render: () => <DashboardPage /> },
+  review: { title: 'Review', render: () => <ReviewPage /> },
+  add: { title: 'Add vocabulary', render: () => <AddPage /> },
+  bank: { title: 'Vocabulary bank', render: () => <BankPage /> },
+  calendar: { title: 'Calendar', render: () => <CalendarPage /> },
+  insights: { title: 'Insights', render: () => <InsightsPage /> },
+  settings: { title: 'Settings', render: () => <SettingsPage /> },
+};
+
+export function App({ api = appApi, settings }: { api?: AppApi; settings?: SettingsStore }) {
+  // Created once: the review session and the loaded vocabulary outlive any single page.
+  const [services] = useState(() => createAppServices(api, settings));
+  return (
+    <AppProvider value={services}>
+      <Root />
+    </AppProvider>
+  );
 }
 
-export function App({ api = reviewApi }: { api?: ReviewApi }) {
-  const { state, session } = useReviewSession(api);
-  const { status, error } = state;
-  const reload = () => void session.load();
-  const unlocking = status === 'error' && error?.kind === 'load' && error.unauthorized;
+function Root() {
+  const { api, session, vocabulary } = useApp();
+  const location = useLocation();
+  const route = matchRoute(location.pathname);
+  const vocab = useSyncExternalStore(vocabulary.subscribe, vocabulary.getState);
+  const review = useSyncExternalStore(session.subscribe, session.getState);
+  const { reduceMotion } = useSettings();
 
-  let content;
-  if (status === 'loading') {
-    content = (
-      <div role="status" className="flex h-full items-center justify-center gap-3 text-muted">
-        <Spinner className="size-5" />
-        Loading your review queue…
+  useEffect(() => {
+    document.documentElement.dataset.reduceMotion = String(reduceMotion);
+  }, [reduceMotion]);
+
+  useEffect(() => {
+    document.title = route === null ? 'Vocabulary' : `${PAGES[route].title} · Vocabulary`;
+  }, [route]);
+
+  const reviewLocked = review.status === 'error' && review.error?.kind === 'load' && review.error.unauthorized;
+  const vocabularyLocked = vocab.error?.unauthorized === true;
+  if (reviewLocked || vocabularyLocked) {
+    return (
+      <div className="h-dvh">
+        <UnlockScreen
+          api={api}
+          onUnlocked={() => {
+            if (vocabularyLocked) void vocabulary.reload();
+            if (reviewLocked) void session.load();
+          }}
+        />
       </div>
     );
-  } else if (unlocking) {
-    content = <UnlockScreen api={api} onUnlocked={reload} />;
-  } else if (status === 'error' && error?.kind === 'load') {
-    content = (
-      <div className="mx-auto flex h-full w-full max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
-        <h2 className="font-serif text-3xl font-semibold">Could not load the queue</h2>
-        <p role="alert" className="text-muted">
-          {error.message}
-        </p>
-        <button
-          type="button"
-          onClick={reload}
-          className="h-12 cursor-pointer rounded-2xl bg-accent px-6 font-semibold text-white dark:text-paper"
-        >
-          Try again
-        </button>
-      </div>
-    );
-  } else if (status === 'completed') {
-    content = (
-      <CompletionScreen total={state.cards.length} tally={state.tally} meta={state.meta} onReload={reload} />
-    );
-  } else {
-    content = <ReviewScreen state={state} session={session} onReload={reload} />;
   }
 
+  const badge = vocab.meta === null ? null : vocab.meta.mode === 'mock' ? 'Demo' : vocab.meta.writesEnabled ? null : 'Read-only';
+  // On the Review tab the session's own progress is the truth, so no second count is shown there.
+  const reviewCount =
+    route === 'review' || vocab.status !== 'ready' ? null : vocab.entries.filter((entry) => entry.reviewable).length;
+  const wordId = wordInQuery(location.query);
+
   return (
-    <div className="flex h-dvh flex-col">
-      <header className="mx-auto flex w-full max-w-xl items-center justify-between gap-3 px-4 pb-1 pt-[max(0.75rem,env(safe-area-inset-top))]">
-        <div className="flex min-w-0 items-center gap-2">
-          <h1 className="truncate text-sm font-semibold tracking-tight">Vocabulary review</h1>
-          <ModeBadge meta={state.meta} />
-        </div>
-        {!unlocking && (
-          <button
-            type="button"
-            onClick={reload}
-            aria-disabled={status === 'saving' || status === 'loading'}
-            title="Reload the queue from Notion. Does not change any review data."
-            className="flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-line px-3 text-sm font-medium text-muted transition hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
-          >
-            <svg viewBox="0 0 24 24" className="size-4" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-              <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            Refresh
-          </button>
+    <>
+      <AppShell active={route} reviewCount={reviewCount} badge={badge}>
+        {route === null ? (
+          <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
+            <h1 className="font-serif text-3xl font-semibold">Page not found</h1>
+            <p className="text-muted">There is nothing at this address.</p>
+            <Link to={ROUTES.dashboard} className={BUTTON_PRIMARY}>
+              Go to the dashboard
+            </Link>
+          </div>
+        ) : (
+          PAGES[route].render()
         )}
-      </header>
-      <main className="min-h-0 flex-1">{content}</main>
-    </div>
+      </AppShell>
+      {wordId !== null && pageIdSchema.safeParse(wordId).success && (
+        <WordDetailPanel key={wordId} entryId={wordId} onClose={closeWord} />
+      )}
+      <Toasts />
+    </>
   );
 }

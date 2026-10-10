@@ -11,6 +11,7 @@ import {
   OTHER_DATA_SOURCE_ID,
   TEST_FIELDS,
   TEST_PROPERTIES,
+  TEST_VOCABULARY_FIELDS,
   notionPage,
 } from '../helpers/notion-fixtures.js';
 
@@ -20,6 +21,7 @@ function setup(overrides: Partial<NotionRepositoryOptions> = {}) {
     databaseId: DATABASE_ID,
     dataSourceId: null,
     properties: TEST_PROPERTIES,
+    vocabularyFields: TEST_VOCABULARY_FIELDS,
     cardFields: TEST_FIELDS,
     rules: sampleRules,
     timeZone: TIME_ZONE,
@@ -68,7 +70,12 @@ describe('data source resolution', () => {
 describe('schema validation', () => {
   it('accepts a schema that matches the configuration', async () => {
     const { repository } = setup();
-    await expect(repository.checkSetup()).resolves.toEqual({ readIssues: [], writeIssues: [], warnings: [] });
+    await expect(repository.checkSetup()).resolves.toEqual({
+      readIssues: [],
+      writeIssues: [],
+      warnings: [],
+      entryWriteIssues: [],
+    });
   });
 
   it('reports a wrong property name and lists what exists', async () => {

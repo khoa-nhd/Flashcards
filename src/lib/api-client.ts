@@ -1,11 +1,17 @@
 import type { ZodType } from 'zod';
 import {
   apiErrorSchema,
+  entryResponseSchema,
   queueResponseSchema,
   reviewActionResponseSchema,
+  vocabularyListResponseSchema,
+  type CreateEntryInput,
   type QueueResponse,
   type ReviewActionRequest,
   type ReviewActionResponse,
+  type UpdateEntryInput,
+  type VocabularyEntry,
+  type VocabularyListResponse,
 } from '../../shared/api.js';
 import { TIMEOUTS } from '../config.js';
 
@@ -15,6 +21,8 @@ export class ApiError extends Error {
     public readonly code: string,
     message: string,
     public readonly status: number | null = null,
+    /** Existing words, when a create or rename was refused as a duplicate. */
+    public readonly duplicates: VocabularyEntry[] = [],
   ) {
     super(message);
     this.name = 'ApiError';
@@ -27,10 +35,27 @@ export interface ReviewApi {
   login(password: string): Promise<void>;
 }
 
+export interface VocabularyApi {
+  fetchVocabulary(): Promise<VocabularyListResponse>;
+  fetchEntry(id: string): Promise<VocabularyEntry>;
+  createEntry(input: CreateEntryInput): Promise<VocabularyEntry>;
+  updateEntry(id: string, input: UpdateEntryInput): Promise<VocabularyEntry>;
+  /** Moves the word to Notion's trash. */
+  deleteEntry(id: string): Promise<void>;
+  restoreEntry(id: string): Promise<VocabularyEntry>;
+}
+
+export type AppApi = ReviewApi & VocabularyApi;
+
 async function request<T>(
   path: string,
   schema: ZodType<T> | null,
-  init: { method: 'GET' | 'POST'; body?: unknown; timeoutMs: number; timeoutMessage: string },
+  init: {
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
+    body?: unknown;
+    timeoutMs: number;
+    timeoutMessage: string;
+  },
 ): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs);
@@ -61,6 +86,7 @@ async function request<T>(
         error.success ? error.data.error.code : 'http_error',
         error.success ? error.data.error.message : `The server responded with an error (${response.status}).`,
         response.status,
+        error.success ? (error.data.duplicates ?? []) : [],
       );
     }
 
@@ -75,7 +101,15 @@ async function request<T>(
   }
 }
 
-export const reviewApi: ReviewApi = {
+const SAVE_TIMEOUT_MESSAGE =
+  'No confirmation arrived in time, so this change may or may not be saved. Check the word before trying again.';
+
+const entry = (path: string, method: 'GET' | 'POST' | 'PATCH', body?: unknown, timeoutMessage = SAVE_TIMEOUT_MESSAGE) =>
+  request(path, entryResponseSchema, { method, body, timeoutMs: TIMEOUTS.actionMs, timeoutMessage }).then(
+    (response) => response.entry,
+  );
+
+export const appApi: AppApi = {
   fetchQueue: () =>
     request('/api/review-queue', queueResponseSchema, {
       method: 'GET',
@@ -100,4 +134,27 @@ export const reviewApi: ReviewApi = {
       timeoutMs: TIMEOUTS.loginMs,
       timeoutMessage: 'Signing in took too long.',
     }),
+
+  fetchVocabulary: () =>
+    request('/api/vocabulary', vocabularyListResponseSchema, {
+      method: 'GET',
+      timeoutMs: TIMEOUTS.queueMs,
+      timeoutMessage: 'Loading your vocabulary took too long.',
+    }),
+
+  fetchEntry: (id) => entry(`/api/vocabulary/${id}`, 'GET', undefined, 'Loading the word took too long.'),
+
+  // Sending the same request again is safe: its request id makes the server return the first result.
+  createEntry: (input) => entry('/api/vocabulary', 'POST', input),
+
+  updateEntry: (id, input) => entry(`/api/vocabulary/${id}`, 'PATCH', input),
+
+  deleteEntry: (id) =>
+    request<void>(`/api/vocabulary/${id}`, null, {
+      method: 'DELETE',
+      timeoutMs: TIMEOUTS.actionMs,
+      timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+    }),
+
+  restoreEntry: (id) => entry(`/api/vocabulary/${id}/restore`, 'POST'),
 };

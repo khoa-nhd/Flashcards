@@ -5,7 +5,13 @@
 import { z } from 'zod';
 import { normalizeId, type SkippedRecord } from '../../shared/api.js';
 import { toCalendarDate, type IsoDate } from '../../shared/dates.js';
-import type { CardFieldConfig, NotionPropertyConfig, VocabularyRecord } from '../../shared/vocabulary.js';
+import type {
+  CardFieldConfig,
+  NotionPropertyConfig,
+  VocabularyFieldConfig,
+  VocabularyRecord,
+} from '../../shared/vocabulary.js';
+import type { EntryData } from '../vocabulary-catalog.js';
 
 export const databaseSchema = z.looseObject({
   id: z.string(),
@@ -28,6 +34,9 @@ export const pageSchema = z.looseObject({
     database_id: z.string().optional(),
   }),
   properties: z.record(z.string(), z.unknown()),
+  url: z.string().optional(),
+  created_time: z.string().optional(),
+  last_edited_time: z.string().optional(),
 });
 
 export type NotionPage = z.infer<typeof pageSchema>;
@@ -213,3 +222,118 @@ export function mapPageToRecord(page: NotionPage, mapping: RecordMapping): Mappe
     record: { id, word: word.value, mastery: mastery.value, nextReview: nextReview.value, fields },
   };
 }
+
+// ---- Vocabulary bank: the full record, and how values are written back ----
+
+export interface EntryMapping {
+  properties: NotionPropertyConfig;
+  fields: VocabularyFieldConfig;
+  timeZone: string;
+}
+
+export type MappedEntry = { ok: true; entry: EntryData } | { ok: false; skipped: SkippedRecord };
+
+const richItemSchema = z.looseObject({
+  type: z.string().optional(),
+  href: z.string().nullable().optional(),
+  annotations: z
+    .looseObject({
+      bold: z.boolean().optional(),
+      italic: z.boolean().optional(),
+      strikethrough: z.boolean().optional(),
+      underline: z.boolean().optional(),
+      code: z.boolean().optional(),
+      color: z.string().optional(),
+    })
+    .optional(),
+});
+
+/** Whether a title / rich-text property holds anything a plain-text rewrite would lose. */
+export function hasFormatting(property: unknown): boolean {
+  const entry = payload(property);
+  if (entry === null || (entry.type !== 'title' && entry.type !== 'rich_text')) return false;
+  const items = z.array(richItemSchema).safeParse(entry.value);
+  if (!items.success) return false;
+  return items.data.some((item) => {
+    const marks = item.annotations;
+    return (
+      (item.type !== undefined && item.type !== 'text') ||
+      Boolean(item.href) ||
+      Boolean(marks?.bold || marks?.italic || marks?.strikethrough || marks?.underline || marks?.code) ||
+      (marks?.color !== undefined && marks.color !== 'default')
+    );
+  });
+}
+
+/** An optional property: unreadable or absent simply means "no value". */
+function optionalText(property: unknown): string | null {
+  const text = readText(property);
+  return text.ok ? text.value : null;
+}
+
+/**
+ * Maps one page to a full vocabulary entry. Unlike a review card, an entry is
+ * kept even when its mastery or dates are unusable, so the bank can show the
+ * problem; only a row without a word is skipped.
+ */
+export function mapPageToEntry(page: NotionPage, mapping: EntryMapping): MappedEntry {
+  const id = normalizeId(page.id);
+  const { properties, fields, timeZone } = mapping;
+
+  const word = readText(page.properties[properties.word]);
+  if (!word.ok || word.value === null) {
+    return { ok: false, skipped: { id, word: null, reason: `"${properties.word}" is empty.` } };
+  }
+
+  const mastery = readNumber(page.properties[properties.mastery]);
+  const reviewDate = readDate(page.properties[properties.nextReview], timeZone);
+  const dateAdded = readDate(page.properties[fields.dateAdded], timeZone);
+
+  const formattedFields: string[] = [];
+  const textProperties = { word: properties.word, meaning: fields.meaning, definition: fields.definition, example: fields.example };
+  for (const [key, name] of Object.entries(textProperties)) {
+    if (hasFormatting(page.properties[name])) formattedFields.push(key);
+  }
+
+  return {
+    ok: true,
+    entry: {
+      id,
+      word: word.value,
+      meaning: optionalText(page.properties[fields.meaning]),
+      definition: optionalText(page.properties[fields.definition]),
+      example: optionalText(page.properties[fields.example]),
+      mastery: mastery.ok ? mastery.value : null,
+      reviewDate: reviewDate.ok ? reviewDate.value : null,
+      dateAdded: dateAdded.ok ? dateAdded.value : null,
+      formattedFields,
+      url: page.url ?? null,
+      createdTime: page.created_time ?? null,
+      lastEditedTime: page.last_edited_time ?? null,
+    },
+  };
+}
+
+/** Notion caps one rich-text item at 2,000 characters, so longer text is sent in pieces. */
+const RICH_TEXT_CHUNK = 2000;
+
+export function toRichText(text: string): Array<{ type: 'text'; text: { content: string } }> {
+  const items: Array<{ type: 'text'; text: { content: string } }> = [];
+  let chunk = '';
+  // Walk code points so a surrogate pair is never cut in half, but measure in
+  // UTF-16 units, which is how the limit is counted.
+  for (const character of text) {
+    if (chunk.length + character.length > RICH_TEXT_CHUNK) {
+      items.push({ type: 'text', text: { content: chunk } });
+      chunk = '';
+    }
+    chunk += character;
+  }
+  if (chunk !== '') items.push({ type: 'text', text: { content: chunk } });
+  return items;
+}
+
+export const titleValue = (text: string) => ({ title: toRichText(text) });
+export const richTextValue = (text: string | null) => ({ rich_text: text === null ? [] : toRichText(text) });
+export const numberValue = (value: number | null) => ({ number: value });
+export const dateValue = (date: IsoDate | null) => ({ date: date === null ? null : { start: date } });

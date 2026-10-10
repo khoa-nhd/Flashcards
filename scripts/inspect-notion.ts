@@ -6,7 +6,13 @@
  * performs no writes, prints no secret, and prints no vocabulary content.
  */
 import { z } from 'zod';
-import { cardFields, notionProperties, pendingConfirmation, reviewRules } from '../config/review.config.js';
+import {
+  cardFields,
+  notionProperties,
+  pendingConfirmation,
+  reviewRules,
+  vocabularyFields,
+} from '../config/review.config.js';
 import { normalizeId } from '../shared/api.js';
 import { loadConfig } from '../server/env.js';
 import { createNotionApi } from '../server/notion/notion-client.js';
@@ -129,6 +135,7 @@ async function main() {
     databaseId,
     dataSourceId,
     properties: notionProperties,
+    vocabularyFields,
     cardFields,
     rules: reviewRules,
     timeZone: config.timeZone ?? 'UTC',
@@ -136,8 +143,10 @@ async function main() {
   const report = await repository.checkSetup();
   for (const issue of report.readIssues) console.log(`BLOCKS READING: ${issue}`);
   for (const issue of report.writeIssues) console.log(`BLOCKS WRITING: ${issue}`);
+  const entryIssues = report.entryWriteIssues ?? [];
+  for (const issue of entryIssues) console.log(`BLOCKS ADDING AND EDITING WORDS: ${issue}`);
   for (const warning of report.warnings) console.log(`warning: ${warning}`);
-  if (report.readIssues.length + report.writeIssues.length + report.warnings.length === 0) {
+  if (report.readIssues.length + report.writeIssues.length + entryIssues.length + report.warnings.length === 0) {
     console.log('Every configured property was found with a usable type.');
   }
 

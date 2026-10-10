@@ -1,27 +1,28 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { QueueResponse, ReviewActionResponse, ReviewCard } from '../../shared/api.js';
 import { App } from '../../src/App.js';
 import { Flashcard } from '../../src/components/Flashcard.js';
-import { ApiError, type ReviewApi } from '../../src/lib/api-client.js';
-import { TODAY, card, deferred, queueResponse, type Deferred } from '../helpers/fixtures.js';
+import { ApiError } from '../../src/lib/api-client.js';
+import { createSettingsStore } from '../../src/lib/settings.js';
+import { createFakeApi } from '../helpers/fake-api.js';
+import { TODAY, card, queueResponse, type Deferred } from '../helpers/fixtures.js';
 
 const applied: ReviewActionResponse = { outcome: 'applied', state: null };
 
+// The review lives at /review; every test starts there with untouched preferences.
+beforeEach(() => {
+  window.history.replaceState(null, '', '/review');
+});
+
+const renderAt = (api: ReturnType<typeof createFakeApi>['api']) =>
+  render(<App api={api} settings={createSettingsStore(null)} />);
+
 async function renderApp(cards: ReviewCard[] = [card(1), card(2), card(3)], meta: Partial<QueueResponse> = {}) {
-  const saves: Array<Deferred<ReviewActionResponse>> = [];
-  const api = {
-    fetchQueue: vi.fn(async () => queueResponse(cards, meta)),
-    submitAction: vi.fn<ReviewApi['submitAction']>(() => {
-      const pending = deferred<ReviewActionResponse>();
-      saves.push(pending);
-      return pending.promise;
-    }),
-    login: vi.fn(async () => undefined),
-  } satisfies ReviewApi;
-  const view = render(<App api={api} />);
+  const { api, saves } = createFakeApi({ cards, queue: meta });
+  const view = renderAt(api);
   if (cards.length > 0) await screen.findByTestId('flashcard');
   return { api, saves, ...view };
 }
@@ -619,15 +620,11 @@ describe('the session as a whole', () => {
   });
 
   it('shows a load failure with a way to try again', async () => {
-    const api = {
-      fetchQueue: vi
-        .fn<ReviewApi['fetchQueue']>()
-        .mockRejectedValueOnce(new ApiError('setup_incomplete', 'No property named "Mastery".', 503))
-        .mockResolvedValue(queueResponse([card(1)])),
-      submitAction: vi.fn<ReviewApi['submitAction']>(),
-      login: vi.fn<ReviewApi['login']>(),
-    };
-    render(<App api={api} />);
+    const { api } = createFakeApi();
+    api.fetchQueue
+      .mockRejectedValueOnce(new ApiError('setup_incomplete', 'No property named "Mastery".', 503))
+      .mockResolvedValue(queueResponse([card(1)]));
+    renderAt(api);
     expect(await screen.findByRole('alert')).toHaveTextContent('No property named "Mastery".');
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('flashcard')).toBeInTheDocument();
@@ -635,18 +632,14 @@ describe('the session as a whole', () => {
 
   it('asks for the access password when the server requires one', async () => {
     const user = userEvent.setup();
-    const api = {
-      fetchQueue: vi
-        .fn<ReviewApi['fetchQueue']>()
-        .mockRejectedValueOnce(new ApiError('unauthorized', 'Enter the access password to continue.', 401))
-        .mockResolvedValue(queueResponse([card(1)])),
-      submitAction: vi.fn<ReviewApi['submitAction']>(),
-      login: vi
-        .fn<ReviewApi['login']>()
-        .mockRejectedValueOnce(new ApiError('invalid_password', 'That password is not correct.', 401))
-        .mockResolvedValue(undefined),
-    };
-    render(<App api={api} />);
+    const { api } = createFakeApi();
+    api.fetchQueue
+      .mockRejectedValueOnce(new ApiError('unauthorized', 'Enter the access password to continue.', 401))
+      .mockResolvedValue(queueResponse([card(1)]));
+    api.login
+      .mockRejectedValueOnce(new ApiError('invalid_password', 'That password is not correct.', 401))
+      .mockResolvedValue(undefined);
+    renderAt(api);
 
     const field = await screen.findByLabelText('Access password');
     // Spaces and arrow keys are ordinary typing here.

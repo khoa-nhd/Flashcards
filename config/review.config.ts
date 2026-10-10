@@ -12,13 +12,37 @@
  * Saving also requires REVIEW_WRITES_ENABLED=true in the environment.
  */
 import type { ReviewRules } from '../shared/review-logic.js';
-import type { CardFieldConfig, NotionPropertyConfig } from '../shared/vocabulary.js';
+import type {
+  CardFieldConfig,
+  NewWordDefaults,
+  NotionPropertyConfig,
+  VocabularyFieldConfig,
+} from '../shared/vocabulary.js';
 
 // VERIFIED: property names and types.
 export const notionProperties: NotionPropertyConfig = {
   word: 'Word', // title
   mastery: 'Mastery', // number
   nextReview: 'Review Date', // date (every existing value is date-only)
+};
+
+// VERIFIED: the descriptive properties, all plain text or date in Notion.
+export const vocabularyFields: VocabularyFieldConfig = {
+  meaning: 'Vietnamese Meaning', // rich_text
+  definition: 'Definition', // rich_text
+  example: 'Example Sentences', // rich_text
+  dateAdded: 'Date Added', // date; equals the creation day on 42 of 43 rows
+};
+
+/**
+ * What a word created in the app starts with, mirroring the database's own
+ * default template ("New page"), read on 2026-10-10: Mastery 1, no Review Date.
+ * An empty Review Date counts as due, so a new word is reviewable at once.
+ * Both can be changed per word in the Add form.
+ */
+export const newWordDefaults: NewWordDefaults = {
+  mastery: 1, // VERIFIED from the template; no existing row is below 1
+  reviewDate: 'empty', // VERIFIED from the template
 };
 
 export const cardFields: CardFieldConfig[] = [

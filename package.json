@@ -16,7 +16,8 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "notion:inspect": "tsx scripts/inspect-notion.ts"
+    "notion:inspect": "tsx scripts/inspect-notion.ts",
+    "dev:mock": "vite --mode mock --port 5174"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.4",
