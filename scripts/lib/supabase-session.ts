@@ -7,6 +7,7 @@ import { createClient } from '@supabase/supabase-js';
 import { loadConfig } from '../../server/env.js';
 import type { Database } from '../../server/supabase/database.types.js';
 import {
+  LATEST_SCHEMA_VERSION,
   createSupabaseDatabase,
   createUserClient,
   type VocabularyDatabase,
@@ -104,11 +105,14 @@ export async function signIn(
     throw new Error(`Could not sign in as ${email}: ${error?.message ?? 'no session was returned'}.`);
   }
   const client = createUserClient(project.url, project.publicKey, data.session.access_token);
+  // Ask the database how far its schema has got, and read only the columns that version has: a project that
+  // has not had the newer SQL files run must still be checkable and importable.
+  const found = await createSupabaseDatabase(client, 1).schemaVersion();
   return {
     userId: data.session.user.id,
     email,
     accessToken: data.session.access_token,
-    database: createSupabaseDatabase(client),
+    database: createSupabaseDatabase(client, Math.min(found, LATEST_SCHEMA_VERSION)),
     client,
   };
 }

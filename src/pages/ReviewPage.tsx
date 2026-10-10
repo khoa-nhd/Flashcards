@@ -2,8 +2,10 @@ import { useEffect, useSyncExternalStore } from 'react';
 import { useApp } from '../app-context.js';
 import { CompletionScreen } from '../components/CompletionScreen.js';
 import { Icon } from '../components/Icon.js';
+import { Link } from '../components/Link.js';
 import { ReviewScreen } from '../components/ReviewScreen.js';
 import { Spinner } from '../components/Spinner.js';
+import { ROUTES, useLocation } from '../lib/router.js';
 import type { SessionMeta } from '../lib/session-machine.js';
 
 function ModeBadge({ meta }: { meta: SessionMeta | null }) {
@@ -35,10 +37,12 @@ export function ReviewPage() {
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const { status, error } = state;
   const reload = () => void session.load();
+  // The address chooses the selection of cards: everything due, or only the weakest of them.
+  const focus = useLocation().query.get('focus') === 'weak' ? 'weak' : null;
 
   useEffect(() => {
-    ensureReviewSession();
-  }, [ensureReviewSession]);
+    ensureReviewSession(focus);
+  }, [ensureReviewSession, focus]);
 
   let content;
   if (status === 'loading') {
@@ -65,7 +69,9 @@ export function ReviewPage() {
       </div>
     );
   } else if (status === 'completed') {
-    content = <CompletionScreen total={state.cards.length} tally={state.tally} meta={state.meta} onReload={reload} />;
+    content = (
+      <CompletionScreen state={state} sessionId={session.sessionId()} onReload={reload} onUndo={() => session.undo()} />
+    );
   } else {
     content = <ReviewScreen state={state} session={session} onReload={reload} />;
   }
@@ -88,6 +94,15 @@ export function ReviewPage() {
           Refresh
         </button>
       </div>
+      {/* The finished screen says this itself, with the same way out. */}
+      {state.meta?.focus === 'weak' && status !== 'loading' && status !== 'completed' && (
+        <p className="mx-auto w-full max-w-xl px-4 pt-1 text-sm text-muted">
+          Weakest words only, from those due now.{' '}
+          <Link to={ROUTES.review} className="font-medium text-accent hover:underline">
+            Review everything due
+          </Link>
+        </p>
+      )}
       <div className="min-h-0 flex-1">{content}</div>
     </div>
   );

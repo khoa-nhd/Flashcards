@@ -3,7 +3,7 @@ import type { ReviewAction } from '../../shared/review-logic.js';
 import { HINT_DURATION_MS } from '../config.js';
 import { useReviewShortcuts } from '../hooks/useReviewShortcuts.js';
 import type { SessionController } from '../lib/session-controller.js';
-import { currentCard, type SessionState } from '../lib/session-machine.js';
+import { canUndo, currentCard, type SessionState } from '../lib/session-machine.js';
 import { Flashcard } from './Flashcard.js';
 import { ReviewControls } from './ReviewControls.js';
 import { ReviewProgress } from './ReviewProgress.js';
@@ -57,7 +57,11 @@ export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
     [session, showFlipHint],
   );
 
-  useReviewShortcuts({ onFlip: flip, onGrade: grade });
+  const undo = useCallback(() => {
+    session.undo();
+  }, [session]);
+
+  useReviewShortcuts({ onFlip: flip, onGrade: grade, onUndo: undo });
 
   // Keep keyboard focus somewhere useful: a control that was just clicked may
   // have gone inert or been replaced, which would otherwise strand key presses.
@@ -77,10 +81,31 @@ export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
 
   const done = state.index;
   const total = state.cards.length;
+  const undoable = state.lastSaved;
+  const undoWord = undoable === null ? null : (state.cards[undoable.index]?.word ?? null);
 
   return (
     <div className="mx-auto flex h-full w-full max-w-xl flex-col gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
       <ReviewProgress done={done} total={total} />
+
+      {(undoable !== null || state.undoError !== null) && (
+        <div className="flex min-h-8 items-center justify-between gap-3 text-sm">
+          <p role={state.undoError === null ? undefined : 'alert'} className="min-w-0 flex-1 text-bad-ink">
+            {state.undoError ?? ''}
+          </p>
+          {undoable !== null && (
+            <button
+              type="button"
+              onClick={undo}
+              disabled={!canUndo(state)}
+              aria-label={`Undo “${ACTION_TEXT[undoable.action]}”${undoWord === null ? '' : ` for ${undoWord}`}`}
+              className="h-8 shrink-0 cursor-pointer rounded-full border border-line px-3 font-medium text-muted transition hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {state.undoing ? 'Undoing…' : `Undo${undoWord === null ? '' : `: ${undoWord}`}`}
+            </button>
+          )}
+        </div>
+      )}
 
       <p className="sr-only" aria-live="polite">
         Card {done + 1} of {total}: {card.word}. {flipped ? 'Answer shown.' : ''}
@@ -177,6 +202,11 @@ export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
         <span>
           <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">→</kbd> remember
         </span>
+        {state.meta?.capabilities.undo === true && (
+          <span>
+            <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">U</kbd> undo
+          </span>
+        )}
       </div>
 
       {state.meta !== null && <SkippedNotice skipped={state.meta.skipped} />}

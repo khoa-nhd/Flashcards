@@ -1,4 +1,5 @@
 import type { IsoDate } from './dates.js';
+import type { FsrsState } from './scheduler/fsrs.js';
 
 /** A vocabulary row after mapping and validation, independent of where it came from. */
 export interface VocabularyRecord {
@@ -10,6 +11,14 @@ export interface VocabularyRecord {
   nextReview: IsoDate | null;
   /** Display fields keyed by `CardFieldConfig.key`; `null` when empty. */
   fields: Record<string, string | null>;
+  /** The card's FSRS state, where one is kept and the card has one. It never decides what is due. */
+  fsrs?: StoredFsrs | null;
+}
+
+/** An FSRS state together with the engine that produced it. */
+export interface StoredFsrs {
+  state: FsrsState;
+  engine: string;
 }
 
 /** The editable text fields of an entry besides the word itself. */

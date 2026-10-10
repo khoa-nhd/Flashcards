@@ -1,6 +1,7 @@
 import { useApp, useSettings, useVocabulary } from '../app-context.js';
-import { AccountSection, TimeZoneSection, TrashSection } from '../components/AccountSettings.js';
+import { AccountSection, DatabaseStatus, TimeZoneSection, TrashSection } from '../components/AccountSettings.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { SchedulerSection } from '../components/SchedulerSection.js';
 import { SkippedNotice } from '../components/SkippedNotice.js';
 import { BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { sortEntries } from '../lib/bank-query.js';
@@ -46,6 +47,7 @@ export function SettingsPage() {
       <div className="flex max-w-2xl flex-col gap-6">
         {account !== null && <AccountSection account={account} />}
         {account !== null && <TimeZoneSection />}
+        <SchedulerSection />
 
         <section className={`${CARD} flex flex-col gap-4 p-5`}>
           <h2 className={SECTION_TITLE}>Vocabulary bank</h2>
@@ -181,6 +183,7 @@ export function SettingsPage() {
               <dd className="m-0">{SOURCE_TEXT[meta.mode]}</dd>
               <dt className="text-muted">Saving</dt>
               <dd className="m-0">{!meta.writesEnabled ? 'Off: read-only' : SAVING_TEXT[meta.mode]}</dd>
+              {account !== null && <DatabaseStatus />}
               {meta.mode === 'supabase' && (
                 <>
                   <dt className="text-muted">Other devices</dt>

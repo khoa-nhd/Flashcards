@@ -1,5 +1,7 @@
-import { cardFields, newWordDefaults, reviewRules } from '../config/review.config.js';
+import { cardFields, fsrsRatingMap, newWordDefaults, reviewRules } from '../config/review.config.js';
 import { calendarDateInTimeZone } from '../shared/dates.js';
+import { DEFAULT_FSRS_SETTINGS } from '../shared/scheduler/fsrs.js';
+import { AnalyticsService } from './analytics-service.js';
 import { createApp } from './create-app.js';
 import { loadConfig, type AppConfig } from './env.js';
 import { MockVocabularyRepository, mockCardFields } from './mock/mock-repository.js';
@@ -28,6 +30,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
             rules: reviewRules,
             cardFields,
             defaults: newWordDefaults,
+            ratingMap: fsrsRatingMap,
             defaultTimeZone: config.timeZone,
             writesRequested: config.writesRequested,
           });
@@ -46,6 +49,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     cardFields: mockCardFields,
     timeZone,
     writesRequested: true,
+    fsrs: { settings: DEFAULT_FSRS_SETTINGS, ratingMap: fsrsRatingMap },
   });
   const vocabulary = new VocabularyService({
     catalog: repository,
@@ -54,7 +58,8 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     timeZone,
     writesRequested: true,
   });
-  return { app: createApp({ config, service, vocabulary }), config };
+  const analytics = new AnalyticsService({ repository, catalog: repository, rules: sampleRules, timeZone });
+  return { app: createApp({ config, service, vocabulary, analytics }), config };
 }
 
 let shared: ReturnType<typeof buildApp> | undefined;

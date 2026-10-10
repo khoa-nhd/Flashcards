@@ -31,7 +31,7 @@ export interface AppServices {
    * afterwards only a finished or failed session is replaced, so one in
    * progress survives a trip to another tab.
    */
-  ensureReviewSession(): void;
+  ensureReviewSession(focus?: 'weak' | null): void;
 }
 
 /**
@@ -48,12 +48,16 @@ export function createAppServices(
   // A saved answer changes mastery and dates, so the other pages must re-read.
   const session = createSessionController(api, () => vocabulary.markStale());
   let reviewStarted = false;
-  const ensureReviewSession = () => {
+  const ensureReviewSession = (focus: 'weak' | null = null) => {
     const current = session.getState();
     const failedToLoad = current.status === 'error' && current.error?.kind === 'load';
-    if (!reviewStarted || current.status === 'completed' || failedToLoad) {
+    // Asking for a different selection of cards is a new session. An answer that is still being saved, or that
+    // failed and is waiting for a retry, is never dropped for it.
+    const unsettled = current.status === 'saving' || (current.status === 'error' && !failedToLoad);
+    const refocused = reviewStarted && current.meta !== null && current.meta.focus !== focus && !unsettled;
+    if (!reviewStarted || current.status === 'completed' || failedToLoad || refocused) {
       reviewStarted = true;
-      void session.load();
+      void session.load({ focus });
     }
   };
   return { api, session, vocabulary, settings, toasts: createToastStore(), account, ensureReviewSession };

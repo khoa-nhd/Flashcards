@@ -46,5 +46,7 @@ export default defineConfig({
     include: ['tests/**/*.test.{ts,tsx}'],
     setupFiles: ['./tests/setup.ts'],
     restoreMocks: true,
+    // The page tests type into real forms in jsdom; the first one in a file can pass 5 s when every file runs at once.
+    testTimeout: 15_000,
   },
 });

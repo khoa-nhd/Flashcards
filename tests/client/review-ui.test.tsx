@@ -192,6 +192,7 @@ describe('answering with the keyboard', () => {
       expected: { mastery: 3, nextReview: TODAY },
       requestId: expect.any(String),
       durationMs: expect.any(Number),
+      sessionId: expect.any(String),
     });
   });
 
@@ -637,5 +638,163 @@ describe('the session as a whole', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('The database schema is not installed.');
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('flashcard')).toBeInTheDocument();
+  });
+});
+
+describe('undoing the last answer', () => {
+  const withUndo = { capabilities: { sessions: true, undo: true, fsrs: false, analytics: false } };
+
+  async function answerFirst(cards: ReviewCard[] = [card(1), card(2), card(3)]) {
+    const context = await renderApp(cards, withUndo);
+    press(' ');
+    press('ArrowRight');
+    await settle(context.saves[0]);
+    return context;
+  }
+
+  it('offers to take back the answer just saved, and returns to its card', async () => {
+    const { api } = await answerFirst();
+    showsCard(2, 'word-2');
+    const button = screen.getByRole('button', { name: 'Undo “Remember” for word-1' });
+    expect(button).toHaveTextContent('Undo: word-1');
+
+    await act(async () => {
+      fireEvent.click(button);
+    });
+    expect(api.undoAction).toHaveBeenCalledWith({
+      reviewRequestId: api.submitAction.mock.calls[0]?.[0].requestId,
+      requestId: expect.any(String),
+    });
+    showsCard(1, 'word-1');
+    expect(isFlipped()).toBe(false);
+    expect(screen.queryByRole('button', { name: /^Undo/ })).not.toBeInTheDocument();
+  });
+
+  it('does the same with the U key, but not while typing would be expected elsewhere', async () => {
+    const { api } = await answerFirst();
+    await act(async () => {
+      press('u');
+    });
+    expect(api.undoAction).toHaveBeenCalledTimes(1);
+    showsCard(1, 'word-1');
+    // Nothing left to undo: the key now does nothing.
+    press('u');
+    expect(api.undoAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('is not offered before anything is saved, or where the store cannot undo', async () => {
+    const first = await renderApp([card(1), card(2)], withUndo);
+    expect(screen.queryByRole('button', { name: /^Undo/ })).not.toBeInTheDocument();
+    press('u');
+    expect(first.api.undoAction).not.toHaveBeenCalled();
+    first.unmount();
+
+    const { saves } = await renderApp([card(1), card(2)]);
+    press(' ');
+    press('ArrowRight');
+    await settle(saves[0]);
+    expect(screen.queryByRole('button', { name: /^Undo/ })).not.toBeInTheDocument();
+    expect(screen.queryByText('undo')).not.toBeInTheDocument();
+  });
+
+  it('says why an undo did not happen and stays on the current card', async () => {
+    const context = await renderApp([card(1), card(2)], withUndo);
+    context.api.undoAction.mockRejectedValueOnce(
+      new ApiError('conflict', 'This card has been reviewed again since then, so that answer can no longer be undone.', 409),
+    );
+    press(' ');
+    press('ArrowRight');
+    await settle(context.saves[0]);
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: /^Undo/ }));
+    });
+    expect(screen.getByRole('alert')).toHaveTextContent('can no longer be undone');
+    showsCard(2, 'word-2');
+    expect(screen.queryByRole('button', { name: /^Undo/ })).not.toBeInTheDocument();
+  });
+
+  it('replaces the offer with the newer answer after the next card is saved', async () => {
+    const { saves } = await answerFirst();
+    press(' ');
+    press('ArrowLeft');
+    await settle(saves[1]);
+    expect(screen.getByRole('button', { name: 'Undo “Not remember” for word-2' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /for word-1/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('the session summary', () => {
+  const withSessions = { capabilities: { sessions: true, undo: true, fsrs: false, analytics: false } };
+  const saved = {
+    sessionId: 'ignored',
+    reviewed: 2,
+    remembered: 1,
+    notRemembered: 1,
+    accuracy: 0.5,
+    firstTime: 1,
+    seenBefore: 1,
+    undone: 1,
+    durationMs: 65_000,
+    timedReviews: 2,
+  };
+
+  async function finishTwo(prepare: (api: ReturnType<typeof createFakeApi>['api']) => void) {
+    const fake = createFakeApi({ cards: [card(1), card(2)], queue: withSessions });
+    prepare(fake.api);
+    renderAt(fake.api);
+    await screen.findByTestId('flashcard');
+    press(' ');
+    press('ArrowRight');
+    await settle(fake.saves[0]);
+    press(' ');
+    press('ArrowLeft');
+    await settle(fake.saves[1]);
+    return fake;
+  }
+
+  it('shows what the server saved for this sitting', async () => {
+    const { api } = await finishTwo((fake) => fake.fetchSessionSummary.mockResolvedValue(saved));
+    const summary = await screen.findByText('These are the answers that were saved.');
+    expect(summary).toBeInTheDocument();
+    expect(api.fetchSessionSummary).toHaveBeenCalledWith(api.submitAction.mock.calls[0]?.[0].sessionId);
+
+    const list = screen.getByLabelText('Session summary');
+    expect(list).toHaveTextContent('50%');
+    expect(list).toHaveTextContent('Accuracy (1 of 2)');
+    expect(list).toHaveTextContent('1 min 05 s');
+    expect(list).toHaveTextContent('1 reviewed for the first time · 1 reviewed before · 1 undone');
+  });
+
+  it('falls back to this device’s confirmed count, and says so, when the summary cannot be loaded', async () => {
+    await finishTwo((fake) => fake.fetchSessionSummary.mockRejectedValue(new ApiError('network', 'offline')));
+    expect(await screen.findByText(/the saved summary could not be loaded/)).toBeInTheDocument();
+    const list = screen.getByLabelText('Session summary');
+    expect(list).toHaveTextContent('Accuracy (1 of 2)');
+    expect(list).not.toHaveTextContent('Time on cards');
+  });
+
+  it('offers to continue, to undo the last answer, or to finish', async () => {
+    const { api } = await finishTwo((fake) => fake.fetchSessionSummary.mockResolvedValue(saved));
+    expect(screen.getByRole('button', { name: 'Check for more cards' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Finish' })).toHaveAttribute('href', '/');
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Undo the last answer (word-2)' }));
+    });
+    expect(api.undoAction).toHaveBeenCalledTimes(1);
+    // Back in the session, on the card whose answer was taken back.
+    showsCard(2, 'word-2');
+  });
+
+  it('does not ask the server after a preview, which saved nothing', async () => {
+    const fake = createFakeApi({ cards: [card(1)], queue: { ...withSessions, writesEnabled: false } });
+    renderAt(fake.api);
+    await screen.findByTestId('flashcard');
+    press(' ');
+    press('ArrowRight');
+    await settle(fake.saves[0], { outcome: 'dry_run', state: null });
+    expect(await screen.findByText(/This was a preview/)).toBeInTheDocument();
+    expect(fake.api.fetchSessionSummary).not.toHaveBeenCalled();
+    expect(screen.queryByText(/Accuracy/)).not.toBeInTheDocument();
   });
 });

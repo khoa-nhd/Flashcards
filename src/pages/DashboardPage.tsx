@@ -8,6 +8,7 @@ import { MasteryPill, StatusBadge, formatDate } from '../components/badges.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { ReviewActivityCard, useReviewActivity } from '../components/ReviewActivity.js';
 import { StatTile } from '../components/StatTile.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, PAGE, SECTION_TITLE } from '../components/ui.js';
@@ -32,6 +33,7 @@ export function DashboardPage() {
   const state = useVocabulary();
   const { vocabulary } = useApp();
   const settings = useSettings();
+  const activity = useReviewActivity();
   const { entries, meta } = state;
   const today = meta?.today ?? null;
 
@@ -53,7 +55,10 @@ export function DashboardPage() {
           <button
             type="button"
             className={BUTTON_SECONDARY}
-            onClick={() => void vocabulary.reload()}
+            onClick={() => {
+              void vocabulary.reload();
+              activity.reload();
+            }}
             disabled={state.refreshing || state.status === 'loading'}
           >
             <Icon name="refresh" className="size-4" />
@@ -89,6 +94,8 @@ export function DashboardPage() {
                 </Link>
               </div>
             </section>
+
+            <ReviewActivityCard activity={activity} />
 
             <section aria-label="Summary">
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -272,6 +279,9 @@ export function DashboardPage() {
                 className={BUTTON_SECONDARY}
               >
                 Added in the last {RECENT_DAYS} days
+              </Link>
+              <Link to={ROUTES.weak} className={BUTTON_SECONDARY}>
+                Weak words
               </Link>
               <Link to={ROUTES.insights} className={BUTTON_SECONDARY}>
                 Insights

@@ -97,6 +97,7 @@ describe('schema', () => {
     expect(tables).toEqual([
       { relname: 'card_states', relrowsecurity: true },
       { relname: 'review_logs', relrowsecurity: true },
+      { relname: 'study_sessions', relrowsecurity: true },
       { relname: 'user_settings', relrowsecurity: true },
       { relname: 'vocabulary', relrowsecurity: true },
     ]);
@@ -106,7 +107,15 @@ describe('schema', () => {
     const can = async (role: string, table: string, privilege: string) =>
       (await db.admin<{ allowed: boolean }>('select has_table_privilege($1, $2, $3) as allowed', [role, `public.${table}`, privilege]))[0]!.allowed;
 
-    for (const table of ['vocabulary', 'card_states', 'review_logs', 'user_settings', 'vocabulary_cards']) {
+    for (const table of [
+      'vocabulary',
+      'card_states',
+      'review_logs',
+      'user_settings',
+      'study_sessions',
+      'vocabulary_cards',
+      'effective_reviews',
+    ]) {
       for (const privilege of ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) {
         expect(await can('anon', table, privilege), `anon ${privilege} ${table}`).toBe(false);
       }
@@ -119,6 +128,9 @@ describe('schema', () => {
     expect(await can('authenticated', 'review_logs', 'DELETE')).toBe(false);
     expect(await can('authenticated', 'user_settings', 'DELETE')).toBe(false);
     expect(await can('authenticated', 'vocabulary_cards', 'INSERT')).toBe(false);
+    expect(await can('authenticated', 'effective_reviews', 'SELECT')).toBe(true);
+    expect(await can('authenticated', 'effective_reviews', 'INSERT')).toBe(false);
+    expect(await can('authenticated', 'study_sessions', 'DELETE')).toBe(false);
     // Nobody can remove a word or its state outright; the app only ever trashes.
     for (const table of ['vocabulary', 'card_states']) {
       expect(await can('authenticated', table, 'SELECT'), table).toBe(true);
@@ -138,6 +150,9 @@ describe('schema', () => {
       'card_states UPDATE {authenticated}',
       'review_logs INSERT {authenticated}',
       'review_logs SELECT {authenticated}',
+      'study_sessions INSERT {authenticated}',
+      'study_sessions SELECT {authenticated}',
+      'study_sessions UPDATE {authenticated}',
       'user_settings INSERT {authenticated}',
       'user_settings SELECT {authenticated}',
       'user_settings UPDATE {authenticated}',
@@ -184,8 +199,24 @@ describe('isolation between users', () => {
 
   it('gives a signed-out visitor nothing at all', async () => {
     const mine = await db.as(alice, (s) => createWord(s));
-    for (const table of ['vocabulary', 'card_states', 'review_logs', 'user_settings', 'vocabulary_cards']) {
+    for (const table of [
+      'vocabulary',
+      'card_states',
+      'review_logs',
+      'user_settings',
+      'study_sessions',
+      'vocabulary_cards',
+      'effective_reviews',
+    ]) {
       await expect(db.asAnon((s) => s.query(`select * from public.${table}`)), table).rejects.toMatchObject({ code: RLS_DENIED });
+    }
+    for (const call of [
+      'public.app_schema_version()',
+      `public.record_review('{}'::jsonb)`,
+      `public.undo_review('${mine.id}'::uuid, '${mine.id}'::uuid)`,
+      `public.session_summary('${mine.id}'::uuid)`,
+    ]) {
+      await expect(db.asAnon((s) => s.query(`select * from ${call}`)), call).rejects.toMatchObject({ code: RLS_DENIED });
     }
     await expect(db.asAnon((s) => createWord(s))).rejects.toMatchObject({ code: RLS_DENIED });
     await expect(

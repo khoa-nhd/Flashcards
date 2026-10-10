@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { ReviewAction } from '../../shared/review-logic.js';
 
-export type ShortcutIntent = 'flip' | ReviewAction;
+export type ShortcutIntent = 'flip' | 'undo' | ReviewAction;
 
 const TEXT_ENTRY =
   'input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"], [role="searchbox"], [role="combobox"], [role="slider"], [role="spinbutton"], [role="listbox"], [role="menu"], [role="tablist"], [role="radiogroup"]';
@@ -25,16 +25,19 @@ export function shortcutFor(event: KeyboardEvent): ShortcutIntent | null {
   }
   if (event.key === 'ArrowLeft') return 'not_remember';
   if (event.key === 'ArrowRight') return 'remember';
+  if (event.key === 'u' || event.key === 'U') return 'undo';
   return null;
 }
 
 export interface ShortcutHandlers {
   onFlip: () => void;
   onGrade: (action: ReviewAction) => void;
+  onUndo?: () => void;
 }
 
 /**
- * Global review shortcuts: Space flips, ← / → answer. One listener is attached
+ * Global review shortcuts: Space flips, ← / → answer, U takes the last answer
+ * back. One listener is attached
  * per mount and removed on unmount; handlers are read through a ref so a
  * re-render never re-subscribes or leaves a stale listener behind.
  */
@@ -54,6 +57,7 @@ export function useReviewShortcuts(handlers: ShortcutHandlers, enabled = true): 
       // A held key auto-repeats; only the initial press counts.
       if (event.repeat) return;
       if (intent === 'flip') latest.current.onFlip();
+      else if (intent === 'undo') latest.current.onUndo?.();
       else latest.current.onGrade(intent);
     };
     window.addEventListener('keydown', onKeyDown);

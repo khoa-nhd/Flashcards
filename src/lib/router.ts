@@ -10,6 +10,7 @@ export const ROUTES = {
   add: '/add',
   bank: '/bank',
   calendar: '/calendar',
+  weak: '/weak',
   insights: '/insights',
   settings: '/settings',
 } as const;

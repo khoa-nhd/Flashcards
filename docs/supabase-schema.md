@@ -28,14 +28,35 @@ PostgreSQL ── Row Level Security decides what that user can reach
 - The server refuses to start in Supabase mode if the configured key is a
   secret / service-role key, because that key would be handed to browsers.
 
+## Versions
+
+The schema grows by SQL files that only add things. Each one raises the number
+returned by `public.app_schema_version()` (a database without that function is
+version 1). The server reads the number once per instance, re-checks every
+minute while the database is behind, and switches features on only when the
+database can serve them, so the app and the database can be updated in either
+order.
+
+| Version | File | Adds | Turns on |
+| --- | --- | --- | --- |
+| 1 | `20261010090000_initial_schema.sql` | The four original tables, policies, `apply_review`. | The app. |
+| 2 | `20261011090000_sessions_and_undo.sql` | `study_sessions`; `kind`, `session_id`, `undoes_log_id` on `review_logs`; `effective_reviews`; `record_review`, `undo_review`, `session_summary`. | Undo, the end-of-session summary. |
+| 3 | `20261012090000_fsrs_shadow.sql` | FSRS columns on `card_states` and `review_logs`; `fsrs_request_retention` on `user_settings`. | FSRS calculated alongside, and its comparison. |
+| 4 | `20261013090000_review_analytics.sql` | `review_daily_stats`, `card_review_stats`. | Review activity, history-based weak words. |
+
+There are no database credentials in the project, so the owner runs each file
+in the Supabase SQL Editor. Nothing in versions 2 to 4 alters or removes
+existing rows.
+
 ## Tables
 
 | Table | One row per | Purpose |
 | --- | --- | --- |
 | `vocabulary` | word | Word, meaning, definition, example, date added, trash marker. |
-| `card_states` | word | Current schedule: mastery (0–10) and review date. |
-| `review_logs` | answer | Append-only history of every review. |
-| `user_settings` | account | Time zone (and room for more). |
+| `card_states` | word | Current schedule: mastery (0–10) and review date; from version 3 also the FSRS state. |
+| `review_logs` | answer or undo | Append-only history of every review and every undo. |
+| `study_sessions` | sitting | (Version 2.) One row per queue load that had an answer saved in it. |
+| `user_settings` | account | Time zone; from version 3 the FSRS target retention. |
 
 Every row carries `user_id`, which defaults to the caller (`auth.uid()`) and
 references `auth.users` with `on delete cascade`.
@@ -62,12 +83,13 @@ references `auth.users` with `on delete cascade`.
 | `vocabulary_id` | Primary key; with `user_id`, references the word (so a state can never belong to someone else's word). |
 | `mastery` | `smallint`, checked 0–10. |
 | `review_date` | Next review; empty means "due now". |
-| `scheduler` | `mastery_v1`: the current rules. |
-| `fsrs_*` | Stability, difficulty, due, last review, reps, lapses, state, version. **All empty.** Reserved for a future scheduler; nothing reads or writes them. |
+| `scheduler` | `mastery_v1`: the rules that decide what is due. |
+| `fsrs_*` | Stability, difficulty, due, last review, reps, lapses, state, scheduled days, learning steps, version. Empty at version 1 and 2. From version 3 they are filled **when a word is next reviewed**, in the same statement that saves the mastery and date. A check keeps them all empty or all filled. |
 
-Mastery and the FSRS fields are deliberately separate. Switching scheduler
-later will mean filling the FSRS columns from `review_logs`, not reinterpreting
-mastery.
+Mastery and the FSRS fields are deliberately separate, and **only mastery and
+`review_date` decide what is due**. The FSRS state is never derived from a
+mastery level: a word has none until its first review after version 3, and
+that first review starts it as a new FSRS card.
 
 ### `review_logs`
 
@@ -76,23 +98,40 @@ mastery.
 reviewer's calendar day), `duration_ms`, `mastery_before`, `mastery_after`,
 `review_date_before`, `review_date_after`, `scheduler`.
 
+From version 2: `kind` (`review` or `undo`), `session_id`, `undoes_log_id`.
+From version 3: `rating` (1–4, the FSRS grade the answer was mapped to),
+`fsrs_before`, `fsrs_after` (the FSRS state either side of the answer, as
+JSON), `fsrs_version`.
+
 - Unique on `(user_id, request_id)`: one answer is recorded once.
 - Signed-in users can `SELECT` and `INSERT` their own rows. There is no
   `UPDATE` or `DELETE` privilege at all, for anyone using the app.
+- **An undo is a row, not a deletion.** It has `kind = 'undo'` and points at
+  the answer it takes back (`undoes_log_id`, unique, so an answer is undone at
+  most once). The view `effective_reviews` (`security_invoker`) lists the
+  answers that still stand; every figure the app shows is computed from it.
 - **History starts at the migration.** Notion never recorded individual
   reviews, so none are invented for the imported words.
+
+### `study_sessions`
+
+`id` (chosen by the browser when a queue is loaded), `user_id`, `mode`,
+`started_at`, `ended_at`. Created by `record_review` with the first answer of
+a sitting. Composite foreign keys tie a log row's session to the same owner.
 
 ### `user_settings`
 
 `user_id` (primary key), `time_zone` (IANA name, decides which day is
-"today"), `preferences` (`jsonb`, unused so far), timestamps.
+"today"), `preferences` (`jsonb`, unused so far), timestamps. From version 3:
+`fsrs_request_retention` (0.700–0.970, default 0.900), the share of reviews
+FSRS aims to have remembered. It affects only the FSRS calculation.
 
 Display preferences (table or list view, sort order, reduced motion) are not
 stored here. They stay in the browser.
 
 ## Row Level Security
 
-RLS is enabled on all four tables. Every policy is the same test:
+RLS is enabled on every table. Every policy is the same test:
 `user_id = auth.uid()`, for the `authenticated` role only.
 
 | Table | SELECT | INSERT | UPDATE | DELETE |
@@ -100,6 +139,7 @@ RLS is enabled on all four tables. Every policy is the same test:
 | `vocabulary` | own | own | own | — |
 | `card_states` | own | own | own | — |
 | `review_logs` | own | own | — | — |
+| `study_sessions` | own | own | own | — |
 | `user_settings` | own | own | own | — |
 
 - **Signed-out visitors (`anon`) have no privileges on anything.**
@@ -123,11 +163,20 @@ empty `search_path`, executable by `authenticated` only.
 | --- | --- |
 | `create_vocabulary(...)` | Creates the word and its state in one transaction. A repeated `request_id`, or a repeated `external_source` + `external_id`, returns the existing word instead of creating another. |
 | `update_vocabulary(id, patch)` | Applies an edit to the word and/or its schedule completely or not at all. Only named fields are accepted. |
-| `apply_review(...)` | Saves one answer: updates the state **only if it still equals the state the answer was computed from**, and appends the history row, in one transaction. Returns `applied`, `already_applied` (same `request_id` seen before), `conflict` (state changed meanwhile) or `not_found`. |
+| `apply_review(...)` | Saves one answer: updates the state **only if it still equals the state the answer was computed from**, and appends the history row, in one transaction. Returns `applied`, `already_applied` (same `request_id` seen before), `conflict` (state changed meanwhile) or `not_found`. Used while the database is at version 1. |
+| `record_review(event)` | (Version 2.) The same guarantees as `apply_review`, taking one JSON document so later versions can add fields. Also creates the sitting's `study_sessions` row and, from version 3, stores the FSRS state with the mastery state in one statement. Adds the outcome `undone` for a request whose answer has since been taken back. |
+| `undo_review(review_request_id, request_id)` | (Version 2.) Takes back one answer: allowed only if it is the latest standing review of that word **and** the word's state still equals what that answer left. Restores mastery, review date and (version 3) the FSRS state from the values recorded before the answer, and appends the `undo` row, in one transaction. Returns `undone`, `already_undone`, `not_latest`, `conflict` or `not_found`. Repeating the same request changes nothing. |
+| `session_summary(session_id)` | (Version 2.) Counts for one sitting: reviewed, remembered, not remembered, first-time and repeat words, time, undone. |
+| `review_daily_stats(from, to)` | (Version 4.) One row per day and study mode from the answers that still stand: reviews, remembered, repeat reviews, time. |
+| `card_review_stats(since)` | (Version 4.) Per word: reviews, failures, recent reviews and failures, days failed on, last reviewed, last failed, last answer. |
 
 The new mastery and review date are computed by the API server with the same
-rules engine (`shared/review-logic.ts`) and passed to `apply_review`
-as absolute values. The browser never supplies them.
+rules engine (`shared/review-logic.ts`) and passed to the function as absolute
+values. The browser never supplies them. The same holds for the FSRS state:
+the server computes it ([`shared/scheduler/fsrs.ts`](../shared/scheduler/fsrs.ts),
+the only file that uses the `ts-fsrs` library) and the database only stores
+it. If that calculation ever fails, the answer is still saved by the mastery
+rules and the failure is logged; a review is never lost to it.
 
 ## Review behaviour
 
@@ -186,6 +235,10 @@ accepted. It cannot affect any other account.
 | Schema, privileges, policies, functions | `tests/database/schema.test.ts` | Real PostgreSQL (PGlite) with the migration applied |
 | HTTP API in Supabase mode, two accounts, two devices | `tests/server/supabase-api.test.ts` | Same, through the real services |
 | Import and reconciliation | `tests/server/backup-import.test.ts` | Same; also the real export when present locally |
+| Undo, sessions, a database one version behind | `tests/server/undo-api.test.ts` | Same |
+| FSRS alongside: stored atomically, restored by undo, never deciding what is due | `tests/server/fsrs-shadow.test.ts`, `tests/shared/fsrs.test.ts` | Same; unit |
+| Review activity and weak words, per account | `tests/server/analytics-api.test.ts`, `tests/shared/analytics.test.ts`, `tests/shared/weak-words.test.ts` | Same; unit |
+| No privileged key in browser code or server settings | `tests/frontend-secrets.test.ts` | The source files |
 | Token and configuration handling | `tests/server/supabase-accounts.test.ts` | Unit |
 | Sign-in flows, account switching | `tests/client/accounts.test.tsx` | In-memory sign-in service |
 | Live project: isolation, idempotent saves, append-only history | `npm run supabase:verify` | **Your Supabase project** |

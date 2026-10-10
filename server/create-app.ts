@@ -4,8 +4,10 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { ZodType } from 'zod';
 import {
   createEntryRequestSchema,
+  normalizeId,
   pageIdSchema,
   reviewActionRequestSchema,
+  reviewUndoRequestSchema,
   updateEntryRequestSchema,
   updateSettingsRequestSchema,
   type AccountSettings,
@@ -13,6 +15,7 @@ import {
   type AppConfigResponse,
 } from '../shared/api.js';
 import { bearerToken, type AccountGateway, type AccountSession } from './accounts.js';
+import type { AnalyticsService } from './analytics-service.js';
 import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
 import type { ReviewService } from './review-service.js';
@@ -27,12 +30,15 @@ export interface AppDependencies {
   vocabulary?: VocabularyService | null;
   /** Present when the app has accounts: every request then gets services of its own. */
   accounts?: AccountGateway | null;
+  /** Review activity and weak words; `null` under the same conditions as `service`. */
+  analytics?: AnalyticsService | null;
 }
 
 /** What the current request may use. With accounts, all of it belongs to one signed-in user. */
 interface Scope {
   review: ReviewService | null;
   vocabulary: VocabularyService | null;
+  analytics: AnalyticsService | null;
   session: AccountSession | null;
 }
 
@@ -80,7 +86,13 @@ async function parseBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
   return parsed.data;
 }
 
-export function createApp({ config, service, vocabulary = null, accounts = null }: AppDependencies): Hono<AppEnv> {
+export function createApp({
+  config,
+  service,
+  vocabulary = null,
+  accounts = null,
+  analytics = null,
+}: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
   const usesAccounts = config.mode === 'supabase';
@@ -180,29 +192,66 @@ export function createApp({ config, service, vocabulary = null, accounts = null 
       if (token === null) throw new HttpError(401, 'unauthorized', 'Sign in to continue.');
       const session = await accounts.open(token, { timeZone: c.req.header('x-time-zone')?.trim() || null });
       if (session === null) throw new HttpError(401, 'unauthorized', 'Your session has expired. Sign in again.');
-      c.set('scope', { review: session.review, vocabulary: session.vocabulary, session });
+      c.set('scope', { review: session.review, vocabulary: session.vocabulary, analytics: session.analytics, session });
       return next();
     }
-    c.set('scope', { review: service, vocabulary, session: null });
+    c.set('scope', { review: service, vocabulary, analytics, session: null });
     await next();
   });
 
-  app.get('/api/review-queue', async (c) => c.json(await requireService(c).getQueue()));
+  const requireAnalytics = (c: Context<AppEnv>): AnalyticsService => {
+    const scoped = c.get('scope').analytics;
+    if (scoped === null) throw notConfigured();
+    return scoped;
+  };
+
+  app.get('/api/review-queue', async (c) => {
+    const focus = c.req.query('focus');
+    if (focus === undefined) return c.json(await requireService(c).getQueue());
+    if (focus !== 'weak') throw new HttpError(400, 'invalid_request', 'Unknown focus. The only one is "weak".');
+    // Weakest first, and only those already due: a focused review never reviews a word early.
+    const { words } = await requireAnalytics(c).weakWords();
+    return c.json(await requireService(c).getQueue({ kind: 'weak', ids: words.map((word) => word.id) }));
+  });
+
+  // Review activity and weak words, from saved answers. Reads only.
+  app.get('/api/analytics', async (c) => c.json(await requireAnalytics(c).reviewAnalytics()));
+  app.get('/api/weak-words', async (c) => c.json(await requireAnalytics(c).weakWords()));
 
   app.post('/api/review-action', async (c) => {
     const request = await parseBody(c, reviewActionRequestSchema);
     return c.json(await requireService(c).submitAction(request));
   });
 
+  app.post('/api/review-undo', async (c) => {
+    const request = await parseBody(c, reviewUndoRequestSchema);
+    return c.json(await requireService(c).undo(request));
+  });
+
+  app.get('/api/sessions/:id/summary', async (c) => {
+    const parsed = pageIdSchema.safeParse(c.req.param('id'));
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', 'That is not a valid session id.');
+    return c.json(await requireService(c).sessionSummary(normalizeId(parsed.data)));
+  });
+
+  // The two schedules side by side. Reads only; never changes a due date.
+  app.get('/api/scheduler', async (c) => c.json(await requireService(c).schedulerReport()));
+
   // ---- Account settings ----
 
   const settingsOf = (c: Context<AppEnv>): AccountSettings => {
     const { session } = c.get('scope');
     if (session !== null) {
-      return { timeZone: session.timeZone, timeZoneEditable: true, email: session.account.email };
+      return {
+        timeZone: session.timeZone,
+        timeZoneEditable: true,
+        email: session.account.email,
+        database: session.database,
+        fsrsRetention: session.fsrsRetention,
+      };
     }
     if (config.timeZone === null) throw notConfigured();
-    return { timeZone: config.timeZone, timeZoneEditable: false, email: null };
+    return { timeZone: config.timeZone, timeZoneEditable: false, email: null, database: null, fsrsRetention: null };
   };
 
   app.get('/api/settings', (c) => c.json(settingsOf(c)));
@@ -210,11 +259,16 @@ export function createApp({ config, service, vocabulary = null, accounts = null 
   app.put('/api/settings', async (c) => {
     const { session } = c.get('scope');
     if (session === null) {
-      throw new HttpError(409, 'not_editable', 'The sample data uses the time zone of the computer it runs on.');
+      throw new HttpError(409, 'not_editable', 'The sample data has no account to keep settings in.');
     }
-    const { timeZone } = await parseBody(c, updateSettingsRequestSchema);
-    const saved = await session.saveTimeZone(timeZone);
-    const body: AccountSettings = { timeZone: saved, timeZoneEditable: true, email: session.account.email };
+    const { timeZone, fsrsRetention } = await parseBody(c, updateSettingsRequestSchema);
+    const body: AccountSettings = {
+      timeZone: timeZone === undefined ? session.timeZone : await session.saveTimeZone(timeZone),
+      timeZoneEditable: true,
+      email: session.account.email,
+      database: session.database,
+      fsrsRetention: fsrsRetention === undefined ? session.fsrsRetention : await session.saveFsrsRetention(fsrsRetention),
+    };
     return c.json(body);
   });
 

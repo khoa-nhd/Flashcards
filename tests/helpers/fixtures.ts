@@ -1,10 +1,12 @@
 import type { QueueResponse, ReviewCard } from '../../shared/api.js';
 import type { ReviewState } from '../../shared/review-logic.js';
+import type { CardHistory } from '../../shared/weak-words.js';
 import type { CardFieldConfig, VocabularyRecord } from '../../shared/vocabulary.js';
 import type {
   ReviewWrite,
   ReviewWriteResult,
   SetupReport,
+  UndoResult,
   VocabularyRepository,
 } from '../../server/vocabulary-repository.js';
 
@@ -52,6 +54,9 @@ export function queueResponse(cards: ReviewCard[], overrides: Partial<QueueRespo
     timeZone: TIME_ZONE,
     mode: 'mock',
     writesEnabled: true,
+    // Off unless a test asks: most tests are about the review itself.
+    capabilities: { sessions: false, undo: false, fsrs: false, analytics: false },
+    focus: null,
     skipped: [],
     vocabulary: 'in_progress',
     ...overrides,
@@ -88,6 +93,7 @@ export const TEST_FIELDS: CardFieldConfig[] = [
  */
 export class FakeRepository implements VocabularyRepository {
   readonly mode = 'mock' as const;
+  readonly capabilities = { sessions: false, undo: false, fsrs: false, analytics: false };
   readonly updates: Array<{ pageId: string; changes: Partial<ReviewState> }> = [];
   setup: SetupReport = { readIssues: [], writeIssues: [], warnings: [] };
   /** Lets a test corrupt what the "database" reports back after a write. */
@@ -141,6 +147,26 @@ export class FakeRepository implements VocabularyRepository {
 
   async findReview(): Promise<ReviewState | null> {
     return null;
+  }
+
+  async undoReview(): Promise<UndoResult> {
+    return { outcome: 'unsupported' };
+  }
+
+  async sessionSummary(): Promise<null> {
+    return null;
+  }
+
+  async listSchedules() {
+    return [];
+  }
+
+  async reviewDailyStats() {
+    return [];
+  }
+
+  async cardReviewStats() {
+    return new Map<string, CardHistory>();
   }
 
   /** Simulates a change made somewhere else, such as on another device. */

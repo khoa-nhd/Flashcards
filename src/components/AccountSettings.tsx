@@ -238,3 +238,43 @@ export function TrashSection() {
     </section>
   );
 }
+
+/**
+ * Whether the database has every update this version of the app can use. When
+ * it is behind, the app still works; the newer features stay off until the
+ * owner runs the next SQL file.
+ */
+export function DatabaseStatus() {
+  const { api } = useApp();
+  const [database, setDatabase] = useState<AccountSettings['database']>(null);
+
+  useEffect(() => {
+    let current = true;
+    api
+      .fetchSettings()
+      .then((loaded) => current && setDatabase(loaded.database))
+      // Not knowing is not worth an error on this page; the row simply stays out.
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [api]);
+
+  if (database === null) return null;
+  const behind = database.version < database.latest;
+  return (
+    <>
+      <dt className="text-muted">Database</dt>
+      <dd className="m-0">
+        {behind ? (
+          <span className="text-warn-ink">
+            Needs an update (version {database.version} of {database.latest}). Some newer features are switched off
+            until the newer SQL files in <code>supabase/migrations</code> have been run in Supabase, oldest first.
+          </span>
+        ) : (
+          `Up to date (version ${database.version})`
+        )}
+      </dd>
+    </>
+  );
+}

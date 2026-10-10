@@ -50,6 +50,18 @@ export const skippedRecordSchema = z.object({
   reason: z.string(),
 });
 
+/** What the store behind the app can do. Features appear only where they are supported. */
+export const capabilitiesSchema = z.object({
+  /** Answers are grouped into sessions, and a session can be summarised from what was saved. */
+  sessions: z.boolean(),
+  /** A saved answer can be taken back. */
+  undo: z.boolean(),
+  /** FSRS is calculated beside the schedule in use, for comparison. */
+  fsrs: z.boolean().default(false),
+  /** Saved reviews can be summarised: activity, accuracy, and how each word has gone. */
+  analytics: z.boolean().default(false),
+});
+
 export const queueResponseSchema = z.object({
   cards: z.array(reviewCardSchema),
   today: isoDateSchema,
@@ -57,6 +69,9 @@ export const queueResponseSchema = z.object({
   mode: dataModeSchema,
   /** False while the app is a read-only preview: grading saves nothing. */
   writesEnabled: z.boolean(),
+  capabilities: capabilitiesSchema.default({ sessions: false, undo: false, fsrs: false, analytics: false }),
+  /** Set when the queue was narrowed on request: `weak` holds only due words that need attention, weakest first. */
+  focus: z.enum(['weak']).nullable().default(null),
   /** Records the source returned that could not be used, so nothing vanishes silently. */
   skipped: z.array(skippedRecordSchema),
   /**
@@ -83,12 +98,151 @@ export const reviewActionRequestSchema = z.strictObject({
   requestId: z.uuid().optional(),
   /** How long the card was on screen before it was answered. */
   durationMs: z.number().int().min(0).max(86_400_000).optional(),
+  /** The sitting this answer belongs to. Chosen by the browser when a review session starts. */
+  sessionId: z.uuid().optional(),
 });
 
 export const reviewActionResponseSchema = z.object({
   outcome: z.enum(['applied', 'already_applied', 'dry_run']),
   /** The record's confirmed state. For `dry_run`, what would have been written (if known). */
   state: reviewStateSchema.nullable(),
+});
+
+/** Takes back one saved answer, named by the request id it was sent with. */
+export const reviewUndoRequestSchema = z.strictObject({
+  reviewRequestId: z.uuid(),
+  /** Identifies this undo, so repeating the request undoes nothing twice. */
+  requestId: z.uuid(),
+});
+
+export const reviewUndoResponseSchema = z.object({
+  outcome: z.enum(['undone', 'already_undone']),
+  pageId: z.string(),
+  /** The state the word is back in. */
+  state: reviewStateSchema,
+});
+
+/** What one review session actually saved. Undone and unsaved answers are not in it. */
+export const sessionSummarySchema = z.object({
+  sessionId: z.string(),
+  reviewed: z.number().int(),
+  remembered: z.number().int(),
+  notRemembered: z.number().int(),
+  /** Remembered ÷ reviewed, from 0 to 1; `null` when nothing was reviewed. */
+  accuracy: z.number().nullable(),
+  /** Answers that were the first recorded review of their word. */
+  firstTime: z.number().int(),
+  seenBefore: z.number().int(),
+  undone: z.number().int(),
+  /** Time on the cards that reported one, and how many did. */
+  durationMs: z.number().int(),
+  timedReviews: z.number().int(),
+});
+
+// ---- Scheduling ----
+
+/**
+ * The two schedules side by side. `active` is the one that decides what is
+ * due; FSRS is only ever calculated beside it here, for comparison.
+ */
+export const schedulerReportSchema = z.object({
+  active: z.literal('mastery_v1'),
+  today: isoDateSchema,
+  timeZone: z.string(),
+  fsrs: z.object({
+    /** False where the store cannot hold FSRS state yet. */
+    available: z.boolean(),
+    /** The library and algorithm version, as the library reports itself. */
+    engine: z.string(),
+    /** The share of reviews FSRS aims to have remembered, from 0 to 1. */
+    requestRetention: z.number(),
+    /** How the two answers are rated for FSRS. */
+    ratings: z.object({ remember: z.string(), notRemember: z.string() }),
+  }),
+  totalCards: z.number().int(),
+  /** Words that have an FSRS state. A word gets one at its first review after FSRS started being calculated. */
+  comparable: z.number().int(),
+  cards: z.array(
+    z.object({
+      id: z.string(),
+      word: z.string(),
+      mastery: z.number(),
+      legacyDue: isoDateSchema.nullable(),
+      fsrsDue: isoDateSchema,
+      fsrsIntervalDays: z.number().int(),
+      differenceDays: z.number().int().nullable(),
+    }),
+  ),
+  workload: z.array(z.object({ date: isoDateSchema, legacy: z.number().int(), fsrs: z.number().int() })),
+});
+
+// ---- Analytics ----
+
+const periodStatsSchema = z.object({
+  from: isoDateSchema,
+  to: isoDateSchema,
+  reviews: z.number().int(),
+  remembered: z.number().int(),
+  notRemembered: z.number().int(),
+  /** Remembered ÷ all answers in the period; `null` on too few answers to say. */
+  accuracy: z.number().nullable(),
+  repeatReviews: z.number().int(),
+  /** Remembered ÷ answers, for words reviewed before; `null` on too few. Observed, not predicted. */
+  retention: z.number().nullable(),
+  durationMs: z.number(),
+  timedReviews: z.number().int(),
+  averageMs: z.number().nullable(),
+  activeDays: z.number().int(),
+});
+
+/** Review activity from saved answers. Undone answers are not counted anywhere in it. */
+export const analyticsResponseSchema = z.object({
+  /** False where the store keeps no review history to summarise. */
+  available: z.boolean(),
+  today: isoDateSchema,
+  timeZone: z.string(),
+  /** Below this many answers no percentage is given. */
+  minSample: z.number().int(),
+  periods: z.object({ today: periodStatsSchema, week: periodStatsSchema, month: periodStatsSchema }),
+  streak: z.object({ current: z.number().int(), longest: z.number().int() }),
+  byMode: z.array(
+    z.object({ mode: z.string(), reviews: z.number().int(), remembered: z.number().int(), accuracy: z.number().nullable() }),
+  ),
+  days: z.array(
+    z.object({
+      date: isoDateSchema,
+      reviews: z.number().int(),
+      remembered: z.number().int(),
+      notRemembered: z.number().int(),
+      durationMs: z.number(),
+    }),
+  ),
+  firstReviewOn: isoDateSchema.nullable(),
+  windowDays: z.number().int(),
+});
+
+export const weakWordSchema = z.object({
+  id: z.string(),
+  word: z.string(),
+  mastery: z.number().nullable(),
+  score: z.number(),
+  severity: z.enum(['high', 'medium', 'low']),
+  /** Heaviest first; the first is the main reason. */
+  reasons: z.array(z.object({ code: z.string(), points: z.number(), detail: z.string() })).min(1),
+  recent: z.object({ reviews: z.number().int(), remembered: z.number().int() }).nullable(),
+  action: z.string(),
+  /** Whether the word is in the review queue right now. */
+  reviewable: z.boolean(),
+});
+
+export const weakWordsResponseSchema = z.object({
+  /** False where no review history is kept; words are then judged on overdue time and missing content only. */
+  historyAvailable: z.boolean(),
+  today: isoDateSchema,
+  /** How many days "recent" looks back. */
+  windowDays: z.number().int(),
+  total: z.number().int(),
+  words: z.array(weakWordSchema),
 });
 
 // ---- Vocabulary bank ----
@@ -219,9 +373,21 @@ export const accountSettingsSchema = z.object({
   timeZoneEditable: z.boolean(),
   /** The signed-in account, where the app uses accounts. */
   email: z.string().nullable(),
+  /**
+   * How far the database's own schema is from what this version of the app can
+   * use. Behind means some features stay off until the next migration is run.
+   */
+  database: z.object({ version: z.number().int(), latest: z.number().int() }).nullable().default(null),
+  /** The retention FSRS aims for, from 0 to 1; `null` where it cannot be stored. */
+  fsrsRetention: z.number().nullable().default(null),
 });
 
-export const updateSettingsRequestSchema = z.strictObject({ timeZone: timeZoneSchema });
+export const updateSettingsRequestSchema = z
+  .strictObject({
+    timeZone: timeZoneSchema.optional(),
+    fsrsRetention: z.number().min(0.7).max(0.97).optional(),
+  })
+  .refine((value) => value.timeZone !== undefined || value.fsrsRetention !== undefined, 'Nothing to change');
 
 export const apiErrorSchema = z.object({
   error: z.object({
@@ -240,6 +406,14 @@ export type QueueResponse = z.infer<typeof queueResponseSchema>;
 export type VocabularyStatus = QueueResponse['vocabulary'];
 export type ReviewActionRequest = z.infer<typeof reviewActionRequestSchema>;
 export type ReviewActionResponse = z.infer<typeof reviewActionResponseSchema>;
+export type Capabilities = z.infer<typeof capabilitiesSchema>;
+export type ReviewUndoRequest = z.infer<typeof reviewUndoRequestSchema>;
+export type ReviewUndoResponse = z.infer<typeof reviewUndoResponseSchema>;
+export type SessionSummary = z.infer<typeof sessionSummarySchema>;
+export type SchedulerReport = z.infer<typeof schedulerReportSchema>;
+export type AnalyticsResponse = z.infer<typeof analyticsResponseSchema>;
+export type WeakWordsResponse = z.infer<typeof weakWordsResponseSchema>;
+export type WeakWordView = z.infer<typeof weakWordSchema>;
 export type ApiErrorBody = z.infer<typeof apiErrorSchema>;
 export type VocabularyEntry = z.infer<typeof vocabularyEntrySchema>;
 export type VocabularyListResponse = z.infer<typeof vocabularyListResponseSchema>;

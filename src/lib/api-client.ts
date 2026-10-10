@@ -1,22 +1,33 @@
 import type { ZodType } from 'zod';
 import {
   accountSettingsSchema,
+  analyticsResponseSchema,
   apiErrorSchema,
   appConfigResponseSchema,
   entryResponseSchema,
   queueResponseSchema,
   reviewActionResponseSchema,
+  reviewUndoResponseSchema,
+  schedulerReportSchema,
+  sessionSummarySchema,
   trashResponseSchema,
   vocabularyListResponseSchema,
+  weakWordsResponseSchema,
   type AccountSettings,
+  type AnalyticsResponse,
   type AppConfigResponse,
   type CreateEntryInput,
   type QueueResponse,
   type ReviewActionRequest,
   type ReviewActionResponse,
+  type ReviewUndoRequest,
+  type ReviewUndoResponse,
+  type SchedulerReport,
+  type SessionSummary,
   type UpdateEntryInput,
   type VocabularyEntry,
   type VocabularyListResponse,
+  type WeakWordsResponse,
 } from '../../shared/api.js';
 import { TIMEOUTS } from '../config.js';
 
@@ -35,8 +46,13 @@ export class ApiError extends Error {
 }
 
 export interface ReviewApi {
-  fetchQueue(): Promise<QueueResponse>;
+  /** The due cards. With a focus, only the due cards that match it. */
+  fetchQueue(options?: { focus?: 'weak' | null }): Promise<QueueResponse>;
   submitAction(request: ReviewActionRequest): Promise<ReviewActionResponse>;
+  /** Takes back one saved answer. */
+  undoAction(request: ReviewUndoRequest): Promise<ReviewUndoResponse>;
+  /** What a session saved, as the server has it. */
+  fetchSessionSummary(sessionId: string): Promise<SessionSummary>;
 }
 
 export interface VocabularyApi {
@@ -53,10 +69,19 @@ export interface VocabularyApi {
 
 export interface AccountApi {
   fetchSettings(): Promise<AccountSettings>;
-  saveSettings(input: { timeZone: string }): Promise<AccountSettings>;
+  saveSettings(input: { timeZone?: string; fsrsRetention?: number }): Promise<AccountSettings>;
+  /** The schedule in force beside FSRS, which is only calculated for comparison. */
+  fetchScheduler(): Promise<SchedulerReport>;
 }
 
-export type AppApi = ReviewApi & VocabularyApi & AccountApi;
+export interface AnalyticsApi {
+  /** Review activity from saved answers. */
+  fetchAnalytics(): Promise<AnalyticsResponse>;
+  /** Words that need attention, weakest first, each with its reasons. */
+  fetchWeakWords(): Promise<WeakWordsResponse>;
+}
+
+export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi;
 
 /** How requests prove who is asking, where the app has accounts. */
 export interface ApiAuth {
@@ -176,8 +201,8 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
     );
 
   return {
-    fetchQueue: () =>
-      call('/api/review-queue', queueResponseSchema, {
+    fetchQueue: (options) =>
+      call(options?.focus == null ? '/api/review-queue' : '/api/review-queue?focus=' + options.focus, queueResponseSchema, {
         method: 'GET',
         timeoutMs: TIMEOUTS.queueMs,
         timeoutMessage: 'Loading the review queue took too long.',
@@ -191,6 +216,22 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         // The answer may have landed. Retrying is safe: the server checks before writing again.
         timeoutMessage:
           'No confirmation arrived in time, so this answer may or may not be saved. Retry checks first and never applies it twice.',
+      }),
+
+    undoAction: (body) =>
+      call('/api/review-undo', reviewUndoResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        // Pressing Undo again repeats the same request, which the server applies at most once.
+        timeoutMessage: 'No confirmation arrived in time, so the answer may or may not have been undone. Try Undo again.',
+      }),
+
+    fetchSessionSummary: (sessionId) =>
+      call(`/api/sessions/${sessionId}/summary`, sessionSummarySchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.quickMs,
+        timeoutMessage: 'Loading the session summary took too long.',
       }),
 
     fetchVocabulary: () =>
@@ -228,6 +269,27 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         method: 'GET',
         timeoutMs: TIMEOUTS.quickMs,
         timeoutMessage: 'Loading your settings took too long.',
+      }),
+
+    fetchAnalytics: () =>
+      call('/api/analytics', analyticsResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your review activity took too long.',
+      }),
+
+    fetchWeakWords: () =>
+      call('/api/weak-words', weakWordsResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your weak words took too long.',
+      }),
+
+    fetchScheduler: () =>
+      call('/api/scheduler', schedulerReportSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading the schedule comparison took too long.',
       }),
 
     saveSettings: (body) =>

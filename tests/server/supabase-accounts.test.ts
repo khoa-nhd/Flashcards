@@ -112,6 +112,8 @@ describe('toDatabaseError', () => {
 function zoneDatabase(stored: string | null) {
   const state = { zone: stored };
   const database = {
+    schemaVersion: vi.fn(async () => 3),
+    getSettings: vi.fn(async () => (state.zone === null ? null : { timeZone: state.zone, fsrsRetention: 0.9 })),
     getTimeZone: vi.fn(async () => state.zone),
     ensureTimeZone: vi.fn(async (zone: string) => (state.zone ??= zone)),
     saveTimeZone: vi.fn(async (zone: string) => (state.zone = zone)),

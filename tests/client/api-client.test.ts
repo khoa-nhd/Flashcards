@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApiError, createAppApi, fetchAppConfig, type ApiAuth } from '../../src/lib/api-client.js';
-import { vocabularyList } from '../helpers/fake-api.js';
+import { analyticsResponse, vocabularyList, weakWord, weakWordsResponse } from '../helpers/fake-api.js';
+import { queueResponse } from '../helpers/fixtures.js';
 
 type Reply = { status: number; body: unknown };
 
@@ -128,7 +129,7 @@ describe('with accounts', () => {
   });
 
   it('reads and saves account settings, and lists the trash', async () => {
-    const settings = { timeZone: 'UTC', timeZoneEditable: true, email: 'me@example.test' };
+    const settings = { timeZone: 'UTC', timeZoneEditable: true, email: 'me@example.test', database: { version: 3, latest: 3 }, fsrsRetention: 0.9 };
     const calls = stubFetch(ok(settings), ok({ ...settings, timeZone: 'Asia/Tokyo' }), ok({ entries: [] }));
     const api = createAppApi(signedIn(['a.b.c', 'a.b.c', 'a.b.c']));
 
@@ -137,6 +138,30 @@ describe('with accounts', () => {
     await expect(api.fetchTrash()).resolves.toEqual([]);
     expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual(['GET /api/settings', 'PUT /api/settings', 'GET /api/trash']);
     expect(calls[1]?.body).toEqual({ timeZone: 'Asia/Tokyo' });
+  });
+});
+
+describe('review activity and weak words', () => {
+  it('asks for the whole queue at its plain address and for the weakest words with a focus', async () => {
+    const calls = stubFetch(ok(queueResponse([])), ok(queueResponse([], { focus: 'weak' })), ok(queueResponse([])));
+    const api = createAppApi();
+    await expect(api.fetchQueue()).resolves.toMatchObject({ focus: null });
+    await expect(api.fetchQueue({ focus: 'weak' })).resolves.toMatchObject({ focus: 'weak' });
+    await api.fetchQueue({ focus: null });
+    expect(calls.map((call) => call.url)).toEqual(['/api/review-queue', '/api/review-queue?focus=weak', '/api/review-queue']);
+  });
+
+  it('reads review activity and weak words, and only reads', async () => {
+    const calls = stubFetch(ok(analyticsResponse()), ok(weakWordsResponse({ words: [weakWord(1)] })));
+    const api = createAppApi();
+    await expect(api.fetchAnalytics()).resolves.toMatchObject({ available: true, minSample: 5 });
+    await expect(api.fetchWeakWords()).resolves.toMatchObject({ total: 1, words: [{ word: 'word-1' }] });
+    expect(calls.map((call) => `${call.method} ${call.url}`)).toEqual(['GET /api/analytics', 'GET /api/weak-words']);
+  });
+
+  it('refuses a reply that is not the agreed shape rather than showing made-up figures', async () => {
+    stubFetch(ok({ available: true }));
+    await expect(createAppApi().fetchAnalytics()).rejects.toBeInstanceOf(ApiError);
   });
 });
 

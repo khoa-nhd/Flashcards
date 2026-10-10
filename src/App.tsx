@@ -19,6 +19,7 @@ import { DashboardPage } from './pages/DashboardPage.js';
 import { InsightsPage } from './pages/InsightsPage.js';
 import { ReviewPage } from './pages/ReviewPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
+import { WeakWordsPage } from './pages/WeakWordsPage.js';
 
 const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   dashboard: { title: 'Dashboard', render: () => <DashboardPage /> },
@@ -26,6 +27,7 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   add: { title: 'Add vocabulary', render: () => <AddPage /> },
   bank: { title: 'Vocabulary bank', render: () => <BankPage /> },
   calendar: { title: 'Calendar', render: () => <CalendarPage /> },
+  weak: { title: 'Weak words', render: () => <WeakWordsPage /> },
   insights: { title: 'Insights', render: () => <InsightsPage /> },
   settings: { title: 'Settings', render: () => <SettingsPage /> },
 };

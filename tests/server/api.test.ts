@@ -221,6 +221,8 @@ describe('access', () => {
       timeZone: config.timeZone,
       timeZoneEditable: false,
       email: null,
+      database: null,
+      fsrsRetention: null,
     });
     const change = await app.request('/api/settings', { ...post({ timeZone: 'UTC' }), method: 'PUT' });
     expect(change.status).toBe(409);

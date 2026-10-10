@@ -1,3 +1,4 @@
+import type { AnalyticsService } from './analytics-service.js';
 import type { ReviewService } from './review-service.js';
 import type { VocabularyService } from './vocabulary-service.js';
 
@@ -11,8 +12,14 @@ export interface AccountSession {
   account: Account;
   /** The zone that decides this account's "today". */
   timeZone: string;
+  /** The database's schema version, and the newest one this server can use. */
+  database: { version: number; latest: number };
+  /** The retention FSRS aims for; `null` where the database cannot store it yet. */
+  fsrsRetention: number | null;
+  saveFsrsRetention(value: number): Promise<number>;
   review: ReviewService;
   vocabulary: VocabularyService;
+  analytics: AnalyticsService;
   saveTimeZone(timeZone: string): Promise<string>;
 }
 

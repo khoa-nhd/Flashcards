@@ -20,6 +20,7 @@ const PRIMARY: NavItem[] = [
 ];
 
 const SECONDARY: NavItem[] = [
+  { route: 'weak', label: 'Weak words', short: 'Weak', icon: 'weak' },
   { route: 'insights', label: 'Insights', short: 'Insights', icon: 'insights' },
   { route: 'settings', label: 'Settings', short: 'Settings', icon: 'settings' },
 ];

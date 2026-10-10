@@ -1,10 +1,13 @@
-import { normalizeId } from '../../shared/api.js';
+import { normalizeId, type SessionSummary } from '../../shared/api.js';
+import type { DailyStat } from '../../shared/analytics.js';
 import { addDays, type IsoDate } from '../../shared/dates.js';
-import type { ReviewState } from '../../shared/review-logic.js';
+import type { CardHistory } from '../../shared/weak-words.js';
+import type { ReviewAction, ReviewState } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
-import type { CardFieldConfig, VocabularyRecord } from '../../shared/vocabulary.js';
+import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
+import type { CardFieldConfig, StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
-import type { ReviewWrite, ReviewWriteResult, VocabularyRepository } from '../vocabulary-repository.js';
+import type { ReviewWrite, ReviewWriteResult, UndoResult, VocabularyRepository } from '../vocabulary-repository.js';
 
 export const mockCardFields: CardFieldConfig[] = [
   { key: 'partOfSpeech', label: 'Part of speech', side: 'front', visibility: 'always' },
@@ -56,11 +59,32 @@ interface StoredWord {
   trashed: boolean;
   createdTime: string;
   lastEditedTime: string;
+  /** Kept beside the mastery schedule, as in the real store; never decides what is due. */
+  fsrs?: StoredFsrs | null;
+}
+
+interface MockLog {
+  /** Position in the history; also what an undo points at. */
+  sequence: number;
+  wordId: string;
+  requestId: string;
+  kind: 'review' | 'undo';
+  undoes: number | null;
+  action: ReviewAction;
+  sessionId: string | null;
+  /** The reviewer's calendar day the answer was given on. */
+  reviewedOn: IsoDate;
+  before: ReviewState;
+  after: ReviewState;
+  durationMs: number | null;
+  /** Present when the answer was saved with an FSRS state: what to put back on Undo. */
+  fsrs: { before: StoredFsrs | null; after: StoredFsrs } | null;
 }
 
 /** In-memory sample vocabulary. Nothing here is ever stored anywhere. */
 export class MockVocabularyRepository implements VocabularyRepository, VocabularyCatalog {
   readonly mode = 'mock' as const;
+  readonly capabilities = { sessions: true, undo: true, fsrs: true, analytics: true };
   private readonly words = new Map<string, StoredWord>();
   private created = 0;
 
@@ -120,28 +144,203 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     return word && !word.trashed ? toRecord(word) : null;
   }
 
-  /** Answers already recorded, by request id, like the review history of a real store. */
-  private readonly reviews = new Map<string, ReviewState>();
+  /** The review history, kept the way the real store keeps it: appended to, never edited. */
+  private readonly logs: MockLog[] = [];
+
+  private stands(log: MockLog): boolean {
+    return log.kind === 'review' && !this.logs.some((other) => other.undoes === log.sequence);
+  }
+
+  private stateOf(word: StoredWord): ReviewState {
+    return { mastery: word.mastery, nextReview: word.reviewDate };
+  }
 
   async applyReview(write: ReviewWrite): Promise<ReviewWriteResult> {
-    const earlier = this.reviews.get(write.requestId);
-    if (earlier) return { outcome: 'already_applied', state: earlier };
+    const earlier = this.logs.find((log) => log.kind === 'review' && log.requestId === write.requestId);
+    if (earlier) {
+      if (this.stands(earlier)) return { outcome: 'already_applied', state: earlier.after };
+      const moved = this.words.get(earlier.wordId);
+      return { outcome: 'undone', state: moved ? this.stateOf(moved) : earlier.before };
+    }
 
     const word = this.words.get(normalizeId(write.id));
     if (!word || word.trashed) return { outcome: 'not_found' };
-    const current = { mastery: word.mastery, nextReview: word.reviewDate };
+    const current = this.stateOf(word);
     if (current.mastery !== write.expected.mastery || current.nextReview !== write.expected.nextReview) {
       return { outcome: 'conflict', state: current };
     }
     word.mastery = write.next.mastery;
     word.reviewDate = write.next.nextReview;
+    const fsrs = write.fsrs == null ? null : { before: write.fsrs.before, after: { state: write.fsrs.after, engine: write.fsrs.engine } };
+    if (fsrs !== null) word.fsrs = fsrs.after;
     this.touch(word);
-    this.reviews.set(write.requestId, write.next);
+    this.logs.push({
+      sequence: this.logs.length + 1,
+      wordId: word.id,
+      requestId: write.requestId,
+      kind: 'review',
+      undoes: null,
+      action: write.action,
+      sessionId: write.sessionId,
+      reviewedOn: write.reviewedOn,
+      before: current,
+      after: write.next,
+      durationMs: write.durationMs,
+      fsrs,
+    });
     return { outcome: 'applied', state: write.next };
   }
 
   async findReview(requestId: string) {
-    return this.reviews.get(requestId) ?? null;
+    return this.logs.find((log) => log.kind === 'review' && log.requestId === requestId)?.after ?? null;
+  }
+
+  async undoReview(input: { reviewRequestId: string; requestId: string }): Promise<UndoResult> {
+    const target = this.logs.find((log) => log.kind === 'review' && log.requestId === input.reviewRequestId);
+    if (!target) return { outcome: 'not_found' };
+
+    const undone = this.logs.find((log) => log.undoes === target.sequence);
+    if (undone) return { outcome: 'already_undone', id: target.wordId, state: undone.after };
+
+    const word = this.words.get(target.wordId);
+    const current = word ? this.stateOf(word) : null;
+    const newer = this.logs.some(
+      (log) => log.wordId === target.wordId && log.sequence > target.sequence && this.stands(log),
+    );
+    if (newer) return { outcome: 'not_latest', id: target.wordId, state: current };
+    if (!word || word.trashed || current?.mastery !== target.after.mastery || current.nextReview !== target.after.nextReview) {
+      return { outcome: 'conflict', id: target.wordId, state: current };
+    }
+
+    word.mastery = target.before.mastery;
+    word.reviewDate = target.before.nextReview;
+    if (target.fsrs !== null) word.fsrs = target.fsrs.before;
+    this.touch(word);
+    this.logs.push({
+      sequence: this.logs.length + 1,
+      wordId: word.id,
+      requestId: input.requestId,
+      kind: 'undo',
+      undoes: target.sequence,
+      action: target.action,
+      sessionId: target.sessionId,
+      reviewedOn: target.reviewedOn,
+      before: target.after,
+      after: target.before,
+      durationMs: null,
+      fsrs: null,
+    });
+    return { outcome: 'undone', id: word.id, state: target.before };
+  }
+
+  async reviewDailyStats(from: IsoDate, to: IsoDate): Promise<DailyStat[]> {
+    const byDay = new Map<IsoDate, DailyStat & { words: Set<string> }>();
+    for (const log of this.logs) {
+      if (!this.stands(log) || log.reviewedOn < from || log.reviewedOn > to) continue;
+      const day = byDay.get(log.reviewedOn) ?? {
+        day: log.reviewedOn,
+        mode: 'flashcard',
+        reviews: 0,
+        remembered: 0,
+        notRemembered: 0,
+        repeatReviews: 0,
+        repeatRemembered: 0,
+        durationMs: 0,
+        timedReviews: 0,
+        cards: 0,
+        words: new Set<string>(),
+      };
+      const remembered = log.action === 'remember';
+      const seenBefore = this.logs.some(
+        (other) => other.wordId === log.wordId && other.sequence < log.sequence && this.stands(other),
+      );
+      day.reviews += 1;
+      day.remembered += remembered ? 1 : 0;
+      day.notRemembered += remembered ? 0 : 1;
+      day.repeatReviews += seenBefore ? 1 : 0;
+      day.repeatRemembered += seenBefore && remembered ? 1 : 0;
+      day.durationMs += log.durationMs ?? 0;
+      day.timedReviews += log.durationMs === null ? 0 : 1;
+      day.words.add(log.wordId);
+      day.cards = day.words.size;
+      byDay.set(log.reviewedOn, day);
+    }
+    return [...byDay.values()]
+      .sort((a, b) => a.day.localeCompare(b.day))
+      .map(({ words: _words, ...stat }) => {
+        void _words;
+        return stat;
+      });
+  }
+
+  async cardReviewStats(since: IsoDate): Promise<Map<string, CardHistory>> {
+    const stats = new Map<string, CardHistory & { days: Set<IsoDate> }>();
+    for (const log of this.logs) {
+      if (!this.stands(log)) continue;
+      const entry = stats.get(log.wordId) ?? {
+        reviews: 0,
+        failures: 0,
+        recentReviews: 0,
+        recentFailures: 0,
+        failedDays: 0,
+        lastReviewedOn: null,
+        lastFailedOn: null,
+        lastAction: null,
+        days: new Set<IsoDate>(),
+      };
+      const failed = log.action === 'not_remember';
+      const recent = log.reviewedOn >= since;
+      entry.reviews += 1;
+      entry.failures += failed ? 1 : 0;
+      entry.recentReviews += recent ? 1 : 0;
+      entry.recentFailures += recent && failed ? 1 : 0;
+      if (failed) entry.days.add(log.reviewedOn);
+      entry.failedDays = entry.days.size;
+      // The history is in order, so the latest log seen is the latest answer.
+      entry.lastReviewedOn = log.reviewedOn;
+      if (failed) entry.lastFailedOn = log.reviewedOn;
+      entry.lastAction = log.action;
+      stats.set(log.wordId, entry);
+    }
+    return new Map(
+      [...stats].map(([id, { days: _days, ...history }]) => {
+        void _days;
+        return [id, history];
+      }),
+    );
+  }
+
+  async listSchedules(): Promise<ScheduleCard[]> {
+    return this.live().map((word) => ({
+      id: word.id,
+      word: word.word,
+      mastery: word.mastery,
+      reviewDate: word.reviewDate,
+      fsrs: word.fsrs?.state ?? null,
+    }));
+  }
+
+  async sessionSummary(sessionId: string): Promise<SessionSummary | null> {
+    const mine = this.logs.filter((log) => log.sessionId === sessionId);
+    if (mine.length === 0) return null;
+    const standing = mine.filter((log) => this.stands(log));
+    const remembered = standing.filter((log) => log.action === 'remember').length;
+    const firstTime = standing.filter(
+      (log) => !this.logs.some((other) => other.wordId === log.wordId && other.sequence < log.sequence && this.stands(other)),
+    ).length;
+    const timed = standing.filter((log) => log.durationMs !== null);
+    return {
+      sessionId,
+      reviewed: standing.length,
+      remembered,
+      notRemembered: standing.length - remembered,
+      accuracy: standing.length === 0 ? null : remembered / standing.length,
+      firstTime,
+      seenBefore: standing.length - firstTime,
+      undone: mine.filter((log) => log.kind === 'undo').length,
+      durationMs: timed.reduce((total, log) => total + (log.durationMs ?? 0), 0),
+      timedReviews: timed.length,
+    };
   }
 
   // ---- Whole records ----
@@ -224,6 +423,7 @@ function toRecord(word: StoredWord): VocabularyRecord {
       definition: word.definition,
       example: word.example,
     },
+    fsrs: word.fsrs ?? null,
   };
 }
 

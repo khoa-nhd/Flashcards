@@ -9,6 +9,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { isIsoDate, type IsoDate } from '../../shared/dates.js';
+import { fsrsStateSchema, type FsrsState } from '../../shared/scheduler/fsrs.js';
 import type { Database } from './database.types.js';
 
 const dateSchema = z.string().refine(isIsoDate).nullable();
@@ -26,12 +27,77 @@ export const cardRowSchema = z.object({
   deleted_at: z.string().nullable(),
   mastery: z.number().int(),
   review_date: dateSchema,
+  // From schema version 3. All empty for a card FSRS has not seen yet.
+  fsrs_due: z.string().nullable().optional(),
+  fsrs_stability: z.number().nullable().optional(),
+  fsrs_difficulty: z.number().nullable().optional(),
+  fsrs_last_review: z.string().nullable().optional(),
+  fsrs_reps: z.number().int().nullable().optional(),
+  fsrs_lapses: z.number().int().nullable().optional(),
+  fsrs_state: z.number().int().nullable().optional(),
+  fsrs_scheduled_days: z.number().int().nullable().optional(),
+  fsrs_learning_steps: z.number().int().nullable().optional(),
+  fsrs_version: z.string().nullable().optional(),
 });
 
 export type CardRow = z.infer<typeof cardRowSchema>;
 
 export const CARD_COLUMNS =
   'id, word, word_key, meaning, definition, example, date_added, created_at, updated_at, deleted_at, mastery, review_date';
+
+const FSRS_COLUMNS =
+  'fsrs_due, fsrs_stability, fsrs_difficulty, fsrs_last_review, fsrs_reps, fsrs_lapses, fsrs_state, fsrs_scheduled_days, fsrs_learning_steps, fsrs_version';
+
+/** The columns a card is read with, which depends on what the database has. */
+export const cardColumns = (schemaVersion: number): string =>
+  schemaVersion >= 3 ? `${CARD_COLUMNS}, ${FSRS_COLUMNS}` : CARD_COLUMNS;
+
+/** An FSRS state as the database stores it, with the engine that produced it. */
+export interface FsrsRow {
+  due: string;
+  stability: number;
+  difficulty: number;
+  last_review: string | null;
+  reps: number;
+  lapses: number;
+  state: number;
+  scheduled_days: number;
+  learning_steps: number;
+  version: string;
+}
+
+export function fsrsStateToRow(state: FsrsState, version: string): FsrsRow {
+  return {
+    due: state.due,
+    stability: state.stability,
+    difficulty: state.difficulty,
+    last_review: state.lastReview,
+    reps: state.reps,
+    lapses: state.lapses,
+    state: state.state,
+    scheduled_days: state.scheduledDays,
+    learning_steps: state.learningSteps,
+    version,
+  };
+}
+
+/** The FSRS state on a card row, or `null` when the card has none (or the database predates it). */
+export function fsrsOfCard(row: CardRow): { state: FsrsState; version: string } | null {
+  if (row.fsrs_due == null || row.fsrs_stability == null || row.fsrs_difficulty == null) return null;
+  const parsed = fsrsStateSchema.safeParse({
+    // The database prints timestamps its own way; the app always carries ISO strings.
+    due: new Date(row.fsrs_due).toISOString(),
+    stability: row.fsrs_stability,
+    difficulty: row.fsrs_difficulty,
+    scheduledDays: row.fsrs_scheduled_days ?? 0,
+    learningSteps: row.fsrs_learning_steps ?? 0,
+    reps: row.fsrs_reps ?? 0,
+    lapses: row.fsrs_lapses ?? 0,
+    state: row.fsrs_state ?? 2,
+    lastReview: row.fsrs_last_review == null ? null : new Date(row.fsrs_last_review).toISOString(),
+  });
+  return parsed.success ? { state: parsed.data, version: row.fsrs_version ?? '' } : null;
+}
 
 export interface NewCard {
   word: string;
@@ -56,15 +122,82 @@ export interface ReviewWriteArgs {
   newReviewDate: IsoDate | null;
   reviewedOn: IsoDate;
   durationMs: number | null;
+  /** What FSRS made of the answer, saved with it. Needs schema version 3. */
+  fsrs?: { rating: number; version: string; before: FsrsRow | null; after: FsrsRow } | null;
+}
+
+export interface StoredSettings {
+  timeZone: string;
+  /** `null` on a database that predates the setting. */
+  fsrsRetention: number | null;
 }
 
 export const reviewWriteResultSchema = z.object({
-  outcome: z.enum(['applied', 'already_applied', 'conflict', 'not_found']),
+  outcome: z.enum(['applied', 'already_applied', 'undone', 'conflict', 'not_found']),
   mastery: z.number().int().nullable(),
   review_date: dateSchema,
 });
 
 export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
+
+/**
+ * The newest migration this server knows how to use. A database that is
+ * behind still serves everything its own version supports.
+ */
+export const LATEST_SCHEMA_VERSION = 4;
+
+export const dailyStatRowSchema = z.object({
+  day: z.string().refine(isIsoDate),
+  review_mode: z.string(),
+  reviews: z.number().int(),
+  remembered: z.number().int(),
+  not_remembered: z.number().int(),
+  repeat_reviews: z.number().int(),
+  repeat_remembered: z.number().int(),
+  duration_ms: z.number().int(),
+  timed_reviews: z.number().int(),
+  cards: z.number().int(),
+});
+
+export type DailyStatRow = z.infer<typeof dailyStatRowSchema>;
+
+export const cardStatRowSchema = z.object({
+  vocabulary_id: z.string(),
+  reviews: z.number().int(),
+  failures: z.number().int(),
+  recent_reviews: z.number().int(),
+  recent_failures: z.number().int(),
+  failed_days: z.number().int(),
+  last_reviewed_on: dateSchema,
+  last_failed_on: dateSchema,
+  last_action: z.string().nullable(),
+});
+
+export type CardStatRow = z.infer<typeof cardStatRowSchema>;
+
+export const undoResultSchema = z.object({
+  outcome: z.enum(['undone', 'already_undone', 'not_latest', 'conflict', 'not_found']),
+  vocabulary_id: z.string().nullable(),
+  mastery: z.number().int().nullable(),
+  review_date: dateSchema,
+});
+
+export type UndoRow = z.infer<typeof undoResultSchema>;
+
+export const sessionSummaryRowSchema = z.object({
+  session_id: z.string(),
+  started_at: z.string(),
+  last_review_at: z.string().nullable(),
+  reviewed: z.number().int(),
+  remembered: z.number().int(),
+  not_remembered: z.number().int(),
+  first_time: z.number().int(),
+  undone: z.number().int(),
+  duration_ms: z.number().int(),
+  timed_reviews: z.number().int(),
+});
+
+export type SessionSummaryRow = z.infer<typeof sessionSummaryRowSchema>;
 
 /** Keys the edit function accepts. Anything else is refused by the database itself. */
 export type CardPatch = Partial<{
@@ -98,6 +231,22 @@ export interface VocabularyDatabase {
   setCardTrashed(id: string, trashed: boolean): Promise<boolean>;
   applyReview(args: ReviewWriteArgs): Promise<ReviewWriteRow>;
   findReviewByRequestId(requestId: string): Promise<{ mastery: number; reviewDate: IsoDate | null } | null>;
+  /** The newest migration applied to the database; 1 when only the first one is. */
+  schemaVersion(): Promise<number>;
+  /** Saves an answer as part of a session. Needs schema version 2. */
+  recordReview(args: ReviewWriteArgs & { sessionId: string | null }): Promise<ReviewWriteRow>;
+  /** Reverses one answer, named by the request id it was saved with. Needs schema version 2. */
+  undoReview(args: { reviewRequestId: string; requestId: string }): Promise<UndoRow>;
+  /** What a session saved, or `null` if the caller has no such session. Needs schema version 2. */
+  sessionSummary(sessionId: string): Promise<SessionSummaryRow | null>;
+  /** Saved reviews per day and study mode, undone ones excluded. Needs schema version 4. */
+  reviewDailyStats(from: IsoDate, to: IsoDate): Promise<DailyStatRow[]>;
+  /** How each reviewed word has gone, overall and since `since`. Needs schema version 4. */
+  cardReviewStats(since: IsoDate): Promise<CardStatRow[]>;
+  /** The account's settings in one read, or `null` if it has none yet. */
+  getSettings(): Promise<StoredSettings | null>;
+  /** Needs schema version 3. */
+  saveFsrsRetention(value: number): Promise<number>;
   getTimeZone(): Promise<string | null>;
   /** Stores the zone only if the user has none yet; returns the one in effect. */
   ensureTimeZone(timeZone: string): Promise<string>;
@@ -171,7 +320,12 @@ export function createUserClient(url: string, publicKey: string, accessToken: st
   });
 }
 
-export function createSupabaseDatabase(client: Client): VocabularyDatabase {
+export function createSupabaseDatabase(
+  client: Client,
+  /** What the database has. Decides which columns are asked for, so an older database is never asked for new ones. */
+  schemaVersion: number = LATEST_SCHEMA_VERSION,
+): VocabularyDatabase {
+  const columns = cardColumns(schemaVersion);
   /** Reads a filtered list to the end, one page at a time. */
   const readAll = async (
     page: (from: number, to: number) => PromiseLike<{ data: unknown; error: PostgrestFailure | null; status: number }>,
@@ -187,7 +341,7 @@ export function createSupabaseDatabase(client: Client): VocabularyDatabase {
     throw new DatabaseError('unavailable', `Stopped after ${MAX_PAGES} pages of results.`);
   };
 
-  const cards = () => client.from('vocabulary_cards').select(CARD_COLUMNS);
+  const cards = () => client.from('vocabulary_cards').select(columns);
 
   return {
     listCards: () =>
@@ -326,6 +480,95 @@ export function createSupabaseDatabase(client: Client): VocabularyDatabase {
         .maybeSingle();
       if (error) throw toDatabaseError(error, status);
       return data === null ? null : { mastery: data.mastery_after, reviewDate: data.review_date_after };
+    },
+
+    async schemaVersion() {
+      const { data, error, status } = await client.rpc('app_schema_version');
+      // The marker itself arrived with the second migration: no function means version 1.
+      if (error?.code === 'PGRST202' || error?.code === '42883') return 1;
+      if (error) throw toDatabaseError(error, status);
+      return typeof data === 'number' && Number.isInteger(data) && data >= 1 ? data : 1;
+    },
+
+    async recordReview(args) {
+      const { data, error, status } = await client.rpc('record_review', {
+        p_event: {
+          vocabulary_id: args.id,
+          request_id: args.requestId,
+          session_id: args.sessionId,
+          action: args.action,
+          expected_mastery: args.expectedMastery,
+          expected_review_date: args.expectedReviewDate,
+          new_mastery: args.newMastery,
+          new_review_date: args.newReviewDate,
+          reviewed_on: args.reviewedOn,
+          duration_ms: args.durationMs,
+          ...(args.fsrs == null ? {} : { fsrs: args.fsrs }),
+        },
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(reviewWriteResultSchema).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not confirm the review.');
+      }
+      return rows.data[0];
+    },
+
+    async reviewDailyStats(from, to) {
+      const { data, error, status } = await client.rpc('review_daily_stats', { p_from: from, p_to: to });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(dailyStatRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned statistics in an unexpected shape.');
+      return rows.data;
+    },
+
+    async cardReviewStats(since) {
+      const { data, error, status } = await client.rpc('card_review_stats', { p_since: since });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(cardStatRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned statistics in an unexpected shape.');
+      return rows.data;
+    },
+
+    async getSettings() {
+      const wanted = schemaVersion >= 3 ? 'time_zone, fsrs_request_retention' : 'time_zone';
+      const { data, error, status } = await client.from('user_settings').select(wanted).maybeSingle();
+      if (error) throw toDatabaseError(error, status);
+      if (data === null) return null;
+      const row = data as unknown as { time_zone: string; fsrs_request_retention?: number | string | null };
+      const retention = row.fsrs_request_retention == null ? null : Number(row.fsrs_request_retention);
+      return { timeZone: row.time_zone, fsrsRetention: retention !== null && Number.isFinite(retention) ? retention : null };
+    },
+
+    async saveFsrsRetention(value) {
+      const { data, error, status } = await client
+        .from('user_settings')
+        .upsert({ fsrs_request_retention: value }, { onConflict: 'user_id' })
+        .select('fsrs_request_retention')
+        .single();
+      if (error) throw toDatabaseError(error, status);
+      return Number(data.fsrs_request_retention);
+    },
+
+    async undoReview(args) {
+      const { data, error, status } = await client.rpc('undo_review', {
+        p_review_request_id: args.reviewRequestId,
+        p_request_id: args.requestId,
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(undoResultSchema).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not confirm the undo.');
+      }
+      return rows.data[0];
+    },
+
+    async sessionSummary(sessionId) {
+      const { data, error, status } = await client.rpc('session_summary', { p_session_id: sessionId });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(sessionSummaryRowSchema).safeParse(data);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned a summary in an unexpected shape.');
+      return rows.data[0] ?? null;
     },
 
     async getTimeZone() {

@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../server/bootstrap.js';
-import { DatabaseError } from '../../server/supabase/supabase-database.js';
+import { DatabaseError, LATEST_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
 import {
   accountSettingsSchema,
   apiErrorSchema,
@@ -152,6 +152,8 @@ describe('a new account', () => {
       timeZone: 'Asia/Ho_Chi_Minh',
       timeZoneEditable: true,
       email: alice.email,
+      database: { version: LATEST_SCHEMA_VERSION, latest: LATEST_SCHEMA_VERSION },
+      fsrsRetention: 0.9,
     });
   });
 
@@ -606,7 +608,7 @@ describe('when something is wrong', () => {
     const flaky = createSupabaseTestApp(db, [alice], {
       wrap: (database) => ({
         ...database,
-        applyReview: async () => {
+        recordReview: async () => {
           throw new DatabaseError('unavailable', 'The database is temporarily unavailable.');
         },
       }),

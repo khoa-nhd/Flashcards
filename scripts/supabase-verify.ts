@@ -16,11 +16,16 @@
  *   - account B cannot see or change anything of account A's;
  *   - a review is saved once, however often it is sent, and a second device's
  *     stale answer is refused;
- *   - history cannot be edited or deleted, and words cannot be removed outright.
+ *   - history cannot be edited or deleted, and words cannot be removed outright;
+ *   - where the database has the newer versions: Undo, sessions, the FSRS state
+ *     saved alongside, and review statistics, each closed to the other account.
+ *     Parts the database is not ready for are reported as SKIP, not as passing.
  */
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { LATEST_SCHEMA_VERSION, fsrsOfCard, fsrsStateToRow } from '../server/supabase/supabase-database.js';
 import { calendarDateInTimeZone } from '../shared/dates.js';
+import { FSRS_ENGINE, FSRS_RATINGS, fsrsReview } from '../shared/scheduler/fsrs.js';
 import { createAnonymousClient, readProjectConfig, signIn } from './lib/supabase-session.js';
 
 try {
@@ -199,6 +204,102 @@ async function main(): Promise<number> {
     const recorded = await a.database.findReviewByRequestId(requestId);
     check('the saved review can be looked up by its request id', recorded?.mastery === 4 && recorded.reviewDate === tomorrow);
     check('B cannot look up A’s review by its request id', (await b.database.findReviewByRequestId(requestId)) === null);
+
+    // ---- 4b. Sessions and Undo (from schema version 2) ----
+    const version = await a.database.schemaVersion();
+    console.log(`\nDatabase schema version ${version}; this app can use up to ${LATEST_SCHEMA_VERSION}.`);
+    if (version < 2) {
+      console.log('SKIP  sessions and Undo: needs database version 2. Run the newer SQL files in supabase/migrations, oldest first.');
+    } else {
+      const sessionId = randomUUID();
+      const second = {
+        ...review,
+        requestId: randomUUID(),
+        expectedMastery: 4,
+        expectedReviewDate: tomorrow,
+        newMastery: 5,
+        newReviewDate: tomorrow,
+        sessionId,
+      };
+      const saved = await a.database.recordReview(second);
+      check('an answer is saved as part of a session', saved.outcome === 'applied' && saved.mastery === 5, saved.outcome);
+      const mineSummary = await a.database.sessionSummary(sessionId);
+      check('the session summary counts it', mineSummary?.reviewed === 1 && mineSummary.remembered === 1);
+      check('account B cannot see A’s session', (await b.database.sessionSummary(sessionId)) === null);
+      const foreignUndo = await b.database.undoReview({ reviewRequestId: second.requestId, requestId: randomUUID() });
+      check('account B cannot undo A’s answer', foreignUndo.outcome === 'not_found', foreignUndo.outcome);
+      const olderUndo = await a.database.undoReview({ reviewRequestId: requestId, requestId: randomUUID() });
+      check('an answer with a newer one after it cannot be undone', olderUndo.outcome === 'not_latest', olderUndo.outcome);
+
+      const undoId = randomUUID();
+      const undoneNow = await a.database.undoReview({ reviewRequestId: second.requestId, requestId: undoId });
+      check('the latest answer can be undone', undoneNow.outcome === 'undone' && undoneNow.mastery === 4, undoneNow.outcome);
+      const undoneAgain = await a.database.undoReview({ reviewRequestId: second.requestId, requestId: undoId });
+      check('undoing it again changes nothing', undoneAgain.outcome === 'already_undone', undoneAgain.outcome);
+      const replay = await a.database.recordReview(second);
+      check('an undone answer is not saved again by a late retry', replay.outcome === 'undone', replay.outcome);
+      const afterUndo = await a.database.sessionSummary(sessionId);
+      check('the summary no longer counts it, and records the undo', afterUndo?.reviewed === 0 && afterUndo.undone === 1);
+      const trail = await attempt(rawA.from('review_logs').select('kind').eq('vocabulary_id', id));
+      const kinds = trail.rows.map((row) => (row as { kind: string }).kind).sort().join(',');
+      check('the history keeps both answers and the undo', kinds === 'review,review,undo', kinds);
+    }
+
+    // ---- 4c. FSRS stored alongside (from schema version 3) ----
+    if (version < 3) {
+      console.log('SKIP  FSRS alongside the mastery schedule: needs database version 3.');
+    } else {
+      const after = fsrsReview(null, FSRS_RATINGS.good, new Date());
+      const third = {
+        ...review,
+        requestId: randomUUID(),
+        expectedMastery: 4,
+        expectedReviewDate: tomorrow,
+        newMastery: 5,
+        newReviewDate: tomorrow,
+        sessionId: randomUUID(),
+        fsrs: { rating: FSRS_RATINGS.good, version: FSRS_ENGINE, before: null, after: fsrsStateToRow(after, FSRS_ENGINE) },
+      };
+      const savedWithFsrs = await a.database.recordReview(third);
+      check('an answer is saved together with its FSRS state', savedWithFsrs.outcome === 'applied', savedWithFsrs.outcome);
+      const scheduled = await a.database.getCard(id);
+      const stored = scheduled === null ? null : fsrsOfCard(scheduled);
+      check(
+        'the FSRS state is stored beside the mastery schedule, which still sets the review date',
+        scheduled?.mastery === 5 &&
+          scheduled.review_date === tomorrow &&
+          stored !== null &&
+          Math.abs(stored.state.stability - after.stability) < 0.001,
+      );
+      check('account B cannot see that state', (await b.database.getCard(id)) === null);
+      const undoneFsrs = await a.database.undoReview({ reviewRequestId: third.requestId, requestId: randomUUID() });
+      const restored = await a.database.getCard(id);
+      check(
+        'undoing that answer restores the mastery schedule and removes the FSRS state it added',
+        undoneFsrs.outcome === 'undone' && restored?.mastery === 4 && restored !== null && fsrsOfCard(restored) === null,
+        undoneFsrs.outcome,
+      );
+    }
+
+    // ---- 4d. Review statistics (from schema version 4) ----
+    if (version < 4) {
+      console.log('SKIP  review statistics: needs database version 4.');
+    } else {
+      const mine = (await a.database.cardReviewStats(today)).find((row) => row.vocabulary_id === id);
+      check(
+        'A’s statistics count the one answer that stands, and none that were undone',
+        mine?.reviews === 1 && mine.failures === 0 && mine.last_action === 'remember',
+        mine === undefined ? 'no row for the word' : `${mine.reviews} reviews`,
+      );
+      const daily = await a.database.reviewDailyStats(today, today);
+      check('A’s daily figures include today', daily.reduce((total, row) => total + row.reviews, 0) >= 1);
+      check(
+        'account B’s statistics do not include A’s word',
+        !(await b.database.cardReviewStats(today)).some((row) => row.vocabulary_id === id),
+      );
+      const strangerStats = await attempt(anon.rpc('review_daily_stats', { p_from: today, p_to: today }));
+      check('a signed-out visitor cannot read review statistics', refused(strangerStats) && nothing(strangerStats));
+    }
 
     // ---- 5. History and rows cannot be destroyed ----
     const editLog = await attempt(rawA.from('review_logs').update({ mastery_after: 9 }).eq('vocabulary_id', id).select('id'));

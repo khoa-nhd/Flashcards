@@ -34,6 +34,20 @@ export interface SessionState {
   /** The answer being saved, kept through a failure so Retry repeats exactly it. */
   pendingAction: ReviewAction | null;
   error: SessionError | null;
+  /** The latest answer the server confirmed, for as long as it can be taken back. */
+  lastSaved: SavedAnswer | null;
+  /** An Undo is on its way to the server. */
+  undoing: boolean;
+  /** Why the last Undo did not happen. */
+  undoError: string | null;
+}
+
+export interface SavedAnswer {
+  /** Where its card sits in the queue, so Undo can return to it. */
+  index: number;
+  action: ReviewAction;
+  /** The id the answer was saved under: what Undo names. */
+  requestId: string;
 }
 
 export type SessionEvent =
@@ -42,12 +56,17 @@ export type SessionEvent =
   | { type: 'LOAD_FAILED'; message: string; unauthorized: boolean }
   | { type: 'FLIP' }
   | { type: 'GRADE'; action: ReviewAction }
-  | { type: 'SAVE_SUCCEEDED' }
+  /** `requestId` is given only when the answer was really saved and can be undone. */
+  | { type: 'SAVE_SUCCEEDED'; requestId?: string }
   | { type: 'SAVE_FAILED'; message: string }
   | { type: 'SAVE_CONFLICT'; message: string }
   | { type: 'RETRY_SAVE' }
   | { type: 'CANCEL_SAVE' }
-  | { type: 'SKIP_CARD' };
+  | { type: 'SKIP_CARD' }
+  | { type: 'UNDO' }
+  | { type: 'UNDO_SUCCEEDED' }
+  /** `final` when the answer can no longer be undone at all, so the offer is withdrawn. */
+  | { type: 'UNDO_FAILED'; message: string; final: boolean };
 
 export const initialSessionState: SessionState = {
   status: 'loading',
@@ -57,7 +76,16 @@ export const initialSessionState: SessionState = {
   tally: { remember: 0, notRemember: 0, skipped: 0 },
   pendingAction: null,
   error: null,
+  lastSaved: null,
+  undoing: false,
+  undoError: null,
 };
+
+/** Whether the latest saved answer can be taken back right now. */
+export function canUndo(state: SessionState): boolean {
+  const settled = state.status === 'ready' || state.status === 'flipped' || state.status === 'completed';
+  return state.lastSaved !== null && !state.undoing && settled;
+}
 
 export function currentCard(state: SessionState): ReviewCard | null {
   return state.cards[state.index] ?? null;
@@ -106,13 +134,18 @@ export function transition(state: SessionState, event: SessionEvent): SessionSta
       return state;
 
     case 'GRADE':
-      if (state.status !== 'flipped') return state;
-      return { ...state, status: 'saving', pendingAction: event.action };
+      // Not while an Undo is in flight: it is about to move the session back a card.
+      if (state.status !== 'flipped' || state.undoing) return state;
+      return { ...state, status: 'saving', pendingAction: event.action, undoError: null };
 
     case 'SAVE_SUCCEEDED': {
       if (state.status !== 'saving' || state.pendingAction === null) return state;
       const key = state.pendingAction === 'remember' ? 'remember' : 'notRemember';
-      return advance(state, { ...state.tally, [key]: state.tally[key] + 1 });
+      const lastSaved =
+        event.requestId === undefined
+          ? null
+          : { index: state.index, action: state.pendingAction, requestId: event.requestId };
+      return { ...advance(state, { ...state.tally, [key]: state.tally[key] + 1 }), lastSaved, undoError: null };
     }
 
     case 'SAVE_FAILED':
@@ -135,6 +168,32 @@ export function transition(state: SessionState, event: SessionEvent): SessionSta
 
     case 'SKIP_CARD':
       if (state.status !== 'error' || state.error?.kind !== 'conflict') return state;
-      return advance(state, { ...state.tally, skipped: state.tally.skipped + 1 });
+      // Going back past a skipped card would only meet the same conflict again.
+      return { ...advance(state, { ...state.tally, skipped: state.tally.skipped + 1 }), lastSaved: null };
+
+    case 'UNDO':
+      if (!canUndo(state)) return state;
+      return { ...state, undoing: true, undoError: null };
+
+    case 'UNDO_SUCCEEDED': {
+      if (!state.undoing || state.lastSaved === null) return state;
+      const key = state.lastSaved.action === 'remember' ? 'remember' : 'notRemember';
+      return {
+        ...state,
+        // Back on the card that was answered, unflipped, as if it had just come up.
+        status: 'ready',
+        index: state.lastSaved.index,
+        tally: { ...state.tally, [key]: Math.max(0, state.tally[key] - 1) },
+        pendingAction: null,
+        error: null,
+        lastSaved: null,
+        undoing: false,
+        undoError: null,
+      };
+    }
+
+    case 'UNDO_FAILED':
+      if (!state.undoing) return state;
+      return { ...state, undoing: false, undoError: event.message, lastSaved: event.final ? null : state.lastSaved };
   }
 }

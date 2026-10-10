@@ -185,3 +185,33 @@ held or repeated key counts once.
 
 The browser never supplies the new mastery or date. A request that tries to
 is rejected.
+
+## 13. Undo
+
+Undo is not a rule about learning; it corrects a slip of the hand. It was
+added by the app and changes none of the rules above.
+
+- It applies to one saved answer, named by that answer's id.
+- It is allowed only while that answer is the **latest thing that happened to
+  the word**: the most recent review that still stands, with the word still
+  holding exactly the mastery and date that answer left. After a later review,
+  or an edit of the schedule on any device, it is refused and says why.
+- It puts back the mastery and review date recorded **before** the answer.
+  Nothing is recalculated.
+- The history keeps the answer and gains an `undo` row pointing at it. Nothing
+  is deleted or edited. Counts and statistics use only answers that still
+  stand.
+- Sending the same undo twice changes nothing the second time. A late retry of
+  the undone answer is not saved again.
+- The reviewer is shown the card again and can answer it afresh; that is a new
+  answer with its own id.
+
+## 14. What does not affect the rules
+
+- **FSRS** is calculated from each saved answer and stored beside the mastery
+  schedule for comparison. It never decides what is due. See
+  [supabase-schema.md](supabase-schema.md).
+- **Reviewing the weakest words** shows a subset of the queue from section 2,
+  in a different order. It cannot make a word due, and its answers follow
+  sections 5 and 6 unchanged.
+- **Review activity and weak-word scores** only read the history.

@@ -4,7 +4,7 @@
  * and queries go to the in-process PostgreSQL. Row Level Security, the
  * database functions and all application code are the real thing.
  */
-import { cardFields, newWordDefaults, reviewRules } from '../../config/review.config.js';
+import { cardFields, fsrsRatingMap, newWordDefaults, reviewRules } from '../../config/review.config.js';
 import { createApp } from '../../server/create-app.js';
 import { loadConfig } from '../../server/env.js';
 import { createSupabaseAccounts, type TokenVerifier } from '../../server/supabase/supabase-accounts.js';
@@ -60,10 +60,11 @@ export function createSupabaseTestApp(db: TestDatabase, users: TestUser[], optio
         return user === undefined ? null : { id: user.id, email: user.email };
       },
     },
-    connect(token) {
+    ratingMap: fsrsRatingMap,
+    connect(token, schemaVersion) {
       const user = byToken.get(token);
       if (user === undefined) throw new Error('No such test user.');
-      const database = createPgVocabularyDatabase(db, user.id);
+      const database = createPgVocabularyDatabase(db, user.id, schemaVersion);
       return options.wrap ? options.wrap(database) : database;
     },
     now,

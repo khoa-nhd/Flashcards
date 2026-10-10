@@ -11,6 +11,7 @@ import { BarChart } from '../components/BarChart.js';
 import { formatDate } from '../components/badges.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { ReviewActivityDetail } from '../components/ReviewActivity.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { CARD, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { MISSING_LABELS, missingFields } from '../lib/bank-query.js';
@@ -50,11 +51,13 @@ export function InsightsPage() {
 
   return (
     <div className={PAGE}>
-      <PageHeader title="Insights" description="How your vocabulary is growing and where it stands." />
+      <PageHeader title="Insights" description="How your reviewing is going, how your vocabulary is growing and where it stands." />
 
       <VocabularyGate state={state}>
         {summary !== null && today !== null && (
           <div className={`flex flex-col gap-6 ${state.refreshing ? 'opacity-70' : ''}`}>
+            <ReviewActivityDetail />
+
             <div className="flex items-center gap-2" role="group" aria-label="Group additions by">
               <span className="text-sm text-muted">Additions by</span>
               {(Object.keys(RANGES) as Granularity[]).map((key) => (

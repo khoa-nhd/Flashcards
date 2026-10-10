@@ -10,21 +10,32 @@
  */
 import { z } from 'zod';
 import {
-  CARD_COLUMNS,
   DatabaseError,
+  LATEST_SCHEMA_VERSION,
+  cardColumns,
+  cardStatRowSchema,
+  dailyStatRowSchema,
   cardRowSchema,
   reviewWriteResultSchema,
+  sessionSummaryRowSchema,
   toDatabaseError,
+  undoResultSchema,
   type CardRow,
   type VocabularyDatabase,
 } from '../../server/supabase/supabase-database.js';
 import type { Row, Session, TestDatabase } from './test-database.js';
 
 /** Rows are read as JSON, which gives dates and timestamps the same text form the hosted API returns. */
-const cardsQuery = (where: string, order: string) =>
-  `select to_jsonb(c) as card from (select ${CARD_COLUMNS} from public.vocabulary_cards where ${where} order by ${order}) c`;
+const cardsQuery = (columns: string, where: string, order: string) =>
+  `select to_jsonb(c) as card from (select ${columns} from public.vocabulary_cards where ${where} order by ${order}) c`;
 
-export function createPgVocabularyDatabase(db: TestDatabase, userId: string): VocabularyDatabase {
+export function createPgVocabularyDatabase(
+  db: TestDatabase,
+  userId: string,
+  /** What the database has, as the real gateway is told; decides which columns are read. */
+  schemaVersion: number = LATEST_SCHEMA_VERSION,
+): VocabularyDatabase {
+  const columns = cardColumns(schemaVersion);
   const run = async <T>(work: (session: Session) => Promise<T>): Promise<T> => {
     try {
       return await db.as(userId, work);
@@ -35,7 +46,7 @@ export function createPgVocabularyDatabase(db: TestDatabase, userId: string): Vo
   };
 
   const cards = async (where: string, order: string, params: unknown[] = []): Promise<CardRow[]> => {
-    const rows = await run((session) => session.query<{ card: unknown }>(cardsQuery(where, order), params));
+    const rows = await run((session) => session.query<{ card: unknown }>(cardsQuery(columns, where, order), params));
     return z.array(cardRowSchema).parse(rows.map((row) => row.card));
   };
 
@@ -169,6 +180,102 @@ export function createPgVocabularyDatabase(db: TestDatabase, userId: string): Vo
         ),
       );
       return rows[0] === undefined ? null : { mastery: rows[0].mastery_after, reviewDate: rows[0].review_date_after };
+    },
+
+    async schemaVersion() {
+      try {
+        const rows = await db.as(userId, (session) =>
+          session.query<{ version: number }>('select public.app_schema_version() as version'),
+        );
+        return rows[0]?.version ?? 1;
+      } catch (error) {
+        // No such function: only the first migration has been applied.
+        if ((error as { code?: string }).code === '42883') return 1;
+        throw error;
+      }
+    },
+
+    async recordReview(args) {
+      const rows = await run((session) =>
+        session.query<Row>(
+          `select outcome, mastery, review_date::text as review_date from public.record_review($1::jsonb)`,
+          [
+            JSON.stringify({
+              vocabulary_id: args.id,
+              request_id: args.requestId,
+              session_id: args.sessionId,
+              action: args.action,
+              expected_mastery: args.expectedMastery,
+              expected_review_date: args.expectedReviewDate,
+              new_mastery: args.newMastery,
+              new_review_date: args.newReviewDate,
+              reviewed_on: args.reviewedOn,
+              duration_ms: args.durationMs,
+              ...(args.fsrs == null ? {} : { fsrs: args.fsrs }),
+            }),
+          ],
+        ),
+      );
+      return reviewWriteResultSchema.parse(rows[0]);
+    },
+
+    async undoReview(args) {
+      const rows = await run((session) =>
+        session.query<Row>(
+          `select outcome, vocabulary_id, mastery, review_date::text as review_date
+             from public.undo_review($1::uuid, $2::uuid)`,
+          [args.reviewRequestId, args.requestId],
+        ),
+      );
+      return undoResultSchema.parse(rows[0]);
+    },
+
+    async sessionSummary(sessionId) {
+      const rows = await run((session) =>
+        session.query<{ summary: unknown }>(
+          `select to_jsonb(s) as summary from public.session_summary($1::uuid) s`,
+          [sessionId],
+        ),
+      );
+      return rows[0] === undefined ? null : sessionSummaryRowSchema.parse(rows[0].summary);
+    },
+
+    async reviewDailyStats(from, to) {
+      const rows = await run((session) =>
+        session.query<{ stat: unknown }>(
+          'select to_jsonb(s) as stat from public.review_daily_stats($1::date, $2::date) s',
+          [from, to],
+        ),
+      );
+      return z.array(dailyStatRowSchema).parse(rows.map((row) => row.stat));
+    },
+
+    async cardReviewStats(since) {
+      const rows = await run((session) =>
+        session.query<{ stat: unknown }>('select to_jsonb(s) as stat from public.card_review_stats($1::date) s', [since]),
+      );
+      return z.array(cardStatRowSchema).parse(rows.map((row) => row.stat));
+    },
+
+    async getSettings() {
+      const wanted = schemaVersion >= 3 ? 'time_zone, fsrs_request_retention::float8 as fsrs_request_retention' : 'time_zone';
+      const rows = await run((session) =>
+        session.query<{ time_zone: string; fsrs_request_retention?: number }>(`select ${wanted} from public.user_settings`),
+      );
+      const row = rows[0];
+      return row === undefined ? null : { timeZone: row.time_zone, fsrsRetention: row.fsrs_request_retention ?? null };
+    },
+
+    async saveFsrsRetention(value) {
+      const rows = await run((session) =>
+        session.query<{ retention: number }>(
+          `insert into public.user_settings (fsrs_request_retention) values ($1)
+           on conflict (user_id) do update set fsrs_request_retention = excluded.fsrs_request_retention
+           returning fsrs_request_retention::float8 as retention`,
+          [value],
+        ),
+      );
+      return rows[0]?.retention ?? value;
     },
 
     async getTimeZone() {

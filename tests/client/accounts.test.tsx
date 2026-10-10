@@ -2,7 +2,7 @@
 import { act, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { VocabularyEntry } from '../../shared/api.js';
+import type { SchedulerReport, VocabularyEntry } from '../../shared/api.js';
 import { App } from '../../src/App.js';
 import { ApiError, type ApiAuth } from '../../src/lib/api-client.js';
 import { createSettingsStore } from '../../src/lib/settings.js';
@@ -19,7 +19,14 @@ const WORDS: Record<string, VocabularyEntry[]> = {
 };
 
 /** Renders the app with accounts. Each signed-in user gets a server of their own, as in production. */
-function open(options: { path?: string; signedInAs?: FakeAccount; trashed?: VocabularyEntry[] } = {}) {
+function open(
+  options: {
+    path?: string;
+    signedInAs?: FakeAccount;
+    trashed?: VocabularyEntry[];
+    scheduler?: Partial<SchedulerReport>;
+  } = {},
+) {
   window.history.replaceState(null, '', options.path ?? '/bank');
   const fake = createFakeAuth(
     [ALICE, BOB],
@@ -39,6 +46,7 @@ function open(options: { path?: string; signedInAs?: FakeAccount; trashed?: Voca
       queue: { mode: 'supabase' },
       trashed: options.trashed,
       account: { email: 'user' in state ? state.user.email : null },
+      scheduler: options.scheduler,
     });
     servers.push({ userId, auth, fake: server });
     return server.api;
@@ -297,5 +305,88 @@ describe('account settings', () => {
     await waitFor(() => expect(api.restoreEntry).toHaveBeenCalledWith(gone.id));
     expect(await within(section).findByText('Nothing has been deleted.')).toBeInTheDocument();
     expect(await screen.findByText('Restored “forgotten”.')).toBeInTheDocument();
+  });
+});
+
+describe('the scheduling panel', () => {
+  const available = {
+    fsrs: {
+      available: true,
+      engine: 'v5.4.2 using FSRS-6.0',
+      requestRetention: 0.9,
+      ratings: { remember: 'Good', notRemember: 'Again' },
+    },
+  };
+  const scheduling = async () => (await screen.findByRole('heading', { name: 'Scheduling' })).closest('section')!;
+
+  it('says the mastery schedule is in force, and that FSRS needs a database update where it is missing', async () => {
+    open({ signedInAs: ALICE, path: '/settings' });
+    const section = await scheduling();
+    expect(section).toHaveTextContent('Your reviews are scheduled by mastery level');
+    expect(await within(section).findByText(/once the database has its latest update/)).toBeInTheDocument();
+    expect(within(section).queryByLabelText('FSRS target retention')).not.toBeInTheDocument();
+  });
+
+  it('explains that FSRS is only calculated alongside, and how far it has got', async () => {
+    open({ signedInAs: ALICE, path: '/settings', scheduler: { ...available, totalCards: 49, comparable: 0 } });
+    const section = await scheduling();
+    await within(section).findByText(/It does not decide what is due/);
+    expect(section).toHaveTextContent('switching to it is not available yet');
+    expect(section).toHaveTextContent('Remember counts as “Good” and Not remember as “Again”');
+    expect(section).toHaveTextContent('0 of 49 words have an FSRS schedule so far');
+    expect(section).toHaveTextContent('none is made up for the rest');
+    expect(section).toHaveTextContent('v5.4.2 using FSRS-6.0');
+    // Nothing to compare yet, so no tables.
+    expect(within(section).queryByRole('table')).not.toBeInTheDocument();
+  });
+
+  it('shows both schedules side by side once there is something to compare', async () => {
+    open({
+      signedInAs: ALICE,
+      path: '/settings',
+      scheduler: {
+        ...available,
+        totalCards: 3,
+        comparable: 2,
+        cards: [
+          { id: 'a', word: 'candid', mastery: 4, legacyDue: '2026-10-12', fsrsDue: '2026-10-11', fsrsIntervalDays: 2, differenceDays: -1 },
+          { id: 'b', word: 'eloquent', mastery: 10, legacyDue: null, fsrsDue: '2026-10-20', fsrsIntervalDays: 11, differenceDays: null },
+        ],
+        workload: [
+          { date: '2026-10-09', legacy: 1, fsrs: 0 },
+          { date: '2026-10-10', legacy: 0, fsrs: 0 },
+          { date: '2026-10-11', legacy: 0, fsrs: 1 },
+        ],
+      },
+    });
+    const section = await scheduling();
+    const [workload, words] = await within(section).findAllByRole('table');
+    expect(within(workload!).getByRole('row', { name: /Today or earlier/ })).toHaveTextContent('Today or earlier10');
+    expect(within(workload!).getByRole('row', { name: /2026-10-11/ })).toHaveTextContent('2026-10-1101');
+    expect(within(words!).getByRole('row', { name: /candid/ })).toHaveTextContent('candid2026-10-122026-10-11−1 d');
+    expect(within(words!).getByRole('row', { name: /eloquent/ })).toHaveTextContent('never (mastered)');
+  });
+
+  it('saves a new target retention for the account', async () => {
+    const { user, servers } = open({ signedInAs: ALICE, path: '/settings', scheduler: available });
+    const section = await scheduling();
+    const select = await within(section).findByLabelText('FSRS target retention');
+    expect(select).toHaveValue('0.9');
+
+    await user.selectOptions(select, '0.95');
+    await waitFor(() => expect(servers[0]!.fake.api.saveSettings).toHaveBeenCalledWith({ fsrsRetention: 0.95 }));
+    expect(await screen.findByText('FSRS target retention set to 95%.')).toBeInTheDocument();
+    expect(select).toHaveValue('0.95');
+  });
+
+  it('puts the choice back and says so when saving fails', async () => {
+    const { user, servers } = open({ signedInAs: ALICE, path: '/settings', scheduler: available });
+    const section = await scheduling();
+    const select = await within(section).findByLabelText('FSRS target retention');
+    servers[0]!.fake.api.saveSettings.mockRejectedValueOnce(new ApiError('network', 'Could not reach the server. Check your connection.'));
+
+    await user.selectOptions(select, '0.8');
+    expect(await within(section).findByRole('alert')).toHaveTextContent('Could not reach the server');
+    expect(select).toHaveValue('0.9');
   });
 });

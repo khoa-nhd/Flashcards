@@ -79,15 +79,34 @@ export interface Database {
           review_date_before: string | null;
           review_date_after: string | null;
           scheduler: string;
+          /** From schema version 2. */
+          kind: string;
+          session_id: string | null;
+          undoes_log_id: string | null;
         };
         Insert: never;
         Update: never;
         Relationships: [];
       };
+      /** From schema version 2. */
+      study_sessions: {
+        Row: { id: string; user_id: string; mode: string; started_at: string; ended_at: string | null };
+        Insert: { id: string; user_id?: string; mode?: string };
+        Update: { ended_at?: string | null };
+        Relationships: [];
+      };
       user_settings: {
-        Row: { user_id: string; time_zone: string; preferences: unknown; created_at: string; updated_at: string };
-        Insert: { user_id?: string; time_zone?: string };
-        Update: { time_zone?: string };
+        Row: {
+          user_id: string;
+          time_zone: string;
+          preferences: unknown;
+          created_at: string;
+          updated_at: string;
+          /** From schema version 3. */
+          fsrs_request_retention: number;
+        };
+        Insert: { user_id?: string; time_zone?: string; fsrs_request_retention?: number };
+        Update: { time_zone?: string; fsrs_request_retention?: number };
         Relationships: [];
       };
     };
@@ -107,6 +126,17 @@ export interface Database {
           deleted_at: string | null;
           mastery: number;
           review_date: string | null;
+          /** From schema version 3. */
+          fsrs_due: string | null;
+          fsrs_stability: number | null;
+          fsrs_difficulty: number | null;
+          fsrs_last_review: string | null;
+          fsrs_reps: number | null;
+          fsrs_lapses: number | null;
+          fsrs_state: number | null;
+          fsrs_scheduled_days: number | null;
+          fsrs_learning_steps: number | null;
+          fsrs_version: string | null;
         };
         Relationships: [];
       };
@@ -147,6 +177,45 @@ export interface Database {
           p_review_mode?: string;
         };
         Returns: Array<{ outcome: string; mastery: number | null; review_date: string | null }>;
+      };
+      /** From schema version 2. Absent on a database that only has the first migration. */
+      app_schema_version: { Args: Record<string, never>; Returns: number };
+      record_review: {
+        Args: { p_event: Record<string, unknown> };
+        Returns: Array<{ outcome: string; mastery: number | null; review_date: string | null }>;
+      };
+      undo_review: {
+        Args: { p_review_request_id: string; p_request_id: string };
+        Returns: Array<{
+          outcome: string;
+          vocabulary_id: string | null;
+          mastery: number | null;
+          review_date: string | null;
+        }>;
+      };
+      /** From schema version 4. */
+      review_daily_stats: {
+        Args: { p_from: string; p_to: string };
+        Returns: Array<Record<string, string | number | null>>;
+      };
+      card_review_stats: {
+        Args: { p_since: string };
+        Returns: Array<Record<string, string | number | null>>;
+      };
+      session_summary: {
+        Args: { p_session_id: string };
+        Returns: Array<{
+          session_id: string;
+          started_at: string;
+          last_review_at: string | null;
+          reviewed: number;
+          remembered: number;
+          not_remembered: number;
+          first_time: number;
+          undone: number;
+          duration_ms: number;
+          timed_reviews: number;
+        }>;
       };
     };
     Enums: Record<string, never>;

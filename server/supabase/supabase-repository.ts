@@ -1,11 +1,27 @@
-import type { SkippedRecord, VocabularyStatus } from '../../shared/api.js';
+import type { Capabilities, SessionSummary, SkippedRecord, VocabularyStatus } from '../../shared/api.js';
+import type { DailyStat } from '../../shared/analytics.js';
 import type { IsoDate } from '../../shared/dates.js';
+import type { CardHistory } from '../../shared/weak-words.js';
 import type { ReviewRules } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
-import type { VocabularyRecord } from '../../shared/vocabulary.js';
+import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
+import type { StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
-import type { ReviewWrite, ReviewWriteResult, SetupReport, VocabularyRepository } from '../vocabulary-repository.js';
-import type { CardPatch, CardRow, VocabularyDatabase } from './supabase-database.js';
+import type {
+  ReviewWrite,
+  ReviewWriteResult,
+  SetupReport,
+  UndoResult,
+  VocabularyRepository,
+} from '../vocabulary-repository.js';
+import {
+  LATEST_SCHEMA_VERSION,
+  fsrsOfCard,
+  fsrsStateToRow,
+  type CardPatch,
+  type CardRow,
+  type VocabularyDatabase,
+} from './supabase-database.js';
 
 function toEntry(row: CardRow): EntryData {
   return {
@@ -30,7 +46,13 @@ function toRecord(row: CardRow): VocabularyRecord {
     mastery: row.mastery,
     nextReview: row.review_date,
     fields: { meaning: row.meaning, definition: row.definition, example: row.example },
+    fsrs: storedFsrs(row),
   };
+}
+
+function storedFsrs(row: CardRow): StoredFsrs | null {
+  const found = fsrsOfCard(row);
+  return found === null ? null : { state: found.state, engine: found.version };
 }
 
 const NO_ISSUES: SetupReport = { readIssues: [], writeIssues: [], warnings: [], entryWriteIssues: [] };
@@ -41,11 +63,21 @@ const NO_ISSUES: SetupReport = { readIssues: [], writeIssues: [], warnings: [], 
  */
 export class SupabaseVocabularyRepository implements VocabularyRepository, VocabularyCatalog {
   readonly mode = 'supabase' as const;
+  readonly capabilities: Capabilities;
 
   constructor(
     private readonly database: VocabularyDatabase,
     private readonly rules: ReviewRules,
-  ) {}
+    /** The newest migration the database has. Anything it lacks stays switched off. */
+    schemaVersion: number = LATEST_SCHEMA_VERSION,
+  ) {
+    this.capabilities = {
+      sessions: schemaVersion >= 2,
+      undo: schemaVersion >= 2,
+      fsrs: schemaVersion >= 3,
+      analytics: schemaVersion >= 4,
+    };
+  }
 
   async checkSetup(): Promise<SetupReport> {
     // The schema is this project's own; a missing migration surfaces as an error on first use.
@@ -72,7 +104,7 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
   }
 
   async applyReview(write: ReviewWrite): Promise<ReviewWriteResult> {
-    const result = await this.database.applyReview({
+    const args = {
       id: write.id,
       requestId: write.requestId,
       action: write.action,
@@ -82,14 +114,106 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
       newReviewDate: write.next.nextReview,
       reviewedOn: write.reviewedOn,
       durationMs: write.durationMs,
-    });
+    };
+    // A database that has not had the sessions migration still saves the answer, the way it always did.
+    const result = this.capabilities.sessions
+      ? await this.database.recordReview({ ...args, sessionId: write.sessionId, fsrs: this.fsrsOf(write) })
+      : await this.database.applyReview(args);
     if (result.outcome === 'not_found' || result.mastery === null) return { outcome: 'not_found' };
     return { outcome: result.outcome, state: { mastery: result.mastery, nextReview: result.review_date } };
+  }
+
+  /** The FSRS part of an answer in stored form, or nothing where the database cannot hold it. */
+  private fsrsOf(write: ReviewWrite) {
+    if (!this.capabilities.fsrs || write.fsrs == null) return null;
+    const { rating, engine, before, after } = write.fsrs;
+    return {
+      rating,
+      version: engine,
+      before: before === null ? null : fsrsStateToRow(before.state, before.engine),
+      after: fsrsStateToRow(after, engine),
+    };
+  }
+
+  async reviewDailyStats(from: IsoDate, to: IsoDate): Promise<DailyStat[]> {
+    if (!this.capabilities.analytics) return [];
+    return (await this.database.reviewDailyStats(from, to)).map((row) => ({
+      day: row.day,
+      mode: row.review_mode,
+      reviews: row.reviews,
+      remembered: row.remembered,
+      notRemembered: row.not_remembered,
+      repeatReviews: row.repeat_reviews,
+      repeatRemembered: row.repeat_remembered,
+      durationMs: row.duration_ms,
+      timedReviews: row.timed_reviews,
+      cards: row.cards,
+    }));
+  }
+
+  async cardReviewStats(since: IsoDate): Promise<Map<string, CardHistory>> {
+    if (!this.capabilities.analytics) return new Map();
+    const rows = await this.database.cardReviewStats(since);
+    return new Map(
+      rows.map((row) => [
+        row.vocabulary_id,
+        {
+          reviews: row.reviews,
+          failures: row.failures,
+          recentReviews: row.recent_reviews,
+          recentFailures: row.recent_failures,
+          failedDays: row.failed_days,
+          lastReviewedOn: row.last_reviewed_on,
+          lastFailedOn: row.last_failed_on,
+          lastAction: row.last_action === 'remember' || row.last_action === 'not_remember' ? row.last_action : null,
+        },
+      ]),
+    );
+  }
+
+  async listSchedules(): Promise<ScheduleCard[]> {
+    return (await this.database.listCards()).map((row) => ({
+      id: row.id,
+      word: row.word,
+      mastery: row.mastery,
+      reviewDate: row.review_date,
+      fsrs: fsrsOfCard(row)?.state ?? null,
+    }));
   }
 
   async findReview(requestId: string) {
     const found = await this.database.findReviewByRequestId(requestId);
     return found === null ? null : { mastery: found.mastery, nextReview: found.reviewDate };
+  }
+
+  async undoReview(input: { reviewRequestId: string; requestId: string }): Promise<UndoResult> {
+    if (!this.capabilities.undo) return { outcome: 'unsupported' };
+    const result = await this.database.undoReview(input);
+    if (result.outcome === 'not_found' || result.vocabulary_id === null) return { outcome: 'not_found' };
+    const state = result.mastery === null ? null : { mastery: result.mastery, nextReview: result.review_date };
+    if (result.outcome === 'not_latest' || result.outcome === 'conflict') {
+      return { outcome: result.outcome, id: result.vocabulary_id, state };
+    }
+    if (state === null) return { outcome: 'not_found' };
+    return { outcome: result.outcome, id: result.vocabulary_id, state };
+  }
+
+  async sessionSummary(sessionId: string): Promise<SessionSummary | null> {
+    if (!this.capabilities.sessions) return null;
+    const row = await this.database.sessionSummary(sessionId);
+    if (row === null) return null;
+    return {
+      sessionId: row.session_id,
+      reviewed: row.reviewed,
+      remembered: row.remembered,
+      notRemembered: row.not_remembered,
+      accuracy: row.reviewed === 0 ? null : row.remembered / row.reviewed,
+      firstTime: row.first_time,
+      seenBefore: row.reviewed - row.first_time,
+      undone: row.undone,
+      durationMs: row.duration_ms,
+      timedReviews: row.timed_reviews,
+    };
   }
 
   // ---- Whole records ----

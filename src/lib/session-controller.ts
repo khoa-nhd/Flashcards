@@ -18,14 +18,22 @@ import {
 export interface SessionController {
   getState(): SessionState;
   subscribe(listener: () => void): () => void;
-  /** (Re)loads the queue. Reads only; never changes review data. */
-  load(): Promise<void>;
+  /**
+   * (Re)loads the queue. Reads only; never changes review data. Given a focus
+   * (or `null` for everything due) it switches to it; given nothing, it keeps
+   * the one in use, which is what Refresh wants.
+   */
+  load(options?: { focus: 'weak' | null }): Promise<void>;
   flip(): void;
   /** Returns false when the answer was not accepted (card not flipped, save in flight…). */
   grade(action: ReviewAction): boolean;
   retrySave(): void;
   cancelSave(): void;
   skipCard(): void;
+  /** Takes back the latest saved answer. Returns false when there is nothing that can be undone now. */
+  undo(): boolean;
+  /** The sitting in progress: every answer since the queue was last loaded. */
+  sessionId(): string;
 }
 
 const messageOf = (error: unknown) =>
@@ -34,17 +42,25 @@ const messageOf = (error: unknown) =>
 /** The longest time on one card worth recording; anything more is a tab left open. */
 const MAX_DURATION_MS = 86_400_000;
 
+/** Failures after which trying the same Undo again cannot succeed. */
+const UNDO_IS_OVER = new Set(['conflict', 'not_found', 'not_supported', 'read_only']);
+
 export function createSessionController(
-  api: Pick<ReviewApi, 'fetchQueue' | 'submitAction'>,
+  api: Pick<ReviewApi, 'fetchQueue' | 'submitAction' | 'undoAction'>,
   /** Called once an answer is confirmed as saved, so other views know their data has changed. */
   onSaved: () => void = () => {},
 ): SessionController {
   let state = initialSessionState;
   let loadSequence = 0;
+  let sessionId = newRequestId();
+  /** What the queue is narrowed to, if anything. */
+  let focus: 'weak' | null = null;
   /** When the card on screen appeared, to record how long it took to answer. */
   let shown: { id: string; at: number } | null = null;
   /** Identifies the answer being saved. A retry repeats it, so one answer is recorded once. */
   let answer: { requestId: string; durationMs: number } | null = null;
+  /** Identifies the Undo of one answer. Pressing Undo again after a failure repeats it. */
+  let undoRequest: { of: string; requestId: string } | null = null;
   const listeners = new Set<() => void>();
 
   const dispatch = (event: SessionEvent): boolean => {
@@ -62,15 +78,19 @@ export function createSessionController(
     const card = currentCard(state);
     const action = state.pendingAction;
     if (state.status !== 'saving' || card === null || action === null || answer === null) return;
+    const { requestId } = answer;
     try {
-      await api.submitAction({
+      const response = await api.submitAction({
         pageId: card.id,
         action,
         expected: { mastery: card.mastery, nextReview: card.nextReview },
-        requestId: answer.requestId,
+        requestId,
         durationMs: answer.durationMs,
+        sessionId,
       });
-      dispatch({ type: 'SAVE_SUCCEEDED' });
+      // Only an answer that was really stored, in a store that can take it back, is offered for Undo.
+      const undoable = response.outcome !== 'dry_run' && state.meta?.capabilities.undo === true;
+      dispatch({ type: 'SAVE_SUCCEEDED', requestId: undoable ? requestId : undefined });
       onSaved();
     } catch (error) {
       if (error instanceof ApiError && error.code === 'conflict') {
@@ -78,6 +98,18 @@ export function createSessionController(
       } else {
         dispatch({ type: 'SAVE_FAILED', message: messageOf(error) });
       }
+    }
+  };
+
+  const runUndo = async (reviewRequestId: string) => {
+    if (undoRequest?.of !== reviewRequestId) undoRequest = { of: reviewRequestId, requestId: newRequestId() };
+    try {
+      await api.undoAction({ reviewRequestId, requestId: undoRequest.requestId });
+      dispatch({ type: 'UNDO_SUCCEEDED' });
+      onSaved();
+    } catch (error) {
+      const final = error instanceof ApiError && UNDO_IS_OVER.has(error.code);
+      dispatch({ type: 'UNDO_FAILED', message: messageOf(error), final });
     }
   };
 
@@ -89,14 +121,18 @@ export function createSessionController(
       return () => listeners.delete(listener);
     },
 
-    async load() {
+    async load(options) {
       if (state.status === 'saving') return;
+      if (options !== undefined) focus = options.focus;
       // A newer load supersedes any still in flight.
       const sequence = ++loadSequence;
       dispatch({ type: 'LOAD' });
       try {
-        const { cards, ...meta } = await api.fetchQueue();
-        if (sequence === loadSequence) dispatch({ type: 'LOAD_SUCCEEDED', cards, meta });
+        const { cards, ...meta } = await api.fetchQueue({ focus });
+        if (sequence !== loadSequence) return;
+        // A freshly loaded queue is a new sitting.
+        sessionId = newRequestId();
+        dispatch({ type: 'LOAD_SUCCEEDED', cards, meta });
       } catch (error) {
         if (sequence !== loadSequence) return;
         dispatch({
@@ -130,5 +166,14 @@ export function createSessionController(
     skipCard() {
       dispatch({ type: 'SKIP_CARD' });
     },
+
+    undo() {
+      const target = state.lastSaved;
+      if (target === null || !dispatch({ type: 'UNDO' })) return false;
+      void runUndo(target.requestId);
+      return true;
+    },
+
+    sessionId: () => sessionId,
   };
 }

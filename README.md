@@ -6,13 +6,14 @@ in on.
 
 | Tab | What it does |
 | --- | --- |
-| **Dashboard** | What is ready to review, summary counts, mastery distribution, additions over time, recent words. |
-| **Review** | Flashcards: flip, then answer Remember or Not remember. |
+| **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
+| **Review** | Flashcards: flip, then answer Remember or Not remember. Undo the last answer; a summary of what was saved at the end. |
 | **Add vocabulary** | Creates a new word, with a duplicate check. |
 | **Vocabulary bank** | Every word: search, filter, sort, view details, edit, delete, export. |
 | **Calendar** | Words by the day they were added. |
-| **Insights** | Additions by day, week and month, share mastered, busiest days, incomplete entries. |
-| **Settings** | Account, time zone, display preferences, backup export, deleted words, connection status. |
+| **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of just those that are due. |
+| **Insights** | Reviews per day, accuracy and retention by period, additions by day, week and month, share mastered, busiest days, incomplete entries. |
+| **Settings** | Account, time zone, scheduling (and the FSRS comparison), display preferences, backup export, deleted words, connection and database status. |
 
 Reference documents:
 
@@ -20,6 +21,7 @@ Reference documents:
 - [docs/supabase-schema.md](docs/supabase-schema.md) — the database, accounts and security.
 - [docs/metrics.md](docs/metrics.md) — the exact definition of every number shown.
 - [docs/supabase-migration.md](docs/supabase-migration.md) — the record of the move from Notion to Supabase.
+- [docs/upgrade-plan.md](docs/upgrade-plan.md) — the plan for turning this into a fuller learning system, and how far it has got.
 
 ## Try it with sample data
 
@@ -47,6 +49,7 @@ In Windows PowerShell, if `npm` is blocked by the script execution policy, use
 | Flip the card | `Space` | Tap the card |
 | Not remember | `←` | Swipe left |
 | Remember | `→` | Swipe right |
+| Undo the last answer | `U` | The Undo button above the card |
 
 An answer is accepted only after the card has been flipped. The two buttons
 under the card do the same as the keys and swipes. These shortcuts are active
@@ -63,6 +66,50 @@ the calendar day in your account's time zone.
 
 A review session survives switching tabs: come back and it is where you left
 it. A finished session reloads the queue when you return.
+
+**Undo** takes back the most recent saved answer: the word returns to exactly
+the mastery and date it had, and the card comes back. It works only while that
+answer is still the latest thing that happened to the word (not after a later
+review or an edit on another device). The history keeps both the answer and
+its undo; nothing is erased.
+
+**At the end of a session** the app shows what was actually saved: remembered
+and not remembered, accuracy, time on cards, how many words were new to you,
+and how many answers were undone.
+
+**Weakest words only.** The Weak words page can start a review of just the
+listed words that are already due (`/review?focus=weak`). It only narrows the
+normal queue; it never brings a word forward, and answers are saved by the
+same rules.
+
+### Scheduling and FSRS
+
+What is due is decided by the mastery rule above, and only by it. Alongside,
+every saved answer is also run through [FSRS](https://github.com/open-spaced-repetition/ts-fsrs)
+(Remember counts as "Good", Not remember as "Again") and the result is stored
+next to the mastery schedule. Settings → Scheduling shows the two side by
+side. **FSRS does not decide what is due, and there is no switch to make it do
+so yet.** A word gets an FSRS state the first time it is reviewed from now on;
+none is invented for words from their mastery level.
+
+### Database updates
+
+New features need new tables and functions. They come as SQL files in
+[supabase/migrations](supabase/migrations), to be run **in order, once each**
+in the Supabase dashboard (SQL Editor → paste the file → Run):
+
+| File | Database version | Turns on |
+| --- | --- | --- |
+| `20261010090000_initial_schema.sql` | 1 | The app itself. |
+| `20261011090000_sessions_and_undo.sql` | 2 | Undo and the end-of-session summary. |
+| `20261012090000_fsrs_shadow.sql` | 3 | The FSRS calculation and comparison. |
+| `20261013090000_review_analytics.sql` | 4 | Review activity and history-based weak words. |
+
+Each file only adds things; none changes or removes existing data. The app
+checks the database version and keeps working on an older one, with the newer
+features switched off and saying so. Settings → Connection → Database shows
+the version found and whether an update is waiting. Run the SQL first, then deploy; either
+order is safe.
 
 ## Set up your own copy
 
@@ -167,7 +214,11 @@ email if your project asks for it.
 - **Only what changed is written.** Editing a definition cannot touch mastery
   or the review date.
 - **Nothing is deleted outright.** Delete means the trash; no one, the app
-  included, has permission to remove a word or edit the review history.
+  included, has permission to remove a word or edit the review history. Undo
+  adds a row saying the answer was taken back; it removes nothing.
+- **No privileged key exists anywhere in the app.** A test reads the source to
+  keep it that way: browser code may not read the environment, name a secret
+  key or import server code.
 - **Every write is confirmed.** The app shows success only when the server has
   returned the stored record.
 - **Automated tests never touch a real project.** They run the real schema on
@@ -228,13 +279,17 @@ shared/                     Pure logic used by browser and server
   review-logic.ts             Eligibility, ordering, visibility, answers
   vocabulary-status.ts        A word's review state, from the same rules
   metrics.ts                  Dashboard, insights and calendar numbers
+  analytics.ts                Review activity from saved answers
+  weak-words.ts               Which words need attention, and why
+  scheduler/                  FSRS (calculated alongside), the rating map, the comparison
   dates.ts, text.ts           Calendar-day arithmetic; word normalisation and search
   api.ts                      Request/response schemas (Zod)
   backup.ts                   The backup file format used by the import
 server/
   create-app.ts               Routes, validation, sign-in check, error mapping
   accounts.ts                 What a signed-in request may use
-  review-service.ts           Review queue and the safe answer path
+  review-service.ts           Review queue, the safe answer path, undo, session summary
+  analytics-service.ts        Review activity and weak words (read-only)
   vocabulary-service.ts       List, create, edit, trash, restore
   supabase/                   Database gateway, repository, account sessions, backup import
   mock/                       Sample words and illustrative rules
@@ -260,8 +315,13 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | --- | --- |
 | `GET /api/health` | Configuration status. Public; contains no secrets. |
 | `GET /api/config` | Public. How to sign in: the project address and public key. |
-| `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. |
-| `POST /api/review-action` | `{ pageId, action, expected, requestId }` → `applied`, `already_applied` or `dry_run`. `409` if the word changed. |
+| `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. `?focus=weak` narrows it to the due words on the weak list. |
+| `POST /api/review-action` | `{ pageId, action, expected, requestId, sessionId?, durationMs? }` → `applied`, `already_applied` or `dry_run`. `409` if the word changed. |
+| `POST /api/review-undo` | `{ reviewRequestId, requestId }` → the word's restored state. `409` if the answer is no longer the latest for that word. |
+| `GET /api/sessions/:id/summary` | What was saved in one sitting. |
+| `GET /api/analytics` | Review activity: periods, streak, by mode, per day. Read-only. |
+| `GET /api/weak-words` | Words that need attention, with reasons. Read-only. |
+| `GET /api/scheduler` | Which schedule is in charge, and the FSRS comparison. Read-only. |
 | `GET /api/vocabulary` | Every word, with its review state. |
 | `GET /api/vocabulary/:id` | One word, read fresh. |
 | `POST /api/vocabulary` | Create a word. `409` with the existing entries if it is a duplicate. |
@@ -269,7 +329,7 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | `DELETE /api/vocabulary/:id` | Move a word to the trash. |
 | `POST /api/vocabulary/:id/restore` | Take it back out. |
 | `GET /api/trash` | Deleted words that can be restored. |
-| `GET /api/settings`, `PUT /api/settings` | The account's time zone. |
+| `GET /api/settings`, `PUT /api/settings` | The account's time zone and FSRS target retention; the database version found. |
 
 ## Development
 
@@ -298,9 +358,15 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 - A signed-in user can change their own data directly through the Supabase
   API, bypassing the review rules. They cannot touch anyone else's.
 - The review history starts on 2026-10-10. Earlier reviews were never
-  recorded individually, so they are not in it.
-- The scheduling is the mastery-based rule above. Columns for a future FSRS
-  scheduler exist in the database but nothing uses them yet.
+  recorded individually, so they are not in it, and review activity, streaks
+  and weak words can only see from then on.
+- The scheduling is the mastery-based rule above. FSRS is calculated alongside
+  for comparison only; switching to it is not built yet.
+- Only the latest answer can be undone, and only while nothing else has
+  happened to that word since.
+- There is one study mode (flashcards). Daily goals, collections, import of
+  word lists and a retention forecast are planned, not built: see
+  [docs/upgrade-plan.md](docs/upgrade-plan.md).
 
 ## If something goes wrong
 

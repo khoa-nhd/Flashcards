@@ -63,10 +63,18 @@ export interface TestDatabase {
   close(): Promise<void>;
 }
 
-export async function createTestDatabase(): Promise<TestDatabase> {
+export interface TestDatabaseOptions {
+  /**
+   * Apply only the first N migrations, to stand in for a project whose owner
+   * has not run the newer ones yet. All of them by default.
+   */
+  migrations?: number;
+}
+
+export async function createTestDatabase(options: TestDatabaseOptions = {}): Promise<TestDatabase> {
   const db = new PGlite();
   await db.exec(PLATFORM_STUB);
-  for (const migration of readMigrations()) await db.exec(migration.sql);
+  for (const migration of readMigrations().slice(0, options.migrations)) await db.exec(migration.sql);
 
   const session = (tx: Transaction): Session => ({
     async query<T extends Row = Row>(sql: string, params: unknown[] = []) {

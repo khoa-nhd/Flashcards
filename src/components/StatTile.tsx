@@ -2,7 +2,8 @@ import { Link } from './Link.js';
 
 export interface StatTileProps {
   label: string;
-  value: number;
+  /** A count, or ready-made text such as a percentage or a duration. */
+  value: number | string;
   /** A short clarification of what is counted. */
   hint?: string;
   /** Where the number can be explored, if anywhere. */
@@ -15,7 +16,7 @@ const numberFormat = new Intl.NumberFormat();
 
 /** One headline number. The value is plain text; colour only ever sits beside it. */
 export function StatTile({ label, value, hint, to, emphasis = null }: StatTileProps) {
-  const marked = emphasis !== null && value > 0;
+  const marked = emphasis !== null && typeof value === 'number' && value > 0;
   const body = (
     <>
       <div className="flex items-center gap-2 text-sm text-muted">
@@ -27,7 +28,9 @@ export function StatTile({ label, value, hint, to, emphasis = null }: StatTilePr
         )}
         <span>{label}</span>
       </div>
-      <div className="mt-1 text-3xl font-semibold tracking-tight text-ink">{numberFormat.format(value)}</div>
+      <div className="mt-1 text-3xl font-semibold tracking-tight text-ink">
+        {typeof value === 'number' ? numberFormat.format(value) : value}
+      </div>
       {hint !== undefined && <div className="mt-1 text-xs text-muted">{hint}</div>}
     </>
   );

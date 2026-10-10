@@ -12,7 +12,19 @@
  * Changing a value here changes how every account's reviews are scheduled.
  */
 import type { ReviewRules } from '../shared/review-logic.js';
+import { FSRS_RATINGS } from '../shared/scheduler/fsrs.js';
+import { assertRatingMap, type RatingMap } from '../shared/scheduler/rating-map.js';
 import type { CardFieldConfig, NewWordDefaults } from '../shared/vocabulary.js';
+
+/**
+ * How the two answers are rated for FSRS, which is calculated in the
+ * background beside the schedule above and does not decide what is due.
+ * Remember is Good rather than Easy on purpose; see shared/scheduler/rating-map.ts.
+ */
+export const fsrsRatingMap: RatingMap = assertRatingMap({
+  remember: FSRS_RATINGS.good,
+  not_remember: FSRS_RATINGS.again,
+});
 
 /**
  * What a word created in the app starts with: mastery 1 and no review date.
