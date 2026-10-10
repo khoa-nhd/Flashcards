@@ -31,10 +31,12 @@ export interface AppShellProps {
   reviewCount: number | null;
   /** A short status label such as "Sample data" or "Read-only". */
   badge: string | null;
+  /** The signed-in account, where the app has accounts. */
+  account?: { email: string | null; signOut(): Promise<void> } | null;
   children: ReactNode;
 }
 
-export function AppShell({ active, reviewCount, badge, children }: AppShellProps) {
+export function AppShell({ active, reviewCount, badge, account = null, children }: AppShellProps) {
   const main = useRef<HTMLElement>(null);
 
   // A new page starts at its top, like a full page load would.
@@ -81,6 +83,20 @@ export function AppShell({ active, reviewCount, badge, children }: AppShellProps
           <div className="my-2 border-t border-line" />
           {SECONDARY.map(sideLink)}
         </nav>
+        {account !== null && (
+          <div className="flex flex-col gap-1 border-t border-line px-3 pt-3 text-xs text-muted">
+            <span className="truncate" title={account.email ?? undefined}>
+              {account.email ?? 'Signed in'}
+            </span>
+            <button
+              type="button"
+              className="cursor-pointer self-start font-semibold text-accent underline-offset-2 hover:underline"
+              onClick={() => void account.signOut().catch(() => undefined)}
+            >
+              Sign out
+            </button>
+          </div>
+        )}
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">

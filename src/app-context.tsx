@@ -11,12 +11,21 @@ import { createSettingsStore, type Settings, type SettingsStore } from './lib/se
 import { createToastStore, type ToastStore } from './lib/toasts.js';
 import { createVocabularyStore, type VocabularyState, type VocabularyStore } from './lib/vocabulary-store.js';
 
+/** The signed-in account, where the app has accounts. */
+export interface AccountControls {
+  email: string | null;
+  /** Signs out on this device. */
+  signOut(): Promise<void>;
+}
+
 export interface AppServices {
   api: AppApi;
   session: SessionController;
   vocabulary: VocabularyStore;
   settings: SettingsStore;
   toasts: ToastStore;
+  /** `null` where the app runs without accounts. */
+  account: AccountControls | null;
   /**
    * Called when the Review tab is shown. Loads the queue on the first visit;
    * afterwards only a finished or failed session is replaced, so one in
@@ -25,7 +34,16 @@ export interface AppServices {
   ensureReviewSession(): void;
 }
 
-export function createAppServices(api: AppApi, settings: SettingsStore = createSettingsStore()): AppServices {
+/**
+ * With accounts, one set of services is created per signed-in user and thrown
+ * away when they sign out, so nothing loaded for one account is ever shown to
+ * another.
+ */
+export function createAppServices(
+  api: AppApi,
+  settings: SettingsStore = createSettingsStore(),
+  account: AccountControls | null = null,
+): AppServices {
   const vocabulary = createVocabularyStore(api);
   // A saved answer changes mastery and dates, so the other pages must re-read.
   const session = createSessionController(api, () => vocabulary.markStale());
@@ -38,7 +56,7 @@ export function createAppServices(api: AppApi, settings: SettingsStore = createS
       void session.load();
     }
   };
-  return { api, session, vocabulary, settings, toasts: createToastStore(), ensureReviewSession };
+  return { api, session, vocabulary, settings, toasts: createToastStore(), account, ensureReviewSession };
 }
 
 const AppContext = createContext<AppServices | null>(null);
@@ -57,6 +75,16 @@ export function useVocabulary(): VocabularyState {
   const state = useSyncExternalStore(vocabulary.subscribe, vocabulary.getState);
   useEffect(() => {
     vocabulary.ensureFresh();
+    // Coming back to the tab is when another device's changes are most likely to be missing.
+    const refresh = () => {
+      if (document.visibilityState === 'visible') vocabulary.ensureFresh();
+    };
+    document.addEventListener('visibilitychange', refresh);
+    window.addEventListener('focus', refresh);
+    return () => {
+      document.removeEventListener('visibilitychange', refresh);
+      window.removeEventListener('focus', refresh);
+    };
   }, [vocabulary]);
   return state;
 }

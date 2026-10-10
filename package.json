@@ -17,17 +17,22 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "notion:inspect": "tsx scripts/inspect-notion.ts",
-    "dev:mock": "vite --mode mock --port 5174"
+    "dev:mock": "vite --mode mock --port 5174",
+    "notion:export": "tsx scripts/export-notion.ts",
+    "supabase:import": "tsx scripts/supabase-import.ts",
+    "supabase:verify": "tsx scripts/supabase-verify.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.4",
     "@notionhq/client": "^5.27.0",
+    "@supabase/supabase-js": "^2.117.3",
     "hono": "^4.13.13",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@eslint/js": "^10.0.1",
     "@tailwindcss/vite": "^4.3.3",
     "@testing-library/dom": "^10.4.2",

@@ -158,7 +158,7 @@ describe('findEntriesByWord', () => {
 describe('createEntry', () => {
   it('creates a row in the configured data source with typed values', async () => {
     const { api, repository } = setup();
-    const entry = await repository.createEntry({
+    const { entry, created } = await repository.createEntry({
       word: 'candid',
       meaning: 'thẳng thắn',
       definition: 'honest and direct',
@@ -167,6 +167,7 @@ describe('createEntry', () => {
       mastery: 1,
       reviewDate: null,
     });
+    expect(created).toBe(true);
     expect(api.creations).toEqual([
       {
         dataSourceId: DATA_SOURCE_ID,

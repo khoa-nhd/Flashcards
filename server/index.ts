@@ -30,6 +30,6 @@ serve({ fetch: app.fetch, port: config.port, hostname: config.host }, ({ port })
         ? 'ENABLED'
         : 'disabled (read-only preview)';
   console.log(`Flashcard API listening on http://${config.host}:${port}`);
-  console.log(`  data: ${config.mode} | Notion writes: ${writes} | access: ${accessMode(config)}`);
+  console.log(`  data: ${config.mode} | writes: ${writes} | access: ${accessMode(config)}`);
   for (const issue of config.issues) console.warn(`  setup issue: ${issue}`);
 });

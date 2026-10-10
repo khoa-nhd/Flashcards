@@ -1,10 +1,12 @@
 import { useApp, useSettings, useVocabulary } from '../app-context.js';
+import { AccountSection, TimeZoneSection, TrashSection } from '../components/AccountSettings.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { SkippedNotice } from '../components/SkippedNotice.js';
 import { BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { sortEntries } from '../lib/bank-query.js';
 import { downloadFile, toCsv, toJson } from '../lib/export.js';
 import type { Settings, SortKey } from '../lib/settings.js';
+import { wording } from '../lib/source.js';
 
 const SORT_LABELS: Record<SortKey, string> = {
   word: 'Word',
@@ -13,8 +15,20 @@ const SORT_LABELS: Record<SortKey, string> = {
   mastery: 'Mastery',
 };
 
+const SOURCE_TEXT = {
+  notion: 'Notion',
+  supabase: 'Your account (Supabase)',
+  mock: 'Built-in sample data (not Notion)',
+} as const;
+
+const SAVING_TEXT = {
+  notion: 'On: reviews, new words and edits are written to Notion',
+  supabase: 'On: reviews, new words and edits are saved to your account',
+  mock: 'On, in memory only: nothing reaches Notion',
+} as const;
+
 export function SettingsPage() {
-  const { settings: store, vocabulary } = useApp();
+  const { settings: store, vocabulary, account } = useApp();
   const settings = useSettings();
   const state = useVocabulary();
   const { meta, entries } = state;
@@ -23,9 +37,19 @@ export function SettingsPage() {
 
   return (
     <div className={PAGE}>
-      <PageHeader title="Settings" description="Preferences are kept in this browser only." />
+      <PageHeader
+        title="Settings"
+        description={
+          account === null
+            ? 'Preferences are kept in this browser only.'
+            : 'Display preferences are kept in this browser; your words and time zone are kept in your account.'
+        }
+      />
 
       <div className="flex max-w-2xl flex-col gap-6">
+        {account !== null && <AccountSection account={account} />}
+        {account !== null && <TimeZoneSection />}
+
         <section className={`${CARD} flex flex-col gap-4 p-5`}>
           <h2 className={SECTION_TITLE}>Vocabulary bank</h2>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -118,7 +142,7 @@ export function SettingsPage() {
           <h2 className={SECTION_TITLE}>Backup</h2>
           <p className="text-sm text-muted">
             Download every word with its meaning, definition, example, mastery and dates. Exporting only reads; it
-            never changes Notion.
+            never changes {wording(meta?.mode, 'Notion', 'anything')}.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -157,15 +181,18 @@ export function SettingsPage() {
           ) : (
             <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-2 text-sm">
               <dt className="text-muted">Data source</dt>
-              <dd className="m-0">{meta.mode === 'notion' ? 'Notion' : 'Built-in sample data (not Notion)'}</dd>
+              <dd className="m-0">{SOURCE_TEXT[meta.mode]}</dd>
               <dt className="text-muted">Saving</dt>
-              <dd className="m-0">
-                {!meta.writesEnabled
-                  ? 'Off: read-only'
-                  : meta.mode === 'notion'
-                    ? 'On: reviews, new words and edits are written to Notion'
-                    : 'On, in memory only: nothing reaches Notion'}
-              </dd>
+              <dd className="m-0">{!meta.writesEnabled ? 'Off: read-only' : SAVING_TEXT[meta.mode]}</dd>
+              {meta.mode === 'supabase' && (
+                <>
+                  <dt className="text-muted">Other devices</dt>
+                  <dd className="m-0">
+                    Changes made elsewhere appear when a page re-reads your words: on opening it, on returning to this
+                    tab, or with Check again. They do not appear instantly.
+                  </dd>
+                </>
+              )}
               <dt className="text-muted">Words</dt>
               <dd className="m-0 tabular-nums">{entries.length}</dd>
               <dt className="text-muted">Today</dt>
@@ -181,6 +208,9 @@ export function SettingsPage() {
           )}
           {meta !== null && <SkippedNotice skipped={meta.skipped} />}
         </section>
+
+        {/* Notion keeps deleted pages in its own trash; every other store lists them here. */}
+        {meta !== null && meta.mode !== 'notion' && <TrashSection />}
       </div>
     </div>
   );

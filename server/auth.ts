@@ -9,9 +9,11 @@ import type { AppConfig } from './env.js';
 export const SESSION_COOKIE = 'flashcard_session';
 export const SESSION_TTL_SECONDS = 60 * 60 * 24 * 30;
 
-export type AccessMode = 'open' | 'password' | 'locked';
+export type AccessMode = 'open' | 'password' | 'locked' | 'account';
 
 export function accessMode(config: AppConfig): AccessMode {
+  // With Supabase every request is made as a signed-in account; the shared passphrase plays no part.
+  if (config.mode === 'supabase') return 'account';
   if (config.accessPassword !== null) return 'password';
   // Without a password, only a local dev server or an explicit opt-out is open.
   if (!config.isProduction || config.allowUnauthenticated) return 'open';

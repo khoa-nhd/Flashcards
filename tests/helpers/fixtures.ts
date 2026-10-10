@@ -1,7 +1,12 @@
 import type { QueueResponse, ReviewCard } from '../../shared/api.js';
 import type { ReviewState } from '../../shared/review-logic.js';
 import type { VocabularyRecord } from '../../shared/vocabulary.js';
-import type { SetupReport, VocabularyRepository } from '../../server/vocabulary-repository.js';
+import type {
+  ReviewWrite,
+  ReviewWriteResult,
+  SetupReport,
+  VocabularyRepository,
+} from '../../server/vocabulary-repository.js';
 
 /** The fixed "today" used throughout the tests. */
 export const TODAY = '2026-10-09';
@@ -104,6 +109,7 @@ export class FakeRepository implements VocabularyRepository {
     return found ? { ...found } : null;
   }
 
+  /** The single place a write lands, so a test can make it fail or misreport. */
   async updateReviewState(id: string, changes: Partial<ReviewState>) {
     const existing = this.records.get(id);
     if (!existing) throw new Error('unknown record');
@@ -111,6 +117,19 @@ export class FakeRepository implements VocabularyRepository {
     const updated = { ...existing, ...changes };
     this.records.set(id, updated);
     return this.afterUpdate({ ...updated });
+  }
+
+  /** Like Notion: writes only what changed, and keeps no record of answers. */
+  async applyReview(write: ReviewWrite): Promise<ReviewWriteResult> {
+    const changes: Partial<ReviewState> = {};
+    if (write.next.mastery !== write.expected.mastery) changes.mastery = write.next.mastery;
+    if (write.next.nextReview !== write.expected.nextReview) changes.nextReview = write.next.nextReview;
+    const updated = await this.updateReviewState(write.id, changes);
+    return { outcome: 'applied', state: { mastery: updated.mastery ?? Number.NaN, nextReview: updated.nextReview } };
+  }
+
+  async findReview(): Promise<ReviewState | null> {
+    return null;
   }
 
   /** Simulates an edit made directly in Notion. */

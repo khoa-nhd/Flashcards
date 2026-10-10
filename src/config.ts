@@ -8,7 +8,7 @@ export const SWIPE = {
 
 export const TIMEOUTS = {
   queueMs: 60_000,
-  /** Longer than the server's own Notion timeouts, so the server answers first when it can. */
+  /** Longer than the server's own timeouts, so the server answers first when it can. */
   actionMs: 40_000,
   loginMs: 15_000,
 } as const;

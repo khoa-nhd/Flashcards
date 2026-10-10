@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { QueueResponse, ReviewActionResponse } from '../../shared/api.js';
-import { ApiError } from '../../src/lib/api-client.js';
+import { ApiError, type ReviewApi } from '../../src/lib/api-client.js';
 import { createSessionController } from '../../src/lib/session-controller.js';
 import { currentCard } from '../../src/lib/session-machine.js';
 import { card, deferred, queueResponse, type Deferred } from '../helpers/fixtures.js';
@@ -12,7 +12,7 @@ function setup(cardCount = 3) {
   const saves: Array<Deferred<ReviewActionResponse>> = [];
   const api = {
     fetchQueue: vi.fn(async () => queueResponse(Array.from({ length: cardCount }, (_, index) => card(index + 1)))),
-    submitAction: vi.fn(() => {
+    submitAction: vi.fn<ReviewApi['submitAction']>(() => {
       const pending = deferred<ReviewActionResponse>();
       saves.push(pending);
       return pending.promise;
@@ -90,7 +90,18 @@ describe('answering', () => {
       pageId: card(1).id,
       action: 'not_remember',
       expected: { mastery: 3, nextReview: card(1).nextReview },
+      requestId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
+      durationMs: expect.any(Number),
     });
+  });
+
+  it('never sends a mastery or a date for the server to store', async () => {
+    const { api, session } = setup();
+    await session.load();
+    session.flip();
+    session.grade('remember');
+    const sent = api.submitAction.mock.calls[0]?.[0] ?? {};
+    expect(Object.keys(sent).sort()).toEqual(['action', 'durationMs', 'expected', 'pageId', 'requestId']);
   });
 
   it('stays on the card until the server confirms, then shows the next front', async () => {
@@ -192,6 +203,22 @@ describe('when a save fails', () => {
     expect(session.getState()).toMatchObject({ status: 'flipped', index: 0, pendingAction: null });
     expect(session.grade('not_remember')).toBe(true);
     expect(api.submitAction).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'not_remember' }));
+    // A different answer is a different submission, not a repeat of the failed one.
+    const [first, second] = api.submitAction.mock.calls.map(([request]) => request.requestId);
+    expect(second).not.toBe(first);
+  });
+
+  it('gives every answer its own request id', async () => {
+    const { api, session, saves } = setup();
+    await session.load();
+    for (const index of [0, 1, 2]) {
+      session.flip();
+      session.grade('remember');
+      saves[index]?.resolve(applied);
+      await settled();
+    }
+    const ids = api.submitAction.mock.calls.map(([request]) => request.requestId);
+    expect(new Set(ids).size).toBe(3);
   });
 
   it('treats a conflict as a stale card: no retry, explicit skip only', async () => {

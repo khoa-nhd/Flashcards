@@ -6,6 +6,7 @@
  */
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { ApiError, type ReviewApi } from './api-client.js';
+import { newRequestId } from './request-id.js';
 import {
   currentCard,
   initialSessionState,
@@ -30,19 +31,29 @@ export interface SessionController {
 const messageOf = (error: unknown) =>
   error instanceof ApiError ? error.message : 'Something unexpected went wrong.';
 
+/** The longest time on one card worth recording; anything more is a tab left open. */
+const MAX_DURATION_MS = 86_400_000;
+
 export function createSessionController(
   api: Pick<ReviewApi, 'fetchQueue' | 'submitAction'>,
-  /** Called once Notion has confirmed an answer, so other views know their data has changed. */
+  /** Called once an answer is confirmed as saved, so other views know their data has changed. */
   onSaved: () => void = () => {},
 ): SessionController {
   let state = initialSessionState;
   let loadSequence = 0;
+  /** When the card on screen appeared, to record how long it took to answer. */
+  let shown: { id: string; at: number } | null = null;
+  /** Identifies the answer being saved. A retry repeats it, so one answer is recorded once. */
+  let answer: { requestId: string; durationMs: number } | null = null;
   const listeners = new Set<() => void>();
 
   const dispatch = (event: SessionEvent): boolean => {
     const next = transition(state, event);
     if (next === state) return false;
     state = next;
+    const card = currentCard(state);
+    if (card === null) shown = null;
+    else if (shown?.id !== card.id) shown = { id: card.id, at: Date.now() };
     for (const listener of listeners) listener();
     return true;
   };
@@ -50,12 +61,14 @@ export function createSessionController(
   const save = async () => {
     const card = currentCard(state);
     const action = state.pendingAction;
-    if (state.status !== 'saving' || card === null || action === null) return;
+    if (state.status !== 'saving' || card === null || action === null || answer === null) return;
     try {
       await api.submitAction({
         pageId: card.id,
         action,
         expected: { mastery: card.mastery, nextReview: card.nextReview },
+        requestId: answer.requestId,
+        durationMs: answer.durationMs,
       });
       dispatch({ type: 'SAVE_SUCCEEDED' });
       onSaved();
@@ -99,7 +112,9 @@ export function createSessionController(
     },
 
     grade(action) {
+      const elapsed = shown === null ? 0 : Date.now() - shown.at;
       if (!dispatch({ type: 'GRADE', action })) return false;
+      answer = { requestId: newRequestId(), durationMs: Math.min(Math.max(Math.round(elapsed), 0), MAX_DURATION_MS) };
       void save();
       return true;
     },

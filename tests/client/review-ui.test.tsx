@@ -190,6 +190,8 @@ describe('answering with the keyboard', () => {
       pageId: card(1).id,
       action: 'remember',
       expected: { mastery: 3, nextReview: TODAY },
+      requestId: expect.any(String),
+      durationMs: expect.any(Number),
     });
   });
 
@@ -581,7 +583,7 @@ describe('when saving fails', () => {
   });
 
   it('does not offer a retry for a card that changed in Notion', async () => {
-    const { api, saves } = await renderApp();
+    const { api, saves } = await renderApp(undefined, { mode: 'notion' });
     press(' ');
     press('ArrowRight');
     await fail(saves[0], new ApiError('conflict', 'This card was changed in Notion after it was loaded.', 409));
@@ -591,6 +593,26 @@ describe('when saving fails', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Skip this card' }));
     showsCard(2, 'word-2');
     expect(api.submitAction).toHaveBeenCalledTimes(1);
+  });
+
+  it('treats a card answered on another device as stale, without naming Notion', async () => {
+    const { api, saves } = await renderApp([card(1), card(2)], { mode: 'supabase' });
+    press(' ');
+    press('ArrowRight');
+    await fail(saves[0], new ApiError('conflict', 'This card was changed after it was loaded, so nothing was saved.', 409));
+
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('This card changed on another device');
+    expect(alert).not.toHaveTextContent(/notion/i);
+    expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+
+    // Skipping records nothing; the session simply moves on and says so at the end.
+    fireEvent.click(screen.getByRole('button', { name: 'Skip this card' }));
+    press(' ');
+    press('ArrowRight');
+    await settle(saves[1]);
+    expect(api.submitAction).toHaveBeenCalledTimes(2);
+    expect(screen.getByText('Skipped because they changed on another device')).toBeInTheDocument();
   });
 });
 

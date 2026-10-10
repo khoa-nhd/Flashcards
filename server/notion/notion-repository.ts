@@ -10,7 +10,7 @@ import type {
 } from '../../shared/vocabulary.js';
 import { HttpError } from '../errors.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
-import type { SetupReport, VocabularyRepository } from '../vocabulary-repository.js';
+import type { ReviewWrite, ReviewWriteResult, SetupReport, VocabularyRepository } from '../vocabulary-repository.js';
 import type { NotionApi } from './notion-client.js';
 import { NotionRequestError } from './notion-errors.js';
 import {
@@ -156,7 +156,34 @@ export class NotionVocabularyRepository implements VocabularyRepository, Vocabul
     return record;
   }
 
+  /**
+   * Notion keeps no record of answers and has no conditional update, so this
+   * simply writes the properties that changed. Protection against a repeated
+   * answer comes from the caller comparing states before it gets here.
+   */
+  async applyReview(write: ReviewWrite): Promise<ReviewWriteResult> {
+    const changes: Partial<ReviewState> = {};
+    if (write.next.mastery !== write.expected.mastery) changes.mastery = write.next.mastery;
+    if (write.next.nextReview !== write.expected.nextReview) changes.nextReview = write.next.nextReview;
+    if (Object.keys(changes).length === 0) return { outcome: 'applied', state: write.expected };
+
+    const record = await this.updateReviewState(write.id, changes);
+    if (record.mastery === null) {
+      throw new HttpError(502, 'unconfirmed_write', 'Notion returned the word without a mastery value.');
+    }
+    return { outcome: 'applied', state: { mastery: record.mastery, nextReview: record.nextReview } };
+  }
+
+  async findReview(): Promise<ReviewState | null> {
+    return null;
+  }
+
   // ---- VocabularyCatalog: whole records for the bank, dashboard and calendar ----
+
+  /** Trashed pages live in Notion's own trash and are not listed through the API. */
+  async listTrashed(): Promise<EntryData[]> {
+    return [];
+  }
 
   async listEntries() {
     const schema = await this.readableSchema();
@@ -205,7 +232,7 @@ export class NotionVocabularyRepository implements VocabularyRepository, Vocabul
     return matches;
   }
 
-  async createEntry(entry: NewEntry): Promise<EntryData> {
+  async createEntry(entry: NewEntry): Promise<{ entry: EntryData; created: boolean }> {
     const schema = await this.writableSchema();
     const { properties, vocabularyFields } = this.options;
     const values: Record<string, unknown> = {
@@ -219,7 +246,7 @@ export class NotionVocabularyRepository implements VocabularyRepository, Vocabul
     if (entry.dateAdded !== null) values[vocabularyFields.dateAdded] = dateValue(entry.dateAdded);
     if (entry.reviewDate !== null) values[properties.nextReview] = dateValue(entry.reviewDate);
 
-    return this.confirmed(await this.api.createPage(schema.dataSourceId, values), schema);
+    return { entry: this.confirmed(await this.api.createPage(schema.dataSourceId, values), schema), created: true };
   }
 
   async updateEntry(id: string, changes: EntryChanges): Promise<EntryData> {

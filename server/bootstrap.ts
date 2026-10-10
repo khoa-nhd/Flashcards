@@ -1,4 +1,3 @@
-import type { Hono } from 'hono';
 import {
   cardFields,
   newWordDefaults,
@@ -14,6 +13,7 @@ import { sampleRules } from './mock/sample-rules.js';
 import { createNotionApi } from './notion/notion-client.js';
 import { NotionVocabularyRepository } from './notion/notion-repository.js';
 import { ReviewService } from './review-service.js';
+import { createSupabaseAccounts } from './supabase/supabase-accounts.js';
 import { VocabularyService } from './vocabulary-service.js';
 
 interface Services {
@@ -76,10 +76,30 @@ function buildServices(config: AppConfig): Services | null {
 
 /** Wires configuration, data source and routes together. Shared by every entry point. */
 export function buildApp(env: Record<string, string | undefined> = process.env): {
-  app: Hono;
+  app: ReturnType<typeof createApp>;
   config: AppConfig;
 } {
   const config = loadConfig(env);
+
+  if (config.mode === 'supabase') {
+    // Each request is served as the account that made it, so there are no shared services.
+    // If the configuration is incomplete the app answers 503 with the reasons; it never
+    // reaches for another data source instead.
+    const accounts =
+      config.supabase === null || config.issues.length > 0
+        ? null
+        : createSupabaseAccounts({
+            url: config.supabase.url,
+            publicKey: config.supabase.publicKey,
+            rules: reviewRules,
+            cardFields,
+            defaults: newWordDefaults,
+            defaultTimeZone: config.timeZone,
+            writesRequested: config.writesRequested,
+          });
+    return { app: createApp({ config, service: null, accounts }), config };
+  }
+
   const services = buildServices(config);
   return {
     app: createApp({ config, service: services?.review ?? null, vocabulary: services?.vocabulary ?? null }),

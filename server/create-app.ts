@@ -9,8 +9,12 @@ import {
   pageIdSchema,
   reviewActionRequestSchema,
   updateEntryRequestSchema,
+  updateSettingsRequestSchema,
+  type AccountSettings,
   type ApiErrorBody,
+  type AppConfigResponse,
 } from '../shared/api.js';
+import { bearerToken, type AccountGateway, type AccountSession } from './accounts.js';
 import {
   LoginThrottle,
   SESSION_COOKIE,
@@ -24,16 +28,28 @@ import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
 import { NotionRequestError, notionErrorToHttp } from './notion/notion-errors.js';
 import type { ReviewService } from './review-service.js';
+import { DatabaseError } from './supabase/supabase-database.js';
 import type { VocabularyService } from './vocabulary-service.js';
 
 export interface AppDependencies {
   config: AppConfig;
-  /** `null` when configuration problems prevent building the service. */
+  /** `null` when configuration problems prevent building the service, or when each account has its own. */
   service: ReviewService | null;
   /** Whole-record operations; `null` under the same conditions as `service`. */
   vocabulary?: VocabularyService | null;
+  /** Present when the app has accounts: every request then gets services of its own. */
+  accounts?: AccountGateway | null;
   now?: () => Date;
 }
+
+/** What the current request may use. With accounts, all of it belongs to one signed-in user. */
+interface Scope {
+  review: ReviewService | null;
+  vocabulary: VocabularyService | null;
+  session: AccountSession | null;
+}
+
+type AppEnv = { Variables: { scope: Scope } };
 
 function errorResponse(c: Context, error: HttpError) {
   const body: ApiErrorBody & Record<string, unknown> = {
@@ -42,6 +58,22 @@ function errorResponse(c: Context, error: HttpError) {
   };
   for (const [name, value] of Object.entries(error.options.headers ?? {})) c.header(name, value);
   return c.json(body, error.status as ContentfulStatusCode);
+}
+
+/** A database failure as the browser should hear about it. Nothing is hidden, and nothing internal is shown. */
+function databaseErrorToHttp(error: DatabaseError): HttpError {
+  switch (error.failure) {
+    case 'unauthorized':
+      return new HttpError(401, 'unauthorized', error.message);
+    case 'forbidden':
+      return new HttpError(403, 'forbidden', error.message);
+    case 'schema_missing':
+      return new HttpError(503, 'setup_incomplete', error.message);
+    case 'invalid':
+      return new HttpError(400, 'invalid_request', error.message);
+    case 'unavailable':
+      return new HttpError(503, 'database_unavailable', `${error.message} Nothing was changed; try again shortly.`);
+  }
 }
 
 async function parseBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
@@ -61,27 +93,42 @@ async function parseBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
   return parsed.data;
 }
 
-export function createApp({ config, service, vocabulary = null, now = () => new Date() }: AppDependencies): Hono {
-  const app = new Hono();
+export function createApp({
+  config,
+  service,
+  vocabulary = null,
+  accounts = null,
+  now = () => new Date(),
+}: AppDependencies): Hono<AppEnv> {
+  const app = new Hono<AppEnv>();
   const access = accessMode(config);
   const throttle = new LoginThrottle();
 
   const notConfigured = () =>
     new HttpError(503, 'setup_incomplete', `The server is not configured yet. ${config.issues.join(' ')}`);
 
-  const requireService = (): ReviewService => {
-    if (service === null) throw notConfigured();
-    return service;
+  const requireService = (c: Context<AppEnv>): ReviewService => {
+    const { review } = c.get('scope');
+    if (review === null) throw notConfigured();
+    return review;
   };
 
-  const requireVocabulary = (): VocabularyService => {
-    if (vocabulary === null) throw notConfigured();
-    return vocabulary;
+  const requireVocabulary = (c: Context<AppEnv>): VocabularyService => {
+    const scoped = c.get('scope').vocabulary;
+    if (scoped === null) throw notConfigured();
+    return scoped;
   };
 
   app.onError((error, c) => {
     if (error instanceof HttpError) return errorResponse(c, error);
     if (error instanceof NotionRequestError) return errorResponse(c, notionErrorToHttp(error));
+    if (error instanceof DatabaseError) {
+      // The code says what went wrong without quoting any stored value.
+      if (error.failure !== 'unauthorized') {
+        console.error(`Database error: ${error.failure}${error.code === null ? '' : ` (${error.code})`}`);
+      }
+      return errorResponse(c, databaseErrorToHttp(error));
+    }
     // Unknown failures may carry internals, so only their message reaches the log and none of it the client.
     console.error('Unhandled error:', error instanceof Error ? error.message : 'non-error thrown');
     return errorResponse(c, new HttpError(500, 'internal_error', 'Something went wrong on the server.'));
@@ -137,8 +184,18 @@ export function createApp({ config, service, vocabulary = null, now = () => new 
     }),
   );
 
+  // Tells the browser how to sign in. The address and key are the ones meant for browsers.
+  app.get('/api/config', (c) => {
+    const body: AppConfigResponse = {
+      mode: config.mode,
+      auth: access === 'account' ? 'account' : access === 'password' ? 'password' : 'none',
+      supabase: access === 'account' ? config.supabase : null,
+    };
+    return c.json(body);
+  });
+
   app.post('/api/login', async (c) => {
-    if (config.accessPassword === null) {
+    if (config.accessPassword === null || access !== 'password') {
       throw new HttpError(400, 'login_not_enabled', 'This server does not use a password.');
     }
     const wait = throttle.retryAfterSeconds(now());
@@ -171,6 +228,16 @@ export function createApp({ config, service, vocabulary = null, now = () => new 
   // ---- Everything registered below this guard requires access. ----
 
   app.use('/api/*', async (c, next) => {
+    if (access === 'account') {
+      // No account backend means the configuration is incomplete. There is no other data path to fall back to.
+      if (accounts === null) throw notConfigured();
+      const token = bearerToken(c.req.header('authorization'));
+      if (token === null) throw new HttpError(401, 'unauthorized', 'Sign in to continue.');
+      const session = await accounts.open(token, { timeZone: c.req.header('x-time-zone')?.trim() || null });
+      if (session === null) throw new HttpError(401, 'unauthorized', 'Your session has expired. Sign in again.');
+      c.set('scope', { review: session.review, vocabulary: session.vocabulary, session });
+      return next();
+    }
     if (access === 'locked') {
       throw new HttpError(
         503,
@@ -183,14 +250,39 @@ export function createApp({ config, service, vocabulary = null, now = () => new 
         throw new HttpError(401, 'unauthorized', 'Enter the access password to continue.');
       }
     }
+    c.set('scope', { review: service, vocabulary, session: null });
     await next();
   });
 
-  app.get('/api/review-queue', async (c) => c.json(await requireService().getQueue()));
+  app.get('/api/review-queue', async (c) => c.json(await requireService(c).getQueue()));
 
   app.post('/api/review-action', async (c) => {
     const request = await parseBody(c, reviewActionRequestSchema);
-    return c.json(await requireService().submitAction(request));
+    return c.json(await requireService(c).submitAction(request));
+  });
+
+  // ---- Account settings ----
+
+  const settingsOf = (c: Context<AppEnv>): AccountSettings => {
+    const { session } = c.get('scope');
+    if (session !== null) {
+      return { timeZone: session.timeZone, timeZoneEditable: true, email: session.account.email };
+    }
+    if (config.timeZone === null) throw notConfigured();
+    return { timeZone: config.timeZone, timeZoneEditable: false, email: null };
+  };
+
+  app.get('/api/settings', (c) => c.json(settingsOf(c)));
+
+  app.put('/api/settings', async (c) => {
+    const { session } = c.get('scope');
+    if (session === null) {
+      throw new HttpError(409, 'not_editable', 'The time zone is part of the server configuration (REVIEW_TIMEZONE).');
+    }
+    const { timeZone } = await parseBody(c, updateSettingsRequestSchema);
+    const saved = await session.saveTimeZone(timeZone);
+    const body: AccountSettings = { timeZone: saved, timeZoneEditable: true, email: session.account.email };
+    return c.json(body);
   });
 
   // ---- Vocabulary bank. Every write goes through VocabularyService's allow-list. ----
@@ -201,26 +293,28 @@ export function createApp({ config, service, vocabulary = null, now = () => new 
     return parsed.data;
   };
 
-  app.get('/api/vocabulary', async (c) => c.json(await requireVocabulary().list()));
+  app.get('/api/vocabulary', async (c) => c.json(await requireVocabulary(c).list()));
 
-  app.get('/api/vocabulary/:id', async (c) => c.json({ entry: await requireVocabulary().get(entryId(c)) }));
+  app.get('/api/trash', async (c) => c.json({ entries: await requireVocabulary(c).listTrashed() }));
+
+  app.get('/api/vocabulary/:id', async (c) => c.json({ entry: await requireVocabulary(c).get(entryId(c)) }));
 
   app.post('/api/vocabulary', async (c) => {
     const request = await parseBody(c, createEntryRequestSchema);
-    const { entry, created } = await requireVocabulary().create(request);
+    const { entry, created } = await requireVocabulary(c).create(request);
     return c.json({ entry }, created ? 201 : 200);
   });
 
   app.patch('/api/vocabulary/:id', async (c) => {
     const id = entryId(c);
     const request = await parseBody(c, updateEntryRequestSchema);
-    return c.json({ entry: await requireVocabulary().update(id, request) });
+    return c.json({ entry: await requireVocabulary(c).update(id, request) });
   });
 
-  app.delete('/api/vocabulary/:id', async (c) => c.json(await requireVocabulary().trash(entryId(c))));
+  app.delete('/api/vocabulary/:id', async (c) => c.json(await requireVocabulary(c).trash(entryId(c))));
 
   app.post('/api/vocabulary/:id/restore', async (c) =>
-    c.json({ entry: await requireVocabulary().restore(entryId(c)) }),
+    c.json({ entry: await requireVocabulary(c).restore(entryId(c)) }),
   );
 
   return app;

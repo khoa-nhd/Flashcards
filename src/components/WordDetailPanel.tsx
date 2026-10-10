@@ -4,6 +4,7 @@ import { isIsoDate } from '../../shared/dates.js';
 import { useApp, useVocabulary } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { MISSING_LABELS, missingFields } from '../lib/bank-query.js';
+import { wording } from '../lib/source.js';
 import { MasteryPill, StatusBadge, formatDate, relativeDay } from './badges.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { Field, describedBy } from './Field.js';
@@ -58,7 +59,7 @@ function validate(draft: Draft, scheduleOpen: boolean): DraftErrors {
 
 /**
  * Everything stored about one word, with editing and deletion. Opens over the
- * current page; the latest values are fetched from Notion each time it opens.
+ * current page; the latest stored values are fetched each time it opens.
  */
 export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const { api, vocabulary, toasts } = useApp();
@@ -86,7 +87,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const closeButton = useRef<HTMLButtonElement>(null);
   const editing = draft !== null;
 
-  // Always show what Notion holds now, not what was loaded a while ago.
+  // Always show what is stored now, not what was loaded a while ago.
   useEffect(() => {
     let current = true;
     api
@@ -144,7 +145,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
     setErrors(found);
     if (Object.keys(found).length > 0) return;
 
-    // Send only what differs; the server compares again against Notion.
+    // Send only what differs; the server compares again against what is stored.
     const before = toDraft(entry);
     const input: UpdateEntryInput = {};
     if (draft.word !== before.word) input.word = draft.word;
@@ -188,7 +189,11 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
       vocabulary.remove(entry.id);
       const removed = entry;
       toasts.show({
-        message: `Moved “${removed.word}” to Notion's trash.`,
+        message: wording(
+          meta?.mode,
+          `Moved “${removed.word}” to Notion's trash.`,
+          `Moved “${removed.word}” to the trash.`,
+        ),
         action: {
           label: 'Undo',
           run: () => {
@@ -201,7 +206,14 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
               .catch((error: unknown) => {
                 toasts.show({
                   tone: 'error',
-                  message: error instanceof ApiError ? error.message : 'Could not restore the word. It is still in Notion’s trash.',
+                  message:
+                    error instanceof ApiError
+                      ? error.message
+                      : wording(
+                          meta?.mode,
+                          'Could not restore the word. It is still in Notion’s trash.',
+                          'Could not restore the word. It is still in the trash; restore it from Settings.',
+                        ),
                 });
               });
           },
@@ -505,8 +517,14 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
         >
           <p>
             <strong className="text-ink">{entry.word}</strong>
-            {entry.meaning ? ` (${entry.meaning})` : ''} will be moved to Notion's trash, together with its mastery of{' '}
-            {entry.mastery ?? '—'}. It can be restored from the trash in Notion for 30 days.
+            {entry.meaning ? ` (${entry.meaning})` : ''}{' '}
+            {wording(meta?.mode, "will be moved to Notion's trash", 'will be moved to the trash')}, together with its
+            mastery of {entry.mastery ?? '—'}.{' '}
+            {wording(
+              meta?.mode,
+              'It can be restored from the trash in Notion for 30 days.',
+              'It can be restored at any time from Settings, under Deleted words.',
+            )}
           </p>
         </ConfirmDialog>
       )}

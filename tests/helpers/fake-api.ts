@@ -1,6 +1,7 @@
 /** A complete in-memory stand-in for the server, for component tests. */
 import { vi } from 'vitest';
 import type {
+  AccountSettings,
   QueueResponse,
   ReviewActionResponse,
   ReviewCard,
@@ -51,13 +52,24 @@ export interface FakeApiOptions {
   queue?: Partial<QueueResponse>;
   entries?: VocabularyEntry[];
   list?: Partial<VocabularyListResponse>;
+  /** Words already in the trash. */
+  trashed?: VocabularyEntry[];
+  account?: Partial<AccountSettings>;
 }
 
-export function createFakeApi({ cards = [], queue = {}, entries = [], list = {} }: FakeApiOptions = {}) {
+export function createFakeApi({
+  cards = [],
+  queue = {},
+  entries = [],
+  list = {},
+  trashed = [],
+  account = {},
+}: FakeApiOptions = {}) {
   /** Review saves stay pending until a test settles them. */
   const saves: Array<Deferred<ReviewActionResponse>> = [];
   const store = entries.map((item) => ({ ...item }));
-  const trash = new Map<string, VocabularyEntry>();
+  const trash = new Map<string, VocabularyEntry>(trashed.map((item) => [item.id, { ...item }]));
+  const settings: AccountSettings = { timeZone: TIME_ZONE, timeZoneEditable: true, email: 'me@example.test', ...account };
   let nextId = 500;
 
   const find = (id: string) => {
@@ -118,6 +130,13 @@ export function createFakeApi({ cards = [], queue = {}, entries = [], list = {} 
       trash.delete(id);
       store.unshift(restored);
       return { ...restored };
+    }),
+    fetchTrash: vi.fn<AppApi['fetchTrash']>(async () => [...trash.values()].map((item) => ({ ...item }))),
+
+    fetchSettings: vi.fn<AppApi['fetchSettings']>(async () => ({ ...settings })),
+    saveSettings: vi.fn<AppApi['saveSettings']>(async ({ timeZone }) => {
+      settings.timeZone = timeZone;
+      return { ...settings };
     }),
   } satisfies AppApi;
 

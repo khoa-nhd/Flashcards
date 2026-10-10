@@ -32,7 +32,12 @@ const post = (body: unknown, headers: Record<string, string> = {}) => ({
   body: typeof body === 'string' ? body : JSON.stringify(body),
 });
 
-const validAction = { pageId: pageId(1), action: 'remember', expected: shown };
+const validAction = {
+  pageId: pageId(1),
+  action: 'remember',
+  expected: shown,
+  requestId: '11111111-1111-4111-8111-111111111111',
+};
 
 describe('GET /api/review-queue', () => {
   it('returns a queue that satisfies the shared schema', async () => {
@@ -67,8 +72,23 @@ describe('POST /api/review-action', () => {
     expect(repository.updates).toHaveLength(1);
   });
 
+  it('still accepts an answer from a page loaded before request ids existed', async () => {
+    const { app, repository } = setup();
+    const { requestId: _requestId, ...older } = validAction;
+    void _requestId;
+    const response = await app.request('/api/review-action', post(older));
+    expect(response.status).toBe(200);
+    expect(reviewActionResponseSchema.parse(await response.json()).outcome).toBe('applied');
+    // Sent again, it is recognised by the state it expected, as it always was.
+    const retry = await app.request('/api/review-action', post(older));
+    expect(reviewActionResponseSchema.parse(await retry.json()).outcome).toBe('already_applied');
+    expect(repository.updates).toHaveLength(1);
+  });
+
   it.each([
     ['an unknown action', { ...validAction, action: 'forget' }],
+    ['a request id that is not a UUID', { ...validAction, requestId: 'again' }],
+    ['a negative duration', { ...validAction, durationMs: -1 }],
     ['a malformed page id', { ...validAction, pageId: 'not-an-id' }],
     ['a missing expected state', { pageId: pageId(1), action: 'remember' }],
     ['a non-numeric mastery', { ...validAction, expected: { mastery: '3', nextReview: '2026-10-01' } }],

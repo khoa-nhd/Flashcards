@@ -4,7 +4,7 @@ import type { ReviewState } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
 import type { CardFieldConfig, VocabularyRecord } from '../../shared/vocabulary.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
-import type { VocabularyRepository } from '../vocabulary-repository.js';
+import type { ReviewWrite, ReviewWriteResult, VocabularyRepository } from '../vocabulary-repository.js';
 
 export const mockCardFields: CardFieldConfig[] = [
   { key: 'partOfSpeech', property: 'Part of Speech', label: 'Part of speech', side: 'front', visibility: 'always' },
@@ -120,12 +120,28 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     return word && !word.trashed ? toRecord(word) : null;
   }
 
-  async updateReviewState(pageId: string, changes: Partial<ReviewState>) {
-    const word = this.words.get(normalizeId(pageId));
-    if (!word) throw new Error(`Unknown sample record: ${pageId}`);
-    if (changes.mastery !== undefined) word.mastery = changes.mastery;
-    if (changes.nextReview !== undefined) word.reviewDate = changes.nextReview;
-    return toRecord(this.touch(word));
+  /** Answers already recorded, by request id, like the review history of a real store. */
+  private readonly reviews = new Map<string, ReviewState>();
+
+  async applyReview(write: ReviewWrite): Promise<ReviewWriteResult> {
+    const earlier = this.reviews.get(write.requestId);
+    if (earlier) return { outcome: 'already_applied', state: earlier };
+
+    const word = this.words.get(normalizeId(write.id));
+    if (!word || word.trashed) return { outcome: 'not_found' };
+    const current = { mastery: word.mastery, nextReview: word.reviewDate };
+    if (current.mastery !== write.expected.mastery || current.nextReview !== write.expected.nextReview) {
+      return { outcome: 'conflict', state: current };
+    }
+    word.mastery = write.next.mastery;
+    word.reviewDate = write.next.nextReview;
+    this.touch(word);
+    this.reviews.set(write.requestId, write.next);
+    return { outcome: 'applied', state: write.next };
+  }
+
+  async findReview(requestId: string) {
+    return this.reviews.get(requestId) ?? null;
   }
 
   // ---- Whole records ----
@@ -146,13 +162,23 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       .map(toEntry);
   }
 
-  async createEntry(entry: NewEntry): Promise<EntryData> {
+  async listTrashed() {
+    return [...this.words.values()].filter((word) => word.trashed).map(toEntry);
+  }
+
+  async createEntry(entry: NewEntry): Promise<{ entry: EntryData; created: boolean }> {
     this.created += 1;
     const id = `00000000-0000-4000-9000-${String(this.created).padStart(12, '0')}`;
     const timestamp = this.now().toISOString();
     const word: StoredWord = {
       id,
-      ...entry,
+      word: entry.word,
+      meaning: entry.meaning,
+      definition: entry.definition,
+      example: entry.example,
+      mastery: entry.mastery,
+      reviewDate: entry.reviewDate,
+      dateAdded: entry.dateAdded,
       partOfSpeech: null,
       pronunciation: null,
       trashed: false,
@@ -160,7 +186,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       lastEditedTime: timestamp,
     };
     this.words.set(id, word);
-    return toEntry(word);
+    return { entry: toEntry(word), created: true };
   }
 
   async updateEntry(id: string, changes: EntryChanges): Promise<EntryData> {

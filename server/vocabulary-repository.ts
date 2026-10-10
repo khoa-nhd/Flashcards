@@ -1,6 +1,6 @@
 import type { SkippedRecord, VocabularyStatus } from '../shared/api.js';
 import type { IsoDate } from '../shared/dates.js';
-import type { ReviewState } from '../shared/review-logic.js';
+import type { ReviewAction, ReviewState } from '../shared/review-logic.js';
 import type { VocabularyRecord } from '../shared/vocabulary.js';
 
 export interface SetupReport {
@@ -14,9 +14,29 @@ export interface SetupReport {
   entryWriteIssues?: string[];
 }
 
-/** Where vocabulary lives. Implemented by Notion and by in-memory sample data. */
+/** One review answer, with the new state already computed by the scheduler. */
+export interface ReviewWrite {
+  id: string;
+  /** Identifies this answer, so a store that records answers can recognise a retry. */
+  requestId: string;
+  action: ReviewAction;
+  /** The state the answer was computed from. A store that can will refuse if it no longer holds. */
+  expected: ReviewState;
+  next: ReviewState;
+  /** The reviewer's calendar day. */
+  reviewedOn: IsoDate;
+  durationMs: number | null;
+}
+
+export type ReviewWriteResult =
+  | { outcome: 'applied' | 'already_applied' | 'conflict'; state: ReviewState }
+  | { outcome: 'not_found' };
+
+export type DataMode = 'mock' | 'notion' | 'supabase';
+
+/** Where vocabulary lives. */
 export interface VocabularyRepository {
-  readonly mode: 'mock' | 'notion';
+  readonly mode: DataMode;
   checkSetup(): Promise<SetupReport>;
   /**
    * Records that might be due on `today`. May return more than the exact
@@ -27,6 +47,8 @@ export interface VocabularyRepository {
   vocabularyStatus(): Promise<VocabularyStatus>;
   /** The record's latest state, or `null` if it is not a live row of this database. */
   getRecord(pageId: string): Promise<VocabularyRecord | null>;
-  /** Writes only the given review properties and returns the record as stored afterwards. */
-  updateReviewState(pageId: string, changes: Partial<ReviewState>): Promise<VocabularyRecord>;
+  /** Saves one answer and returns the state the store confirms afterwards. */
+  applyReview(write: ReviewWrite): Promise<ReviewWriteResult>;
+  /** The state an earlier answer with this request id left the word in, if the store records answers. */
+  findReview(requestId: string): Promise<ReviewState | null>;
 }

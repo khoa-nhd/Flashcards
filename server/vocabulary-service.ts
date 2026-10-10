@@ -19,7 +19,7 @@ export interface VocabularyServiceOptions {
   rules: ReviewRules;
   defaults: NewWordDefaults;
   timeZone: string;
-  /** The owner allowed the app to change Notion. */
+  /** The owner allowed the app to change stored data. */
   writesRequested: boolean;
   now?: () => Date;
 }
@@ -109,7 +109,9 @@ export class VocabularyService {
 
     return this.locks.run(`create:${normalizeWord(request.word)}`, async () => {
       const today = this.today();
-      const repeated = this.recallCreate(request.requestId);
+      // A store that keeps request ids answers this across devices and restarts.
+      const repeated =
+        this.recallCreate(request.requestId) ?? (await catalog.findByRequestId?.(request.requestId)) ?? null;
       if (repeated !== null) return { entry: this.decorate(repeated, today), created: false };
 
       if (request.allowDuplicate !== true) {
@@ -121,7 +123,8 @@ export class VocabularyService {
         }
       }
 
-      const entry = await catalog.createEntry({
+      const { entry, created } = await catalog.createEntry({
+        requestId: request.requestId,
         word: request.word,
         meaning: emptyToNull(request.meaning) ?? null,
         definition: emptyToNull(request.definition) ?? null,
@@ -132,7 +135,7 @@ export class VocabularyService {
           request.reviewDate !== undefined ? request.reviewDate : defaults.reviewDate === 'today' ? today : null,
       });
       this.rememberCreate(request.requestId, entry);
-      return { entry: this.decorate(entry, today), created: true };
+      return { entry: this.decorate(entry, today), created };
     });
   }
 
@@ -175,7 +178,13 @@ export class VocabularyService {
     });
   }
 
-  /** Moves the word to Notion's trash, from which it can be restored. */
+  /** Words that were deleted and can still be restored, where the store can list them. */
+  async listTrashed(): Promise<VocabularyEntry[]> {
+    const today = this.today();
+    return (await this.options.catalog.listTrashed()).map((entry) => this.decorate(entry, today));
+  }
+
+  /** Moves the word to the trash, from which it can be restored. */
   async trash(id: string): Promise<{ id: string; trashed: true }> {
     await this.requireWrites();
     const pageId = normalizeId(id);
@@ -209,5 +218,5 @@ export class VocabularyService {
 }
 
 function notFound(): HttpError {
-  return new HttpError(404, 'not_found', 'That word is not in the vocabulary database.');
+  return new HttpError(404, 'not_found', 'That word is not in your vocabulary.');
 }

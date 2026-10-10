@@ -1,6 +1,6 @@
 /**
- * Display preferences, kept in this browser only. Nothing here is a secret
- * and nothing here is sent to the server or to Notion.
+ * Display preferences, kept in this browser only. Nothing here is a secret,
+ * none of it is vocabulary, and nothing here is sent to the server.
  */
 import { z } from 'zod';
 

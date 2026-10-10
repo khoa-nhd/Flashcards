@@ -18,6 +18,30 @@ Reference documents:
 - [docs/database-schema.md](docs/database-schema.md) — the actual Notion schema and what each operation writes.
 - [docs/review-logic.md](docs/review-logic.md) — the review rules and where each comes from.
 - [docs/metrics.md](docs/metrics.md) — the exact definition of every number shown.
+- [docs/supabase-migration.md](docs/supabase-migration.md) — moving from Notion to Supabase: status, steps, rollback.
+- [docs/supabase-schema.md](docs/supabase-schema.md) — the Supabase schema, accounts and security.
+
+## Moving to Supabase (in progress)
+
+The app can also keep its data in Supabase, with an account per person,
+per-account isolation enforced by the database, and a recorded history of
+every review. **That backend is built and tested but not switched on.** Notion
+remains the live data source, unchanged, until a Supabase project exists and
+the checks in [docs/supabase-migration.md](docs/supabase-migration.md) pass.
+
+`DATA_MODE` chooses the data source: `notion` (today), `supabase`, or `mock`.
+Nothing falls back from one to another on its own.
+
+| In Supabase mode | |
+| --- | --- |
+| Sign-in | Email and password (Supabase Auth): sign up, sign in, sign out, password reset. |
+| Data | PostgreSQL. Every row belongs to one account; Row Level Security keeps accounts apart. |
+| Review rules | Identical. The same rules engine computes every answer on the server. |
+| Several devices | The same data everywhere. Changes appear on the next read, not instantly. |
+| Deleting | Moves a word to the trash; restore it from Settings → Deleted words. |
+| Keys | Only the project URL and the public key. No secret key is used anywhere. |
+
+Everything below describes the app as it runs on Notion today.
 
 ## Try it with sample data
 
@@ -262,8 +286,11 @@ server/                     The only code that sees the Notion key
   review-service.ts           Review queue and the safe answer path
   vocabulary-service.ts       List, create, edit, trash, restore
   notion/                     SDK wrapper, mappers, pagination, repository
+  supabase/                   Database gateway, repository, account sessions, backup import
+  accounts.ts                 What a signed-in request may use
   mock/                       Sample words and illustrative rules
   index.ts                    Node entry (self-hosting)
+supabase/migrations/        The Supabase schema, policies and functions (SQL)
 api/index.ts                Vercel entry
 src/                        React interface
   App.tsx, app-context.tsx    Shell, routing, shared session and vocabulary
@@ -271,7 +298,7 @@ src/                        React interface
   components/                 Flashcard, charts, word panel, form fields, navigation
   lib/                        Router, API client, stores, bank query, export
   hooks/                      Keyboard shortcuts, swipe detection
-scripts/inspect-notion.ts   Read-only schema and view inspection
+scripts/                    inspect-notion, export-notion, supabase-import, supabase-verify
 tests/                      Vitest: logic, server, API, pages
 docs/                       Schema, review logic, metric definitions
 ```
@@ -281,7 +308,10 @@ docs/                       Schema, review logic, metric definitions
 | Route | Purpose |
 | --- | --- |
 | `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. |
-| `POST /api/review-action` | `{ pageId, action, expected }` → `applied`, `already_applied` or `dry_run`. `409` if the record changed. |
+| `POST /api/review-action` | `{ pageId, action, expected, requestId }` → `applied`, `already_applied` or `dry_run`. `409` if the record changed. |
+| `GET /api/config` | Public. Whether the app uses accounts, a passphrase or neither. |
+| `GET /api/settings`, `PUT /api/settings` | The time zone in force; editable per account with Supabase. |
+| `GET /api/trash` | Deleted words that can be restored (empty with Notion, which has its own trash). |
 | `GET /api/vocabulary` | Every word, with its review state. |
 | `GET /api/vocabulary/:id` | One word, read fresh from Notion. |
 | `POST /api/vocabulary` | Create a word. `409` with the existing entries if it is a duplicate. |
@@ -311,6 +341,9 @@ data is never cached between sessions.
 | `npm run lint` | ESLint |
 | `npm run build` | Type-check, build frontend and server |
 | `npm run notion:inspect` | Read-only look at the Notion schema and views |
+| `npm run notion:export` | Read-only export of every Notion row to `backups/` (git-ignored) |
+| `npm run supabase:import` | Dry run of importing a backup into a Supabase account; `-- --apply` to do it |
+| `npm run supabase:verify` | Checks a live Supabase project's isolation with two test accounts |
 
 ## Limitations
 

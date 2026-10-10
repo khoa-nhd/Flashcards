@@ -1,10 +1,15 @@
 import type { ZodType } from 'zod';
 import {
+  accountSettingsSchema,
   apiErrorSchema,
+  appConfigResponseSchema,
   entryResponseSchema,
   queueResponseSchema,
   reviewActionResponseSchema,
+  trashResponseSchema,
   vocabularyListResponseSchema,
+  type AccountSettings,
+  type AppConfigResponse,
   type CreateEntryInput,
   type QueueResponse,
   type ReviewActionRequest,
@@ -40,42 +45,90 @@ export interface VocabularyApi {
   fetchEntry(id: string): Promise<VocabularyEntry>;
   createEntry(input: CreateEntryInput): Promise<VocabularyEntry>;
   updateEntry(id: string, input: UpdateEntryInput): Promise<VocabularyEntry>;
-  /** Moves the word to Notion's trash. */
+  /** Moves the word to the trash, from which it can be restored. */
   deleteEntry(id: string): Promise<void>;
   restoreEntry(id: string): Promise<VocabularyEntry>;
+  /** Deleted words that can still be restored. */
+  fetchTrash(): Promise<VocabularyEntry[]>;
 }
 
-export type AppApi = ReviewApi & VocabularyApi;
+export interface AccountApi {
+  fetchSettings(): Promise<AccountSettings>;
+  saveSettings(input: { timeZone: string }): Promise<AccountSettings>;
+}
 
-async function request<T>(
-  path: string,
-  schema: ZodType<T> | null,
-  init: {
-    method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
-    body?: unknown;
-    timeoutMs: number;
-    timeoutMessage: string;
-  },
-): Promise<T> {
+export type AppApi = ReviewApi & VocabularyApi & AccountApi;
+
+/** How requests prove who is asking, where the app has accounts. */
+export interface ApiAuth {
+  /** A current access token, or `null` when nobody is signed in. */
+  token(options?: { forceRefresh?: boolean }): Promise<string | null>;
+  /** The server refused a freshly renewed token: the session is over. */
+  onRejected(): void;
+}
+
+interface CallOptions {
+  method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
+  body?: unknown;
+  timeoutMs: number;
+  timeoutMessage: string;
+}
+
+const SIGNED_OUT_MESSAGE = 'Your session has ended. Sign in again to continue.';
+
+function deviceTimeZone(): string | null {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
+async function request<T>(path: string, schema: ZodType<T> | null, init: CallOptions, auth: ApiAuth | null): Promise<T> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), init.timeoutMs);
+
+  const send = async (token: string | null) => {
+    const zone = token === null ? null : deviceTimeZone();
+    const response = await fetch(path, {
+      method: init.method,
+      credentials: 'same-origin',
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
+        ...(token === null ? {} : { Authorization: `Bearer ${token}` }),
+        // Only gives a brand-new account its starting time zone; a stored one always wins.
+        ...(zone === null ? {} : { 'X-Time-Zone': zone }),
+      },
+      body: init.body === undefined ? undefined : JSON.stringify(init.body),
+    });
+    return { response, body: (await response.json().catch(() => null)) as unknown };
+  };
+
+  const signedOut = () => {
+    auth?.onRejected();
+    return new ApiError('unauthorized', SIGNED_OUT_MESSAGE, 401);
+  };
 
   try {
     let response: Response;
     let body: unknown = null;
     try {
-      response = await fetch(path, {
-        method: init.method,
-        credentials: 'same-origin',
-        signal: controller.signal,
-        headers: {
-          Accept: 'application/json',
-          ...(init.body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        },
-        body: init.body === undefined ? undefined : JSON.stringify(init.body),
-      });
-      body = await response.json().catch(() => null);
-    } catch {
+      let token = auth === null ? null : await auth.token();
+      if (auth !== null && token === null) throw signedOut();
+      ({ response, body } = await send(token));
+
+      // A refused token is renewed once and the request repeated. Nothing was
+      // processed the first time, so repeating it cannot apply a change twice.
+      if (auth !== null && response.status === 401) {
+        token = await auth.token({ forceRefresh: true });
+        if (token === null) throw signedOut();
+        ({ response, body } = await send(token));
+        if (response.status === 401) throw signedOut();
+      }
+    } catch (cause) {
+      if (cause instanceof ApiError) throw cause;
       if (controller.signal.aborted) throw new ApiError('timeout', init.timeoutMessage);
       throw new ApiError('network', 'Could not reach the server. Check your connection.');
     }
@@ -104,57 +157,97 @@ async function request<T>(
 const SAVE_TIMEOUT_MESSAGE =
   'No confirmation arrived in time, so this change may or may not be saved. Check the word before trying again.';
 
-const entry = (path: string, method: 'GET' | 'POST' | 'PATCH', body?: unknown, timeoutMessage = SAVE_TIMEOUT_MESSAGE) =>
-  request(path, entryResponseSchema, { method, body, timeoutMs: TIMEOUTS.actionMs, timeoutMessage }).then(
-    (response) => response.entry,
+/** How the app should let people in. Public: asked before anyone is signed in. */
+export function fetchAppConfig(): Promise<AppConfigResponse> {
+  return request(
+    '/api/config',
+    appConfigResponseSchema,
+    { method: 'GET', timeoutMs: TIMEOUTS.loginMs, timeoutMessage: 'Starting the app took too long.' },
+    null,
   );
+}
 
-export const appApi: AppApi = {
-  fetchQueue: () =>
-    request('/api/review-queue', queueResponseSchema, {
-      method: 'GET',
-      timeoutMs: TIMEOUTS.queueMs,
-      timeoutMessage: 'Loading the review queue took too long.',
-    }),
+/** `auth` is given where the app has accounts; every request is then made as the signed-in user. */
+export function createAppApi(auth: ApiAuth | null = null): AppApi {
+  const call = <T>(path: string, schema: ZodType<T> | null, init: CallOptions) => request(path, schema, init, auth);
 
-  submitAction: (body) =>
-    request('/api/review-action', reviewActionResponseSchema, {
-      method: 'POST',
-      body,
-      timeoutMs: TIMEOUTS.actionMs,
-      // The answer may have landed. Retrying is safe: the server checks before writing again.
-      timeoutMessage:
-        'No confirmation arrived in time, so this answer may or may not be saved. Retry checks first and never applies it twice.',
-    }),
+  const entry = (path: string, method: 'GET' | 'POST' | 'PATCH', body?: unknown, timeoutMessage = SAVE_TIMEOUT_MESSAGE) =>
+    call(path, entryResponseSchema, { method, body, timeoutMs: TIMEOUTS.actionMs, timeoutMessage }).then(
+      (response) => response.entry,
+    );
 
-  login: (password) =>
-    request<void>('/api/login', null, {
-      method: 'POST',
-      body: { password },
-      timeoutMs: TIMEOUTS.loginMs,
-      timeoutMessage: 'Signing in took too long.',
-    }),
+  return {
+    fetchQueue: () =>
+      call('/api/review-queue', queueResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading the review queue took too long.',
+      }),
 
-  fetchVocabulary: () =>
-    request('/api/vocabulary', vocabularyListResponseSchema, {
-      method: 'GET',
-      timeoutMs: TIMEOUTS.queueMs,
-      timeoutMessage: 'Loading your vocabulary took too long.',
-    }),
+    submitAction: (body) =>
+      call('/api/review-action', reviewActionResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        // The answer may have landed. Retrying is safe: the server checks before writing again.
+        timeoutMessage:
+          'No confirmation arrived in time, so this answer may or may not be saved. Retry checks first and never applies it twice.',
+      }),
 
-  fetchEntry: (id) => entry(`/api/vocabulary/${id}`, 'GET', undefined, 'Loading the word took too long.'),
+    login: (password) =>
+      call<void>('/api/login', null, {
+        method: 'POST',
+        body: { password },
+        timeoutMs: TIMEOUTS.loginMs,
+        timeoutMessage: 'Signing in took too long.',
+      }),
 
-  // Sending the same request again is safe: its request id makes the server return the first result.
-  createEntry: (input) => entry('/api/vocabulary', 'POST', input),
+    fetchVocabulary: () =>
+      call('/api/vocabulary', vocabularyListResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your vocabulary took too long.',
+      }),
 
-  updateEntry: (id, input) => entry(`/api/vocabulary/${id}`, 'PATCH', input),
+    fetchEntry: (id) => entry(`/api/vocabulary/${id}`, 'GET', undefined, 'Loading the word took too long.'),
 
-  deleteEntry: (id) =>
-    request<void>(`/api/vocabulary/${id}`, null, {
-      method: 'DELETE',
-      timeoutMs: TIMEOUTS.actionMs,
-      timeoutMessage: SAVE_TIMEOUT_MESSAGE,
-    }),
+    // Sending the same request again is safe: its request id makes the server return the first result.
+    createEntry: (input) => entry('/api/vocabulary', 'POST', input),
 
-  restoreEntry: (id) => entry(`/api/vocabulary/${id}/restore`, 'POST'),
-};
+    updateEntry: (id, input) => entry(`/api/vocabulary/${id}`, 'PATCH', input),
+
+    deleteEntry: (id) =>
+      call<void>(`/api/vocabulary/${id}`, null, {
+        method: 'DELETE',
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    restoreEntry: (id) => entry(`/api/vocabulary/${id}/restore`, 'POST'),
+
+    fetchTrash: () =>
+      call('/api/trash', trashResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading deleted words took too long.',
+      }).then((response) => response.entries),
+
+    fetchSettings: () =>
+      call('/api/settings', accountSettingsSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.loginMs,
+        timeoutMessage: 'Loading your settings took too long.',
+      }),
+
+    saveSettings: (body) =>
+      call('/api/settings', accountSettingsSchema, {
+        method: 'PUT',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+  };
+}
+
+/** The API for a deployment without accounts. */
+export const appApi: AppApi = createAppApi();

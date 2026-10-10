@@ -1,6 +1,6 @@
 import type { SkippedRecord, VocabularyEntry } from '../shared/api.js';
 import type { IsoDate } from '../shared/dates.js';
-import type { SetupReport } from './vocabulary-repository.js';
+import type { DataMode, SetupReport } from './vocabulary-repository.js';
 
 /** A stored entry before the service adds its review status. */
 export type EntryData = Omit<VocabularyEntry, 'reviewStatus' | 'reviewable'>;
@@ -14,6 +14,8 @@ export interface NewEntry {
   dateAdded: IsoDate | null;
   mastery: number;
   reviewDate: IsoDate | null;
+  /** Identifies the submission, for stores that can refuse to create the same one twice. */
+  requestId?: string;
 }
 
 /** Only the keys present are written; `null` clears a value. */
@@ -33,15 +35,20 @@ export interface EntryChanges {
  * (VocabularyRepository) and does not go through here.
  */
 export interface VocabularyCatalog {
-  readonly mode: 'mock' | 'notion';
+  readonly mode: DataMode;
   checkSetup(): Promise<SetupReport>;
   listEntries(): Promise<{ entries: EntryData[]; invalid: SkippedRecord[] }>;
   /** The latest stored values, or `null` if this is not a live row of the database. */
   getEntry(id: string): Promise<EntryData | null>;
   /** Existing live entries whose word equals `word` after normalisation. */
   findEntriesByWord(word: string): Promise<EntryData[]>;
-  createEntry(entry: NewEntry): Promise<EntryData>;
+  /** The word created by an earlier submission with this request id, where the store keeps track. */
+  findByRequestId?(requestId: string): Promise<EntryData | null>;
+  /** `created` is false when the store recognised the submission and returned the existing word. */
+  createEntry(entry: NewEntry): Promise<{ entry: EntryData; created: boolean }>;
   updateEntry(id: string, changes: EntryChanges): Promise<EntryData>;
+  /** Words in the trash, most recently trashed first. Empty where the trash is kept elsewhere. */
+  listTrashed(): Promise<EntryData[]>;
   /** Moves a row to the trash. Returns false if it was not a row of this database. */
   trashEntry(id: string): Promise<boolean>;
   /** Takes a row back out of the trash, or returns `null` if it is not one of ours. */

@@ -1,10 +1,13 @@
 /** The HTTP contract between the browser and the server, validated on both ends. */
 import { z } from 'zod';
-import { isIsoDate } from './dates.js';
+import { isIsoDate, isValidTimeZone } from './dates.js';
 
 export const isoDateSchema = z.string().refine(isIsoDate, 'Expected a YYYY-MM-DD calendar date');
 
 export const reviewActionSchema = z.enum(['remember', 'not_remember']);
+
+/** Where the data comes from. Shown to the user so sample data is never mistaken for their own. */
+export const dataModeSchema = z.enum(['mock', 'notion', 'supabase']);
 
 export const reviewStateSchema = z.object({
   mastery: z.number(),
@@ -50,7 +53,7 @@ export const queueResponseSchema = z.object({
   cards: z.array(reviewCardSchema),
   today: isoDateSchema,
   timeZone: z.string(),
-  mode: z.enum(['mock', 'notion']),
+  mode: dataModeSchema,
   /** False while the app is a read-only preview: grading saves nothing. */
   writesEnabled: z.boolean(),
   /** Records the source returned that could not be used, so nothing vanishes silently. */
@@ -70,6 +73,15 @@ export const reviewActionRequestSchema = z.strictObject({
    * computes what to write from its own fresh read, never from these values.
    */
   expected: reviewStateSchema,
+  /**
+   * Generated once per answer and repeated on a retry, so one answer is
+   * recorded once. Optional only so that a page loaded before this field
+   * existed keeps working; the server then makes one up, and the comparison
+   * with `expected` remains the guard against applying an answer twice.
+   */
+  requestId: z.uuid().optional(),
+  /** How long the card was on screen before it was answered. */
+  durationMs: z.number().int().min(0).max(86_400_000).optional(),
 });
 
 export const reviewActionResponseSchema = z.object({
@@ -118,8 +130,8 @@ export const vocabularyListResponseSchema = z.object({
   entries: z.array(vocabularyEntrySchema),
   today: isoDateSchema,
   timeZone: z.string(),
-  mode: z.enum(['mock', 'notion']),
-  /** False when the app may not change Notion; adding, editing and deleting are then unavailable. */
+  mode: dataModeSchema,
+  /** False when the app may not change stored data; adding, editing and deleting are then unavailable. */
   writesEnabled: z.boolean(),
   skipped: z.array(skippedRecordSchema),
   /** What a new word starts with, so the Add form can show it rather than hide it. */
@@ -182,6 +194,38 @@ export const updateEntryRequestSchema = z
 
 export const deleteEntryResponseSchema = z.object({ id: z.string(), trashed: z.literal(true) });
 
+/** Deleted words that can still be restored. */
+export const trashResponseSchema = z.object({ entries: z.array(vocabularyEntrySchema) });
+
+// ---- Application setup and account ----
+
+/**
+ * What the browser needs before it can do anything else: whether to ask for
+ * an account, a shared passphrase, or nothing. The Supabase address and key
+ * are the public ones a browser is meant to hold.
+ */
+export const appConfigResponseSchema = z.object({
+  mode: dataModeSchema,
+  auth: z.enum(['none', 'password', 'account']),
+  supabase: z.object({ url: z.string(), publicKey: z.string() }).nullable(),
+});
+
+const timeZoneSchema = z
+  .string()
+  .max(64)
+  .refine(isValidTimeZone, 'Expected an IANA time zone such as "Asia/Ho_Chi_Minh"');
+
+export const accountSettingsSchema = z.object({
+  /** Decides which calendar day counts as "today" for due dates. */
+  timeZone: z.string(),
+  /** False where the zone comes from the server's own configuration. */
+  timeZoneEditable: z.boolean(),
+  /** The signed-in account, where the app uses accounts. */
+  email: z.string().nullable(),
+});
+
+export const updateSettingsRequestSchema = z.strictObject({ timeZone: timeZoneSchema });
+
 export const loginRequestSchema = z.strictObject({
   password: z.string().min(1).max(512),
 });
@@ -211,3 +255,5 @@ export type CreateEntryRequest = z.infer<typeof createEntryRequestSchema>;
 export type CreateEntryInput = z.input<typeof createEntryRequestSchema>;
 export type UpdateEntryRequest = z.infer<typeof updateEntryRequestSchema>;
 export type UpdateEntryInput = z.input<typeof updateEntryRequestSchema>;
+export type AppConfigResponse = z.infer<typeof appConfigResponseSchema>;
+export type AccountSettings = z.infer<typeof accountSettingsSchema>;

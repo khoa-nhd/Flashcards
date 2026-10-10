@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   normalizeId,
   type CardField,
@@ -34,6 +35,9 @@ export interface ReviewServiceOptions {
   writesRequested: boolean;
   now?: () => Date;
 }
+
+/** An answer as the service takes it. Without a request id, one is made up for this attempt. */
+export type ReviewSubmission = ReviewActionRequest;
 
 export class ReviewService {
   private readonly locks = new KeyedMutex();
@@ -89,39 +93,42 @@ export class ReviewService {
   /**
    * Applies one review decision. The browser's `expected` state is only a
    * precondition; every value written comes from a fresh read of the record,
-   * and is written as an absolute value (never "+1"), so a repeated request
-   * can at worst rewrite what is already there.
+   * and is written as an absolute value (never "+1"). Where the store records
+   * answers, the request id makes a retried answer a no-op; elsewhere the
+   * state comparison below does.
    */
-  submitAction(request: ReviewActionRequest): Promise<ReviewActionResponse> {
+  submitAction(request: ReviewSubmission): Promise<ReviewActionResponse> {
     const pageId = normalizeId(request.pageId);
     return this.locks.run(pageId, () => this.applyDecision(pageId, request));
   }
 
-  private async applyDecision(
-    pageId: string,
-    { action, expected }: ReviewActionRequest,
-  ): Promise<ReviewActionResponse> {
+  private async applyDecision(pageId: string, request: ReviewSubmission): Promise<ReviewActionResponse> {
+    const { action, expected } = request;
+    const requestId = request.requestId ?? randomUUID();
     const { repository, rules } = this.options;
     const today = this.today();
 
     const record = await repository.getRecord(pageId);
     if (record === null) {
-      throw new HttpError(404, 'not_found', 'That card is not in the vocabulary database.');
+      throw new HttpError(404, 'not_found', 'That card is not in your vocabulary.');
     }
     const current = this.stateOf(record);
     if (current === null) {
       throw new HttpError(409, 'invalid_record', 'This card has no mastery value, so it cannot be reviewed.');
     }
 
+    const conflict = (state: ReviewState) =>
+      new HttpError(409, 'conflict', 'This card was changed after it was loaded, so nothing was saved.', {
+        body: { current: state },
+      });
+
     const decision = reconcile(action, expected, current, today, rules);
     if (decision === 'already_applied') return { outcome: 'already_applied', state: current };
     if (decision === 'conflict') {
-      throw new HttpError(
-        409,
-        'conflict',
-        'This card was changed in Notion after it was loaded, so nothing was saved.',
-        { body: { current } },
-      );
+      // The word may have moved on since this very answer was saved: ask by request id.
+      const earlier = await repository.findReview(requestId);
+      if (earlier !== null) return { outcome: 'already_applied', state: earlier };
+      throw conflict(current);
     }
     // Unchanged since it was shown, but still not something that may be reviewed now.
     const eligibility = checkEligibility(current, today, rules);
@@ -141,20 +148,28 @@ export class ReviewService {
     const next = ruleFor(action, rules) === null ? null : applyAction(action, current, today, rules);
     if (next === null || !(await this.writesEnabled())) return { outcome: 'dry_run', state: next };
 
-    const changes: Partial<ReviewState> = {};
-    if (next.mastery !== current.mastery) changes.mastery = next.mastery;
-    if (next.nextReview !== current.nextReview) changes.nextReview = next.nextReview;
-    if (Object.keys(changes).length === 0) return { outcome: 'applied', state: current };
-
-    const confirmed = this.stateOf(await repository.updateReviewState(pageId, changes));
-    if (confirmed === null || !isSameState(confirmed, next)) {
+    const result = await repository.applyReview({
+      id: pageId,
+      requestId,
+      action,
+      expected: current,
+      next,
+      reviewedOn: today,
+      durationMs: request.durationMs ?? null,
+    });
+    if (result.outcome === 'not_found') {
+      throw new HttpError(404, 'not_found', 'That card is not in your vocabulary.');
+    }
+    // Another device answered between the read above and this write.
+    if (result.outcome === 'conflict') throw conflict(result.state);
+    if (result.outcome === 'applied' && !isSameState(result.state, next)) {
       throw new HttpError(
         502,
         'unconfirmed_write',
-        'Notion accepted the update but did not return the expected values. Check the card in Notion.',
+        'The update was accepted but the stored values are not the expected ones. Check this word.',
       );
     }
-    return { outcome: 'applied', state: confirmed };
+    return { outcome: result.outcome, state: result.state };
   }
 
   private stateOf(record: VocabularyRecord): ReviewState | null {

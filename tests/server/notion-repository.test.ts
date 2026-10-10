@@ -282,3 +282,48 @@ describe('updateReviewState', () => {
     await expect(repository.updateReviewState(pageId(1), { mastery: 4 })).rejects.toBeInstanceOf(HttpError);
   });
 });
+
+describe('applyReview', () => {
+  const write = (expected: [number, string | null], next: [number, string | null]) => ({
+    id: pageId(1),
+    requestId: '11111111-1111-4111-8111-111111111111',
+    action: 'remember' as const,
+    expected: { mastery: expected[0], nextReview: expected[1] },
+    next: { mastery: next[0], nextReview: next[1] },
+    reviewedOn: '2026-10-09',
+    durationMs: null,
+  });
+
+  it('writes the new mastery and date, and reports what Notion then holds', async () => {
+    const { api, repository } = setup();
+    api.pages.set(pageId(1), notionPage({ id: pageId(1), mastery: 3, nextReview: '2026-10-09' }));
+
+    const result = await repository.applyReview(write([3, '2026-10-09'], [4, '2026-10-12']));
+    expect(api.updates).toEqual([
+      { pageId: pageId(1), properties: { Mastery: { number: 4 }, 'Next Review': { date: { start: '2026-10-12' } } } },
+    ]);
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 4, nextReview: '2026-10-12' } });
+  });
+
+  it('leaves mastery alone when only the date moves, as "Không nhớ" does', async () => {
+    const { api, repository } = setup();
+    api.pages.set(pageId(1), notionPage({ id: pageId(1), mastery: 7, nextReview: '2026-10-09' }));
+    const result = await repository.applyReview(write([7, '2026-10-09'], [7, '2026-10-10']));
+    expect(Object.keys(api.updates[0]?.properties ?? {})).toEqual(['Next Review']);
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 7, nextReview: '2026-10-10' } });
+  });
+
+  it('contacts Notion for nothing when the answer changes nothing', async () => {
+    const { api, repository } = setup();
+    api.pages.set(pageId(1), notionPage({ id: pageId(1), mastery: 3, nextReview: '2026-10-09' }));
+    const result = await repository.applyReview(write([3, '2026-10-09'], [3, '2026-10-09']));
+    expect(api.updates).toEqual([]);
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 3, nextReview: '2026-10-09' } });
+  });
+
+  it('keeps no record of answers, so it cannot recognise one by its request id', async () => {
+    const { repository } = setup();
+    await expect(repository.findReview()).resolves.toBeNull();
+    await expect(repository.listTrashed()).resolves.toEqual([]);
+  });
+});

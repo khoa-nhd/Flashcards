@@ -70,12 +70,17 @@ export class FakeCatalog implements VocabularyCatalog {
     return (await this.listEntries()).entries.filter((entry) => normalizeWord(entry.word) === wanted);
   }
 
-  async createEntry(entry: NewEntry) {
+  async listTrashed() {
+    return [...this.entries.values()].filter((entry) => entry.inTrash).map((entry) => this.strip(entry));
+  }
+
+  async createEntry({ requestId: _requestId, ...entry }: NewEntry) {
+    void _requestId;
     this.maybeFail();
     this.created.push(entry);
     const stored = { ...entryData(this.nextId++), ...entry, inTrash: false };
     this.entries.set(stored.id, stored);
-    return this.strip(stored);
+    return { entry: this.strip(stored), created: true };
   }
 
   async updateEntry(id: string, changes: EntryChanges) {

@@ -12,3 +12,6 @@ coverage/
 .vercel/
 .DS_Store
 *.log
+
+# Local data backups contain your vocabulary. Never commit them.
+backups/

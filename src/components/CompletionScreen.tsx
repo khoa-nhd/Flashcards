@@ -1,4 +1,5 @@
 import type { SessionMeta, SessionTally } from '../lib/session-machine.js';
+import { wording } from '../lib/source.js';
 import { SkippedNotice } from './SkippedNotice.js';
 
 export interface CompletionScreenProps {
@@ -20,7 +21,7 @@ export function CompletionScreen({ total, tally, meta, onReload }: CompletionScr
     emptyDetail = 'All of your vocabulary has reached full mastery, so there is nothing left to review.';
   } else if (meta?.vocabulary === 'empty') {
     emptyTitle = 'No vocabulary yet';
-    emptyDetail = 'The vocabulary database has no words in it.';
+    emptyDetail = wording(meta.mode, 'The vocabulary database has no words in it.', 'Add your first word to start reviewing.');
   }
 
   return (
@@ -59,7 +60,9 @@ export function CompletionScreen({ total, tally, meta, onReload }: CompletionScr
           {tally.skipped > 0 && (
             <div className="col-span-2 rounded-2xl bg-warn-soft px-4 py-3 text-warn-ink">
               <dd className="text-2xl font-semibold tabular-nums">{tally.skipped}</dd>
-              <dt className="text-sm">Skipped because they changed in Notion</dt>
+              <dt className="text-sm">
+                {wording(meta?.mode, 'Skipped because they changed in Notion', 'Skipped because they changed on another device')}
+              </dt>
             </div>
           )}
         </dl>
