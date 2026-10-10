@@ -14,7 +14,6 @@ import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, INPUT, PAGE, TEXT
 import { ApiError } from '../lib/api-client.js';
 import { newRequestId } from '../lib/request-id.js';
 import { ROUTES, buildHref, openWord } from '../lib/router.js';
-import { wording } from '../lib/source.js';
 import type { VocabularyMeta } from '../lib/vocabulary-store.js';
 
 interface FormValues {
@@ -63,14 +62,7 @@ export function AddPage() {
   const state = useVocabulary();
   return (
     <div className={PAGE}>
-      <PageHeader
-        title="Add vocabulary"
-        description={wording(
-          state.meta?.mode,
-          'Create a new word in your Notion vocabulary database.',
-          'Create a new word in your vocabulary.',
-        )}
-      />
+      <PageHeader title="Add vocabulary" description="Create a new word in your vocabulary." />
       <VocabularyGate state={state}>{state.meta !== null && <AddForm meta={state.meta} entries={state.entries} />}</VocabularyGate>
     </div>
   );
@@ -197,13 +189,8 @@ function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyE
           <Icon name="check" className="size-5 shrink-0" />
           <p className="min-w-0 flex-1 text-sm">
             <strong className="font-semibold">{created.word}</strong>{' '}
-            {meta.mode === 'notion'
-              ? 'was added to Notion.'
-              : meta.mode === 'mock'
-                ? 'was added to the sample data.'
-                : 'was added to your vocabulary.'}{' '}
-            The form is ready for
-            the next word.
+            {meta.mode === 'mock' ? 'was added to the sample data.' : 'was added to your vocabulary.'} The form is
+            ready for the next word.
           </p>
           <button type="button" className="cursor-pointer text-sm font-semibold underline" onClick={() => openWord(created.id)}>
             View
@@ -354,11 +341,7 @@ function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyE
               <Field
                 id="add-mastery"
                 label="Mastery"
-                hint={wording(
-                  meta.mode,
-                  `New words start at ${meta.defaults.mastery}, as in your Notion template.`,
-                  `New words start at ${meta.defaults.mastery}.`,
-                )}
+                hint={`New words start at ${meta.defaults.mastery}.`}
                 error={errors.mastery}
               >
                 <input

@@ -1,14 +1,13 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import { buildApp } from '../../server/bootstrap.js';
 import { createApp } from '../../server/create-app.js';
 import { loadConfig, type AppConfig } from '../../server/env.js';
 import { sampleRules } from '../../server/mock/sample-rules.js';
-import { NotionRequestError } from '../../server/notion/notion-errors.js';
 import { ReviewService } from '../../server/review-service.js';
+import { DatabaseError } from '../../server/supabase/supabase-database.js';
 import { apiErrorSchema, queueResponseSchema, reviewActionResponseSchema } from '../../shared/api.js';
-import { FakeRepository, NOW, TIME_ZONE, pageId, record } from '../helpers/fixtures.js';
-import { TEST_FIELDS } from '../helpers/notion-fixtures.js';
+import { FakeRepository, NOW, TEST_FIELDS, TIME_ZONE, pageId, record } from '../helpers/fixtures.js';
 
-const ACCESS_PASSWORD = 'correct horse battery staple';
 const shown = { mastery: 3, nextReview: '2026-10-01' };
 
 function setup(configOverrides: Partial<AppConfig> = {}, env: Record<string, string> = {}) {
@@ -22,7 +21,7 @@ function setup(configOverrides: Partial<AppConfig> = {}, env: Record<string, str
     now: () => NOW,
   });
   const config = { ...loadConfig({ DATA_MODE: 'mock', ...env }), ...configOverrides };
-  const app = createApp({ config, service, now: () => NOW });
+  const app = createApp({ config, service });
   return { app, repository, service, config };
 }
 
@@ -50,13 +49,21 @@ describe('GET /api/review-queue', () => {
   });
 
   it('answers 503 with the reasons when the server is not configured', async () => {
-    const config = loadConfig({ DATA_MODE: 'notion' });
+    const config = loadConfig({ DATA_MODE: 'supabase' });
     const app = createApp({ config, service: null });
     const response = await app.request('/api/review-queue');
     expect(response.status).toBe(503);
     const body = apiErrorSchema.parse(await response.json());
     expect(body.error.code).toBe('setup_incomplete');
-    expect(body.error.message).toContain('NOTION_API_KEY');
+    expect(body.error.message).toContain('SUPABASE_URL');
+  });
+
+  it('refuses to run on a data source that no longer exists, rather than guess another', async () => {
+    const { app, config } = buildApp({ DATA_MODE: 'notion', NODE_ENV: 'production' });
+    expect(config.issues).toEqual(expect.arrayContaining([expect.stringContaining('DATA_MODE must be')]));
+    const response = await app.request('/api/review-queue', { headers: { Authorization: 'Bearer a.b.c' } });
+    expect(response.status).toBe(503);
+    expect(apiErrorSchema.parse(await response.json()).error.code).toBe('setup_incomplete');
   });
 });
 
@@ -126,7 +133,7 @@ describe('POST /api/review-action', () => {
 
   it('answers 409 with the current state on a conflict', async () => {
     const { app, repository } = setup();
-    repository.editInNotion(pageId(1), { mastery: 7 });
+    repository.editElsewhere(pageId(1), { mastery: 7 });
     const response = await app.request('/api/review-action', post(validAction));
     expect(response.status).toBe(409);
     const body = apiErrorSchema.parse(await response.json());
@@ -140,30 +147,27 @@ describe('POST /api/review-action', () => {
     expect(response.status).toBe(404);
   });
 
-  it('passes on Notion rate limiting with a Retry-After header', async () => {
+  it('reports a database outage as temporary, and a missing schema as a setup problem', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { app, repository } = setup();
     repository.getRecord = async () => {
-      throw new NotionRequestError('rate_limited', 'Notion is rate limiting requests.', 7);
+      throw new DatabaseError('unavailable', 'The database is temporarily unavailable.', '57P03');
     };
-    const response = await app.request('/api/review-action', post(validAction));
-    expect(response.status).toBe(429);
-    expect(response.headers.get('retry-after')).toBe('7');
-    expect(apiErrorSchema.parse(await response.json()).error.code).toBe('rate_limited');
-  });
+    const outage = await app.request('/api/review-action', post(validAction));
+    expect(outage.status).toBe(503);
+    expect(apiErrorSchema.parse(await outage.json()).error.code).toBe('database_unavailable');
 
-  it('maps a Notion outage to 502 and a timeout to 504', async () => {
-    const { app, repository } = setup();
     repository.getRecord = async () => {
-      throw new NotionRequestError('unavailable', 'Notion is temporarily unavailable.');
+      throw new DatabaseError('schema_missing', 'The database schema is not installed.', '42P01');
     };
-    expect((await app.request('/api/review-action', post(validAction))).status).toBe(502);
-    repository.getRecord = async () => {
-      throw new NotionRequestError('timeout', 'Notion took too long to respond.');
-    };
-    expect((await app.request('/api/review-action', post(validAction))).status).toBe(504);
+    const missing = await app.request('/api/review-action', post(validAction));
+    expect(missing.status).toBe(503);
+    expect(apiErrorSchema.parse(await missing.json()).error.code).toBe('setup_incomplete');
+    expect(repository.updates).toEqual([]);
   });
 
   it('hides the detail of unexpected errors', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { app, repository } = setup();
     repository.getRecord = async () => {
       throw new Error('secret_abc123 leaked from a stack trace');
@@ -191,96 +195,35 @@ describe('POST /api/review-action', () => {
   });
 });
 
-describe('access control', () => {
-  const login = (app: ReturnType<typeof setup>['app'], password: string) =>
-    app.request('/api/login', post({ password }));
-
-  const cookieFrom = (response: Response) => (response.headers.get('set-cookie') ?? '').split(';')[0] ?? '';
-
-  it('is open on a local development server with no password', async () => {
+describe('access', () => {
+  it('needs no sign-in for the built-in sample words', async () => {
     const { app } = setup();
     expect((await app.request('/api/review-queue')).status).toBe(200);
+    expect(await (await app.request('/api/config')).json()).toEqual({ mode: 'mock', auth: 'none', supabase: null });
   });
 
-  it('fails closed in production when nothing protects the app', async () => {
-    const { app, repository } = setup({ isProduction: true });
-    const queue = await app.request('/api/review-queue');
-    expect(queue.status).toBe(503);
-    expect(apiErrorSchema.parse(await queue.json()).error.code).toBe('access_not_configured');
-    expect((await app.request('/api/review-action', post(validAction))).status).toBe(503);
-    expect(repository.updates).toEqual([]);
-  });
-
-  it('can be opened in production only by an explicit opt-out', async () => {
-    const { app } = setup({ isProduction: true, allowUnauthenticated: true });
-    expect((await app.request('/api/review-queue')).status).toBe(200);
-  });
-
-  it('requires the password for both reading and writing', async () => {
-    const { app, repository } = setup({ accessPassword: ACCESS_PASSWORD });
-    const queue = await app.request('/api/review-queue');
-    expect(queue.status).toBe(401);
-    expect(apiErrorSchema.parse(await queue.json()).error.code).toBe('unauthorized');
-    expect((await app.request('/api/review-action', post(validAction))).status).toBe(401);
-    expect(repository.updates).toEqual([]);
-  });
-
-  it('grants a session cookie for the right password', async () => {
-    const { app } = setup({ accessPassword: ACCESS_PASSWORD, isProduction: true });
-    const response = await login(app, ACCESS_PASSWORD);
-    expect(response.status).toBe(200);
-    const setCookie = response.headers.get('set-cookie') ?? '';
-    expect(setCookie).toMatch(/HttpOnly/i);
-    expect(setCookie).toMatch(/SameSite=Strict/i);
-    expect(setCookie).toMatch(/Secure/i);
-    expect(setCookie).not.toContain(ACCESS_PASSWORD);
-
-    const queue = await app.request('/api/review-queue', { headers: { Cookie: cookieFrom(response) } });
-    expect(queue.status).toBe(200);
-  });
-
-  it('rejects a wrong password and a forged or expired cookie', async () => {
-    const { app, config } = setup({ accessPassword: ACCESS_PASSWORD });
-    expect((await login(app, 'wrong')).status).toBe(401);
-
-    const forged = await app.request('/api/review-queue', {
-      headers: { Cookie: 'flashcard_session=9999999999.forged-signature' },
-    });
-    expect(forged.status).toBe(401);
-
-    // A cookie issued 31 days ago has outlived the 30-day session.
-    const repository = new FakeRepository([record(1)]);
-    const service = new ReviewService({
-      repository,
-      rules: sampleRules,
-      cardFields: TEST_FIELDS,
-      timeZone: TIME_ZONE,
-      writesRequested: true,
-    });
-    const longAgo = new Date(NOW.getTime() - 31 * 86_400_000);
-    const past = createApp({ config, service, now: () => longAgo });
-    const stale = cookieFrom(await login(past, ACCESS_PASSWORD));
-    expect((await app.request('/api/review-queue', { headers: { Cookie: stale } })).status).toBe(401);
-  });
-
-  it('throttles repeated wrong passwords', async () => {
-    const { app } = setup({ accessPassword: ACCESS_PASSWORD });
-    for (let attempt = 0; attempt < 10; attempt += 1) {
-      expect((await login(app, `guess-${attempt}`)).status).toBe(401);
-    }
-    const blocked = await login(app, ACCESS_PASSWORD);
-    expect(blocked.status).toBe(429);
-    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+  it('has no shared-password endpoints any more', async () => {
+    const { app } = setup();
+    expect((await app.request('/api/login', post({ password: 'anything' }))).status).toBe(404);
+    expect((await app.request('/api/logout', post({}))).status).toBe(404);
   });
 
   it('keeps the health endpoint public but free of sensitive detail', async () => {
-    const { app } = setup({ accessPassword: ACCESS_PASSWORD }, { NOTION_API_KEY: 'secret_test_value' });
+    const { app } = setup();
     const response = await app.request('/api/health');
     expect(response.status).toBe(200);
-    const text = await response.text();
-    expect(JSON.parse(text)).toMatchObject({ ok: true, access: 'password' });
-    expect(text).not.toContain('secret_test_value');
-    expect(text).not.toContain(ACCESS_PASSWORD);
+    expect(await response.json()).toEqual({ ok: true, mode: 'mock', access: 'open', writesRequested: true, issues: [] });
+  });
+
+  it('reports the sample data’s time zone, and does not pretend it can be changed', async () => {
+    const { app, config } = setup();
+    expect(await (await app.request('/api/settings')).json()).toEqual({
+      timeZone: config.timeZone,
+      timeZoneEditable: false,
+      email: null,
+    });
+    const change = await app.request('/api/settings', { ...post({ timeZone: 'UTC' }), method: 'PUT' });
+    expect(change.status).toBe(409);
   });
 });
 

@@ -37,7 +37,6 @@ export class ApiError extends Error {
 export interface ReviewApi {
   fetchQueue(): Promise<QueueResponse>;
   submitAction(request: ReviewActionRequest): Promise<ReviewActionResponse>;
-  login(password: string): Promise<void>;
 }
 
 export interface VocabularyApi {
@@ -162,7 +161,7 @@ export function fetchAppConfig(): Promise<AppConfigResponse> {
   return request(
     '/api/config',
     appConfigResponseSchema,
-    { method: 'GET', timeoutMs: TIMEOUTS.loginMs, timeoutMessage: 'Starting the app took too long.' },
+    { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Starting the app took too long.' },
     null,
   );
 }
@@ -192,14 +191,6 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         // The answer may have landed. Retrying is safe: the server checks before writing again.
         timeoutMessage:
           'No confirmation arrived in time, so this answer may or may not be saved. Retry checks first and never applies it twice.',
-      }),
-
-    login: (password) =>
-      call<void>('/api/login', null, {
-        method: 'POST',
-        body: { password },
-        timeoutMs: TIMEOUTS.loginMs,
-        timeoutMessage: 'Signing in took too long.',
       }),
 
     fetchVocabulary: () =>
@@ -235,7 +226,7 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
     fetchSettings: () =>
       call('/api/settings', accountSettingsSchema, {
         method: 'GET',
-        timeoutMs: TIMEOUTS.loginMs,
+        timeoutMs: TIMEOUTS.quickMs,
         timeoutMessage: 'Loading your settings took too long.',
       }),
 
@@ -249,5 +240,5 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
   };
 }
 
-/** The API for a deployment without accounts. */
+/** The API for the built-in sample words, which need no account. */
 export const appApi: AppApi = createAppApi();

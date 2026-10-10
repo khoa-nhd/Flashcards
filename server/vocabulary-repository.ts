@@ -32,7 +32,7 @@ export type ReviewWriteResult =
   | { outcome: 'applied' | 'already_applied' | 'conflict'; state: ReviewState }
   | { outcome: 'not_found' };
 
-export type DataMode = 'mock' | 'notion' | 'supabase';
+export type DataMode = 'mock' | 'supabase';
 
 /** Where vocabulary lives. */
 export interface VocabularyRepository {

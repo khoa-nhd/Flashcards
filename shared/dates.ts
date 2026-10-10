@@ -6,8 +6,6 @@
 export type IsoDate = string;
 
 const ISO_DATE_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/;
-const ISO_DATETIME_PREFIX = /^\d{4}-\d{2}-\d{2}T/;
-const HAS_UTC_OFFSET = /(Z|[+-]\d{2}:?\d{2})$/i;
 
 export function isIsoDate(value: unknown): boolean {
   if (typeof value !== 'string') return false;
@@ -65,21 +63,3 @@ export function calendarDateInTimeZone(instant: Date, timeZone: string): IsoDate
   return `${part('year')}-${part('month')}-${part('day')}`;
 }
 
-/**
- * Normalises a Notion date `start` value to a calendar date. Date-only values
- * pass through untouched; date-times are placed on the calendar of `timeZone`.
- * Anything else is rejected with `null` rather than guessed at.
- */
-export function toCalendarDate(value: unknown, timeZone: string): IsoDate | null {
-  if (typeof value !== 'string') return null;
-  if (isIsoDate(value)) return value;
-  if (!ISO_DATETIME_PREFIX.test(value)) return null;
-  if (!HAS_UTC_OFFSET.test(value)) {
-    // A wall-clock time with no offset already names its own calendar day.
-    const datePart = value.slice(0, 10);
-    return isIsoDate(datePart) ? datePart : null;
-  }
-  const instant = new Date(value);
-  if (Number.isNaN(instant.getTime())) return null;
-  return calendarDateInTimeZone(instant, timeZone);
-}

@@ -222,7 +222,7 @@ describe('reconciling after the app has been used', () => {
 });
 
 /**
- * What the Notion-backed app computed for a set of words, computed here from
+ * What the original system computed for a set of words, computed here from
  * the backup alone with the same rules engine, to compare against what the
  * Supabase-backed app serves after importing them.
  */

@@ -6,7 +6,6 @@ import { AuthScreen } from './components/AuthScreen.js';
 import { Link } from './components/Link.js';
 import { Spinner } from './components/Spinner.js';
 import { Toasts } from './components/Toasts.js';
-import { UnlockScreen } from './components/UnlockScreen.js';
 import { WordDetailPanel } from './components/WordDetailPanel.js';
 import { BUTTON_PRIMARY } from './components/ui.js';
 import { ApiError, appApi, createAppApi, fetchAppConfig, type ApiAuth, type AppApi } from './lib/api-client.js';
@@ -32,7 +31,7 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
 };
 
 export interface AppProps {
-  /** Given directly where the app runs without accounts, and in tests. */
+  /** Given directly with the built-in sample words, which need no account, and in tests. */
   api?: AppApi;
   settings?: SettingsStore;
   /** Given in tests of the account flow; otherwise built from what the server says it uses. */
@@ -211,11 +210,10 @@ function Workspace({ api, settings, account }: { api: AppApi; settings?: Setting
 }
 
 function Root() {
-  const { api, session, vocabulary, account } = useApp();
+  const { vocabulary, account } = useApp();
   const location = useLocation();
   const route = matchRoute(location.pathname);
   const vocab = useSyncExternalStore(vocabulary.subscribe, vocabulary.getState);
-  const review = useSyncExternalStore(session.subscribe, session.getState);
   const { reduceMotion } = useSettings();
 
   useEffect(() => {
@@ -225,23 +223,6 @@ function Root() {
   useEffect(() => {
     document.title = route === null ? 'Vocabulary' : `${PAGES[route].title} · Vocabulary`;
   }, [route]);
-
-  const reviewLocked = review.status === 'error' && review.error?.kind === 'load' && review.error.unauthorized;
-  const vocabularyLocked = vocab.error?.unauthorized === true;
-  // With accounts, an ended session leads back to the sign-in screen instead; there is no shared password to ask for.
-  if (account === null && (reviewLocked || vocabularyLocked)) {
-    return (
-      <div className="h-dvh">
-        <UnlockScreen
-          api={api}
-          onUnlocked={() => {
-            if (vocabularyLocked) void vocabulary.reload();
-            if (reviewLocked) void session.load();
-          }}
-        />
-      </div>
-    );
-  }
 
   const badge = vocab.meta === null ? null : vocab.meta.mode === 'mock' ? 'Demo' : vocab.meta.writesEnabled ? null : 'Read-only';
   // On the Review tab the session's own progress is the truth, so no second count is shown there.

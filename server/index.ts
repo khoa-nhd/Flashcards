@@ -3,7 +3,6 @@ import { serve } from '@hono/node-server';
 import { serveStatic } from '@hono/node-server/serve-static';
 import { areWriteRulesConfirmed } from '../shared/review-logic.js';
 import { reviewRules } from '../config/review.config.js';
-import { accessMode } from './auth.js';
 import { buildApp } from './bootstrap.js';
 
 try {
@@ -30,6 +29,6 @@ serve({ fetch: app.fetch, port: config.port, hostname: config.host }, ({ port })
         ? 'ENABLED'
         : 'disabled (read-only preview)';
   console.log(`Flashcard API listening on http://${config.host}:${port}`);
-  console.log(`  data: ${config.mode} | writes: ${writes} | access: ${accessMode(config)}`);
+  console.log(`  data: ${config.mode} | writes: ${writes} | access: ${config.mode === 'supabase' ? 'accounts' : 'open'}`);
   for (const issue of config.issues) console.warn(`  setup issue: ${issue}`);
 });

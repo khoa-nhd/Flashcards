@@ -6,7 +6,6 @@ export type { DataMode };
 export interface AppConfig {
   mode: DataMode;
   isProduction: boolean;
-  notion: { apiKey: string; databaseId: string | null; dataSourceId: string | null } | null;
   /**
    * Where the Supabase project is, and the key browsers are meant to hold.
    * Both are public by design. No privileged key is ever read by this app.
@@ -18,10 +17,8 @@ export interface AppConfig {
    * starts with, and may be `null`.
    */
   timeZone: string | null;
-  /** The owner asked for writes; they still require confirmed rules and a writable schema. */
+  /** False only when saving has been frozen on purpose. */
   writesRequested: boolean;
-  accessPassword: string | null;
-  allowUnauthenticated: boolean;
   port: number;
   host: string;
   /** Problems that stop the app from serving reviews. Never contains secret values. */
@@ -33,10 +30,6 @@ type Env = Record<string, string | undefined>;
 function read(env: Env, key: string): string | null {
   const value = env[key]?.trim();
   return value ? value : null;
-}
-
-function readFlag(env: Env, key: string): boolean {
-  return read(env, key)?.toLowerCase() === 'true';
 }
 
 /**
@@ -66,19 +59,18 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const issues: string[] = [];
   const isProduction = read(env, 'NODE_ENV') === 'production';
 
-  const apiKey = read(env, 'NOTION_API_KEY');
-  const databaseId = read(env, 'NOTION_DATABASE_ID');
-  const dataSourceId = read(env, 'NOTION_DATA_SOURCE_ID');
+  const url = read(env, 'SUPABASE_URL');
+  const publicKey = read(env, 'SUPABASE_ANON_KEY') ?? read(env, 'SUPABASE_PUBLISHABLE_KEY');
 
   const requestedMode = read(env, 'DATA_MODE');
   let mode: DataMode;
-  if (requestedMode === 'mock' || requestedMode === 'notion' || requestedMode === 'supabase') {
+  if (requestedMode === 'mock' || requestedMode === 'supabase') {
     mode = requestedMode;
   } else {
-    if (requestedMode !== null) issues.push('DATA_MODE must be "mock", "notion" or "supabase".');
-    // Sample data is a development convenience; a deployment must opt into it.
-    // Supabase is never chosen implicitly, and never abandoned implicitly either.
-    mode = apiKey !== null || isProduction ? 'notion' : 'mock';
+    if (requestedMode !== null) issues.push('DATA_MODE must be "supabase" or "mock".');
+    // Sample data is a development convenience only: a deployment, or anything
+    // that names a Supabase project, uses Supabase and says so if it cannot.
+    mode = isProduction || url !== null || requestedMode !== null ? 'supabase' : 'mock';
   }
 
   let timeZone = read(env, 'REVIEW_TIMEZONE');
@@ -87,21 +79,8 @@ export function loadConfig(env: Env = process.env): AppConfig {
     timeZone = null;
   }
 
-  let notion: AppConfig['notion'] = null;
   let supabase: AppConfig['supabase'] = null;
-  if (mode === 'notion') {
-    if (apiKey === null) issues.push('NOTION_API_KEY is not set.');
-    if (databaseId === null && dataSourceId === null) {
-      issues.push('Set NOTION_DATABASE_ID (or NOTION_DATA_SOURCE_ID).');
-    }
-    // "Due today" depends on the calendar in use, so it is never assumed.
-    if (timeZone === null && !issues.some((issue) => issue.startsWith('REVIEW_TIMEZONE'))) {
-      issues.push('REVIEW_TIMEZONE is not set. It decides which calendar day counts as "today".');
-    }
-    if (apiKey !== null) notion = { apiKey, databaseId, dataSourceId };
-  } else if (mode === 'supabase') {
-    const url = read(env, 'SUPABASE_URL');
-    const publicKey = read(env, 'SUPABASE_ANON_KEY') ?? read(env, 'SUPABASE_PUBLISHABLE_KEY');
+  if (mode === 'supabase') {
     if (url === null) issues.push('SUPABASE_URL is not set.');
     else if (!isUsableSupabaseUrl(url)) issues.push('SUPABASE_URL must be an https:// address.');
     if (publicKey === null) {
@@ -121,24 +100,13 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const port = Number(read(env, 'PORT') ?? '8787');
   if (!Number.isInteger(port) || port <= 0 || port > 65535) issues.push('PORT is not a valid port.');
 
-  // With Notion, saving is opt-in. With Supabase it is what the app is for,
-  // and the switch remains only as a way to freeze changes on purpose.
-  const writesRequested =
-    mode === 'mock'
-      ? true
-      : mode === 'supabase'
-        ? read(env, 'REVIEW_WRITES_ENABLED')?.toLowerCase() !== 'false'
-        : readFlag(env, 'REVIEW_WRITES_ENABLED');
-
   return {
     mode,
     isProduction,
-    notion,
     supabase,
     timeZone,
-    writesRequested,
-    accessPassword: read(env, 'APP_ACCESS_PASSWORD'),
-    allowUnauthenticated: readFlag(env, 'ALLOW_UNAUTHENTICATED_ACCESS'),
+    // Saving is what the app is for; the switch exists only to freeze changes deliberately.
+    writesRequested: mode === 'mock' || read(env, 'REVIEW_WRITES_ENABLED')?.toLowerCase() !== 'false',
     port: Number.isInteger(port) ? port : 8787,
     host: read(env, 'HOST') ?? (isProduction ? '0.0.0.0' : '127.0.0.1'),
     issues,

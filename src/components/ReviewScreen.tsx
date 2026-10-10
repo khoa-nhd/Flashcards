@@ -4,7 +4,6 @@ import { HINT_DURATION_MS } from '../config.js';
 import { useReviewShortcuts } from '../hooks/useReviewShortcuts.js';
 import type { SessionController } from '../lib/session-controller.js';
 import { currentCard, type SessionState } from '../lib/session-machine.js';
-import { wording } from '../lib/source.js';
 import { Flashcard } from './Flashcard.js';
 import { ReviewControls } from './ReviewControls.js';
 import { ReviewProgress } from './ReviewProgress.js';
@@ -112,9 +111,7 @@ export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
       {status === 'error' && error !== null ? (
         <div role="alert" className="rounded-2xl border border-bad/40 bg-bad-soft p-4 text-bad-ink">
           <p className="font-semibold">
-            {error.kind === 'conflict'
-              ? wording(state.meta?.mode, 'This card changed in Notion', 'This card changed on another device')
-              : 'Your answer was not confirmed'}
+            {error.kind === 'conflict' ? 'This card changed on another device' : 'Your answer was not confirmed'}
           </p>
           <p className="mt-1 text-sm">{error.message}</p>
           <div className="mt-3 flex flex-wrap gap-2">

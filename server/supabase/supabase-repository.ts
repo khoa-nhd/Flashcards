@@ -17,9 +17,6 @@ function toEntry(row: CardRow): EntryData {
     mastery: row.mastery,
     reviewDate: row.review_date,
     dateAdded: row.date_added,
-    // Text is stored plain, so an edit never loses formatting.
-    formattedFields: [],
-    url: null,
     createdTime: row.created_at,
     lastEditedTime: row.updated_at,
   };

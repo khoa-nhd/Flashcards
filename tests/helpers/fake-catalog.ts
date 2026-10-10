@@ -13,23 +13,21 @@ export function entryData(n: number, overrides: Partial<EntryData> = {}): EntryD
     mastery: 3,
     reviewDate: '2026-10-09',
     dateAdded: '2026-10-01',
-    formattedFields: [],
-    url: `https://app.notion.com/p/${n}`,
     createdTime: '2026-10-01T02:00:00.000Z',
     lastEditedTime: '2026-10-05T02:00:00.000Z',
     ...overrides,
   };
 }
 
-/** An in-memory catalog that records every write, standing in for Notion. */
+/** An in-memory catalog that records every write. */
 export class FakeCatalog implements VocabularyCatalog {
-  readonly mode = 'notion' as const;
+  readonly mode = 'mock' as const;
   setup: SetupReport = { readIssues: [], writeIssues: [], warnings: [] };
   readonly created: NewEntry[] = [];
   readonly updated: Array<{ id: string; changes: EntryChanges }> = [];
   readonly trashed: string[] = [];
   readonly restored: string[] = [];
-  /** Set to make the next write fail the way a Notion outage would. */
+  /** Set to make the next write fail the way an outage would. */
   failNextWrite: Error | null = null;
   private readonly entries: Map<string, EntryData & { inTrash: boolean }>;
   private nextId = 100;

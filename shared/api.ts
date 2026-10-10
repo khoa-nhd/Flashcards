@@ -7,16 +7,17 @@ export const isoDateSchema = z.string().refine(isIsoDate, 'Expected a YYYY-MM-DD
 export const reviewActionSchema = z.enum(['remember', 'not_remember']);
 
 /** Where the data comes from. Shown to the user so sample data is never mistaken for their own. */
-export const dataModeSchema = z.enum(['mock', 'notion', 'supabase']);
+export const dataModeSchema = z.enum(['mock', 'supabase']);
 
 export const reviewStateSchema = z.object({
   mastery: z.number(),
   nextReview: isoDateSchema.nullable(),
 });
 
-const NOTION_ID_PATTERN = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
 
-export const pageIdSchema = z.string().regex(NOTION_ID_PATTERN, 'Expected a Notion page id');
+/** The id of one word. The field keeps the name `pageId` in requests so open pages keep working. */
+export const pageIdSchema = z.string().regex(UUID_PATTERN, 'Expected a word id');
 
 /** Canonical dashed, lower-case form so ids compare reliably. */
 export function normalizeId(id: string): string {
@@ -101,7 +102,7 @@ export const reviewStatusSchema = z.enum([
   'invalid',
 ]);
 
-/** Limits for what the app will write. Generous for a vocabulary note, far below Notion's own. */
+/** Limits for what the app will write, matching the checks in the database. Generous for a vocabulary note. */
 export const FIELD_LIMITS = { word: 200, text: 6000 } as const;
 
 /** A full vocabulary record as the bank, dashboard and calendar see it. */
@@ -117,11 +118,7 @@ export const vocabularyEntrySchema = z.object({
   reviewStatus: reviewStatusSchema,
   /** Whether the word is in the review queue right now, by the same rule the Review tab uses. */
   reviewable: z.boolean(),
-  /** Text fields that carry formatting in Notion, which a plain-text edit would flatten. */
-  formattedFields: z.array(z.string()),
-  /** Link to the page in Notion. */
-  url: z.string().nullable(),
-  /** Notion's own timestamps, kept apart from the user-entered Date Added. */
+  /** When the record itself was created and last changed, kept apart from the user-entered Date Added. */
   createdTime: z.string().nullable(),
   lastEditedTime: z.string().nullable(),
 });
@@ -201,12 +198,12 @@ export const trashResponseSchema = z.object({ entries: z.array(vocabularyEntrySc
 
 /**
  * What the browser needs before it can do anything else: whether to ask for
- * an account, a shared passphrase, or nothing. The Supabase address and key
- * are the public ones a browser is meant to hold.
+ * an account (always, except with the built-in sample words). The Supabase
+ * address and key are the public ones a browser is meant to hold.
  */
 export const appConfigResponseSchema = z.object({
   mode: dataModeSchema,
-  auth: z.enum(['none', 'password', 'account']),
+  auth: z.enum(['none', 'account']),
   supabase: z.object({ url: z.string(), publicKey: z.string() }).nullable(),
 });
 
@@ -225,10 +222,6 @@ export const accountSettingsSchema = z.object({
 });
 
 export const updateSettingsRequestSchema = z.strictObject({ timeZone: timeZoneSchema });
-
-export const loginRequestSchema = z.strictObject({
-  password: z.string().min(1).max(512),
-});
 
 export const apiErrorSchema = z.object({
   error: z.object({

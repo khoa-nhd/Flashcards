@@ -23,8 +23,6 @@ export function entry(n: number, overrides: Partial<VocabularyEntry> = {}): Voca
     dateAdded: '2026-10-01',
     reviewStatus: 'due_today',
     reviewable: true,
-    formattedFields: [],
-    url: `https://app.notion.com/p/${n}`,
     createdTime: '2026-10-01T02:00:00.000Z',
     lastEditedTime: '2026-10-05T02:00:00.000Z',
     ...overrides,
@@ -39,7 +37,7 @@ export function vocabularyList(
     entries,
     today: TODAY,
     timeZone: TIME_ZONE,
-    mode: 'notion',
+    mode: 'supabase',
     writesEnabled: true,
     skipped: [],
     defaults: { mastery: 1, reviewDate: 'empty' },
@@ -85,8 +83,6 @@ export function createFakeApi({
       saves.push(pending);
       return pending.promise;
     }),
-    login: vi.fn<AppApi['login']>(async () => undefined),
-
     fetchVocabulary: vi.fn<AppApi['fetchVocabulary']>(async () => vocabularyList(store.map((item) => ({ ...item })), list)),
     fetchEntry: vi.fn<AppApi['fetchEntry']>(async (id) => ({ ...find(id) })),
     createEntry: vi.fn<AppApi['createEntry']>(async (input) => {

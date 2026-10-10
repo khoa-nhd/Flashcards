@@ -1,8 +1,8 @@
 {
-  "name": "notion-flashcard-ui",
+  "name": "vocabulary-flashcards",
   "version": "0.1.0",
   "private": true,
-  "description": "Quizlet-style flashcard review UI for an existing Notion vocabulary database.",
+  "description": "Vocabulary flashcards with spaced review, accounts and sync, on Supabase.",
   "type": "module",
   "engines": {
     "node": "24.x"
@@ -16,15 +16,12 @@
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "notion:inspect": "tsx scripts/inspect-notion.ts",
     "dev:mock": "vite --mode mock --port 5174",
-    "notion:export": "tsx scripts/export-notion.ts",
     "supabase:import": "tsx scripts/supabase-import.ts",
     "supabase:verify": "tsx scripts/supabase-verify.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.4",
-    "@notionhq/client": "^5.27.0",
     "@supabase/supabase-js": "^2.117.3",
     "hono": "^4.13.13",
     "react": "^19.3.0",

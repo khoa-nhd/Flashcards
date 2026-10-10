@@ -10,7 +10,7 @@ export const TIMEOUTS = {
   queueMs: 60_000,
   /** Longer than the server's own timeouts, so the server answers first when it can. */
   actionMs: 40_000,
-  loginMs: 15_000,
+  quickMs: 15_000,
 } as const;
 
 /** How long the "flip the card first" hint stays visible. */

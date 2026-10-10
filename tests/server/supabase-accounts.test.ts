@@ -4,7 +4,7 @@ import { isPrivilegedSupabaseKey, loadConfig } from '../../server/env.js';
 import { accountFromClaims, createSupabaseAccounts } from '../../server/supabase/supabase-accounts.js';
 import { DatabaseError, toDatabaseError, type VocabularyDatabase } from '../../server/supabase/supabase-database.js';
 import { sampleRules } from '../../server/mock/sample-rules.js';
-import { TEST_FIELDS } from '../helpers/notion-fixtures.js';
+import { TEST_FIELDS } from '../helpers/fixtures.js';
 
 const USER = '0b0e7c6a-5a4e-4c1f-9d2b-3f1e2d4c5b6a';
 
@@ -59,7 +59,6 @@ describe('Supabase configuration', () => {
     expect(config).toMatchObject({
       mode: 'supabase',
       supabase: { url: 'https://project.supabase.co', publicKey: 'sb_publishable_abc' },
-      notion: null,
       timeZone: null,
       writesRequested: true,
       issues: [],
@@ -69,13 +68,6 @@ describe('Supabase configuration', () => {
   it('accepts the key under its newer name', () => {
     const config = loadConfig({ DATA_MODE: 'supabase', SUPABASE_URL: env.SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY: 'sb_publishable_new' });
     expect(config.supabase?.publicKey).toBe('sb_publishable_new');
-  });
-
-  it('is only ever selected explicitly', () => {
-    const { DATA_MODE: _mode, ...withoutMode } = env;
-    void _mode;
-    expect(loadConfig(withoutMode).mode).toBe('mock');
-    expect(loadConfig({ ...withoutMode, NODE_ENV: 'production' }).mode).toBe('notion');
   });
 
   it('names what is missing', () => {
@@ -91,11 +83,6 @@ describe('Supabase configuration', () => {
     expect(loadConfig({ ...env, REVIEW_WRITES_ENABLED: 'false' }).writesRequested).toBe(false);
     expect(loadConfig({ ...env, REVIEW_WRITES_ENABLED: 'true' }).writesRequested).toBe(true);
     expect(loadConfig({ ...env, REVIEW_WRITES_ENABLED: '' }).writesRequested).toBe(true);
-  });
-
-  it('ignores Notion settings entirely', () => {
-    const config = loadConfig({ ...env, NOTION_API_KEY: 'secret_test_value', NOTION_DATABASE_ID: '11111111111141118111111111111111' });
-    expect(config).toMatchObject({ mode: 'supabase', notion: null, issues: [] });
   });
 });
 

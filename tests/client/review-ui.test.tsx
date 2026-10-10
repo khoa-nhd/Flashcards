@@ -582,20 +582,7 @@ describe('when saving fails', () => {
     expect(api.submitAction).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'not_remember' }));
   });
 
-  it('does not offer a retry for a card that changed in Notion', async () => {
-    const { api, saves } = await renderApp(undefined, { mode: 'notion' });
-    press(' ');
-    press('ArrowRight');
-    await fail(saves[0], new ApiError('conflict', 'This card was changed in Notion after it was loaded.', 409));
-
-    expect(screen.getByRole('alert')).toHaveTextContent('This card changed in Notion');
-    expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Skip this card' }));
-    showsCard(2, 'word-2');
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
-  });
-
-  it('treats a card answered on another device as stale, without naming Notion', async () => {
+  it('treats a card answered on another device as stale, and offers only to skip it', async () => {
     const { api, saves } = await renderApp([card(1), card(2)], { mode: 'supabase' });
     press(' ');
     press('ArrowRight');
@@ -631,7 +618,7 @@ describe('the session as a whole', () => {
     const mock = await renderApp([card(1)], { mode: 'mock' });
     expect(screen.getByText('Sample data')).toBeInTheDocument();
     mock.unmount();
-    await renderApp([card(1)], { mode: 'notion', writesEnabled: false });
+    await renderApp([card(1)], { mode: 'supabase', writesEnabled: false });
     expect(screen.getByText('Preview · not saving')).toBeInTheDocument();
   });
 
@@ -644,35 +631,11 @@ describe('the session as a whole', () => {
   it('shows a load failure with a way to try again', async () => {
     const { api } = createFakeApi();
     api.fetchQueue
-      .mockRejectedValueOnce(new ApiError('setup_incomplete', 'No property named "Mastery".', 503))
+      .mockRejectedValueOnce(new ApiError('setup_incomplete', 'The database schema is not installed.', 503))
       .mockResolvedValue(queueResponse([card(1)]));
     renderAt(api);
-    expect(await screen.findByRole('alert')).toHaveTextContent('No property named "Mastery".');
+    expect(await screen.findByRole('alert')).toHaveTextContent('The database schema is not installed.');
     fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByTestId('flashcard')).toBeInTheDocument();
-  });
-
-  it('asks for the access password when the server requires one', async () => {
-    const user = userEvent.setup();
-    const { api } = createFakeApi();
-    api.fetchQueue
-      .mockRejectedValueOnce(new ApiError('unauthorized', 'Enter the access password to continue.', 401))
-      .mockResolvedValue(queueResponse([card(1)]));
-    api.login
-      .mockRejectedValueOnce(new ApiError('invalid_password', 'That password is not correct.', 401))
-      .mockResolvedValue(undefined);
-    renderAt(api);
-
-    const field = await screen.findByLabelText('Access password');
-    // Spaces and arrow keys are ordinary typing here.
-    await user.type(field, 'a b{ArrowLeft}{ArrowRight}');
-    expect(field).toHaveValue('a b');
-    await user.click(screen.getByRole('button', { name: 'Unlock' }));
-    expect(await screen.findByRole('alert')).toHaveTextContent('That password is not correct.');
-
-    await user.click(screen.getByRole('button', { name: 'Unlock' }));
-    expect(await screen.findByTestId('flashcard')).toBeInTheDocument();
-    expect(api.login).toHaveBeenCalledTimes(2);
-    expect(api.login).toHaveBeenLastCalledWith('a b');
   });
 });

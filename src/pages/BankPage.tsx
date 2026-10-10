@@ -25,7 +25,6 @@ import {
 import { downloadFile, toCsv, toJson } from '../lib/export.js';
 import { ROUTES, buildHref, navigate, openWord, useLocation } from '../lib/router.js';
 import type { SortKey } from '../lib/settings.js';
-import { wording } from '../lib/source.js';
 
 const SORT_LABELS: Record<SortKey, string> = {
   word: 'Word',
@@ -68,8 +67,6 @@ export function BankPage() {
 
   const preset = today === null ? null : activePreset(query, today);
   const exportName = `vocabulary-${today ?? 'export'}`;
-  const place = wording(state.meta?.mode, 'Notion database', 'vocabulary');
-  const readOnlyNote = wording(state.meta?.mode, 'Does not change Notion.', 'Does not change anything.');
 
   return (
     <div className={PAGE}>
@@ -77,8 +74,8 @@ export function BankPage() {
         title="Vocabulary bank"
         description={
           state.status === 'ready'
-            ? `${state.entries.length} ${state.entries.length === 1 ? 'word' : 'words'} in your ${place}.`
-            : `Every word in your ${place}.`
+            ? `${state.entries.length} ${state.entries.length === 1 ? 'word' : 'words'} in your vocabulary.`
+            : 'Every word in your vocabulary.'
         }
         actions={
           <>
@@ -89,7 +86,7 @@ export function BankPage() {
               type="button"
               className={BUTTON_SECONDARY}
               disabled={state.entries.length === 0}
-              title={`Download every word as a CSV file. ${readOnlyNote}`}
+              title="Download every word as a CSV file. Does not change anything."
               onClick={() => downloadFile(`${exportName}.csv`, 'text/csv;charset=utf-8', toCsv(sortEntries(state.entries, 'word', 'asc')))}
             >
               <Icon name="download" className="size-4" /> CSV
@@ -98,7 +95,7 @@ export function BankPage() {
               type="button"
               className={BUTTON_SECONDARY}
               disabled={state.entries.length === 0}
-              title={`Download every word as a JSON file. ${readOnlyNote}`}
+              title="Download every word as a JSON file. Does not change anything."
               onClick={() =>
                 downloadFile(
                   `${exportName}.json`,

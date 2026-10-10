@@ -1,10 +1,11 @@
 /**
- * Guards the owner's actual configuration: the queue rules read from their
- * Notion database, and the "Nhớ" / "Không nhớ" rules as the owner specified
- * them. The expected dates below are the owner's own worked examples.
+ * Guards the owner's actual configuration: the queue rule carried over from
+ * their original vocabulary system, and the "Nhớ" / "Không nhớ" rules as the
+ * owner specified them. The expected dates below are the owner's own worked
+ * examples.
  */
 import { describe, expect, it } from 'vitest';
-import { cardFields, notionProperties, reviewRules } from '../../config/review.config.js';
+import { cardFields, newWordDefaults, reviewRules } from '../../config/review.config.js';
 import {
   applyAction,
   areDetailsVisible,
@@ -17,13 +18,14 @@ import { TODAY } from '../helpers/fixtures.js';
 /** The day of the review in the owner's examples. */
 const REVIEW_DAY = '2026-10-10';
 
-/** Notion's own rule: Mastery < 10 and (empty(Review Date) or Review Date <= today()). */
+/** The original rule, written out: mastery < 10 and (no review date, or review date <= today). */
 const dueForReview = (mastery: number, reviewDate: string | null) =>
   mastery < 10 && (reviewDate === null || reviewDate <= TODAY);
 
 describe('queue rules', () => {
-  it('reads the properties the database actually has', () => {
-    expect(notionProperties).toEqual({ word: 'Word', mastery: 'Mastery', nextReview: 'Review Date' });
+  it('starts a new word at mastery 1 with no review date, so it is due at once', () => {
+    expect(newWordDefaults).toEqual({ mastery: 1, reviewDate: 'empty' });
+    expect(dueForReview(newWordDefaults.mastery, null)).toBe(true);
   });
 
   it('agrees with the "Due for Review" formula for every combination', () => {
@@ -91,9 +93,9 @@ describe('card fields', () => {
     expect(cardFields.filter((field) => field.side === 'front' && field.visibility === 'details')).toEqual([]);
   });
 
-  it('gives every card field a distinct key and property', () => {
+  it('gives every card field a distinct key, and only fields the database stores', () => {
     expect(new Set(cardFields.map((field) => field.key)).size).toBe(cardFields.length);
-    expect(new Set(cardFields.map((field) => field.property)).size).toBe(cardFields.length);
+    expect(cardFields.map((field) => field.key).sort()).toEqual(['definition', 'example', 'meaning']);
   });
 });
 
@@ -139,7 +141,7 @@ describe('"Nhớ" (Remember)', () => {
   it('leaves a mastery-0 word due the same day', () => {
     const result = applyAction('remember', { mastery: 0, nextReview: REVIEW_DAY }, REVIEW_DAY, reviewRules);
     expect(result).toEqual({ mastery: 1, nextReview: REVIEW_DAY });
-    // Still due in Notion, which is why a session never shows a card twice.
+    // Still due by the rule, which is why a session never shows a card twice.
     expect(checkEligibility(result, REVIEW_DAY, reviewRules).eligible).toBe(true);
   });
 

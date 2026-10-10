@@ -24,7 +24,7 @@ export interface AppServices {
   vocabulary: VocabularyStore;
   settings: SettingsStore;
   toasts: ToastStore;
-  /** `null` where the app runs without accounts. */
+  /** `null` with the built-in sample words, which need no account. */
   account: AccountControls | null;
   /**
    * Called when the Review tab is shown. Loads the queue on the first visit;

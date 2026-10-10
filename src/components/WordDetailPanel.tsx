@@ -4,7 +4,6 @@ import { isIsoDate } from '../../shared/dates.js';
 import { useApp, useVocabulary } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { MISSING_LABELS, missingFields } from '../lib/bank-query.js';
-import { wording } from '../lib/source.js';
 import { MasteryPill, StatusBadge, formatDate, relativeDay } from './badges.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { Field, describedBy } from './Field.js';
@@ -189,11 +188,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
       vocabulary.remove(entry.id);
       const removed = entry;
       toasts.show({
-        message: wording(
-          meta?.mode,
-          `Moved “${removed.word}” to Notion's trash.`,
-          `Moved “${removed.word}” to the trash.`,
-        ),
+        message: `Moved “${removed.word}” to the trash.`,
         action: {
           label: 'Undo',
           run: () => {
@@ -209,11 +204,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                   message:
                     error instanceof ApiError
                       ? error.message
-                      : wording(
-                          meta?.mode,
-                          'Could not restore the word. It is still in Notion’s trash.',
-                          'Could not restore the word. It is still in the trash; restore it from Settings.',
-                        ),
+                      : 'Could not restore the word. It is still in the trash; restore it from Settings.',
                 });
               });
           },
@@ -322,17 +313,6 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                   </span>
                 </p>
               )}
-
-              {entry.url !== null && (
-                <a
-                  href={entry.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-1.5 self-start text-sm font-medium text-accent hover:underline"
-                >
-                  Open in Notion <Icon name="external" className="size-4" />
-                </a>
-              )}
             </div>
           )}
 
@@ -390,13 +370,6 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                   aria-describedby={describedBy('edit-date-added', null, errors.dateAdded)}
                 />
               </Field>
-
-              {entry.formattedFields.length > 0 && (
-                <p className="rounded-xl bg-warn-soft px-3 py-2 text-sm text-warn-ink">
-                  Some of this text has formatting in Notion (bold, links or similar). A field you change here is saved
-                  as plain text; fields you leave alone keep their formatting.
-                </p>
-              )}
 
               <div className="rounded-xl border border-line">
                 <button
@@ -517,14 +490,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
         >
           <p>
             <strong className="text-ink">{entry.word}</strong>
-            {entry.meaning ? ` (${entry.meaning})` : ''}{' '}
-            {wording(meta?.mode, "will be moved to Notion's trash", 'will be moved to the trash')}, together with its
-            mastery of {entry.mastery ?? '—'}.{' '}
-            {wording(
-              meta?.mode,
-              'It can be restored from the trash in Notion for 30 days.',
-              'It can be restored at any time from Settings, under Deleted words.',
-            )}
+            {entry.meaning ? ` (${entry.meaning})` : ''} will be moved to the trash, together with its mastery of{' '}
+            {entry.mastery ?? '—'}. It can be restored at any time from Settings, under Deleted words.
           </p>
         </ConfirmDialog>
       )}

@@ -78,9 +78,9 @@ describe('loading', () => {
     const { store, fetchVocabulary } = setup();
     store.ensureFresh();
     await settled();
-    fetchVocabulary.mockRejectedValueOnce(new ApiError('rate_limited', 'Notion is rate limiting requests.', 429));
+    fetchVocabulary.mockRejectedValueOnce(new ApiError('rate_limited', 'The database is temporarily unavailable.', 429));
     await store.reload();
-    expect(store.getState()).toMatchObject({ status: 'ready', refreshing: false, error: { message: 'Notion is rate limiting requests.' } });
+    expect(store.getState()).toMatchObject({ status: 'ready', refreshing: false, error: { message: 'The database is temporarily unavailable.' } });
     expect(store.getState().entries).toHaveLength(2);
   });
 

@@ -4,7 +4,7 @@ import { ReviewService, type ReviewServiceOptions } from '../../server/review-se
 import type { ReviewRules } from '../../shared/review-logic.js';
 import type { VocabularyRecord } from '../../shared/vocabulary.js';
 import { FakeRepository, NOW, TIME_ZONE, TODAY, pageId, record } from '../helpers/fixtures.js';
-import { TEST_FIELDS } from '../helpers/notion-fixtures.js';
+import { TEST_FIELDS } from '../helpers/fixtures.js';
 
 function setup(records: VocabularyRecord[], overrides: Partial<ReviewServiceOptions> = {}, listed?: VocabularyRecord[]) {
   const repository = new FakeRepository(records, listed);
@@ -32,7 +32,7 @@ describe('getQueue', () => {
     ]);
     const queue = await service.getQueue();
     expect(queue.cards.map((item) => item.id)).toEqual([pageId(2), pageId(1)]);
-    expect(queue).toMatchObject({ today: TODAY, timeZone: TIME_ZONE, mode: 'notion', writesEnabled: true, skipped: [] });
+    expect(queue).toMatchObject({ today: TODAY, timeZone: TIME_ZONE, mode: 'mock', writesEnabled: true, skipped: [] });
   });
 
   it('uses the configured time zone to decide what "today" is', async () => {
@@ -163,9 +163,9 @@ describe('submitAction', () => {
     expect(repository.updates).toHaveLength(1);
   });
 
-  it('refuses to write over a change made in Notion and reports the current state', async () => {
+  it('refuses to write over a change made elsewhere and reports the current state', async () => {
     const { repository, service } = start();
-    repository.editInNotion(pageId(1), { mastery: 7 });
+    repository.editElsewhere(pageId(1), { mastery: 7 });
     await expect(
       service.submitAction({ pageId: pageId(1), action: 'remember', expected: shown }),
     ).rejects.toMatchObject({
@@ -220,7 +220,7 @@ describe('submitAction', () => {
     expect(repository.updates).toEqual([]);
   });
 
-  it('fails when Notion does not echo back the values that were written', async () => {
+  it('fails when the store does not echo back the values that were written', async () => {
     const { repository, service } = start();
     repository.afterUpdate = (updated) => ({ ...updated, mastery: 3 });
     await expect(

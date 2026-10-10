@@ -4,27 +4,12 @@ import type { IsoDate } from './dates.js';
 export interface VocabularyRecord {
   id: string;
   word: string;
-  /** `null` when the mastery property is empty. */
+  /** `null` when no mastery is stored. */
   mastery: number | null;
   /** `null` when the due date is empty or unreadable. */
   nextReview: IsoDate | null;
   /** Display fields keyed by `CardFieldConfig.key`; `null` when empty. */
   fields: Record<string, string | null>;
-}
-
-/** The Notion properties that drive review eligibility and scheduling. */
-export interface NotionPropertyConfig {
-  word: string;
-  mastery: string;
-  nextReview: string;
-}
-
-/** The Notion properties behind the descriptive fields of a vocabulary entry. */
-export interface VocabularyFieldConfig {
-  meaning: string;
-  definition: string;
-  example: string;
-  dateAdded: string;
 }
 
 /** The editable text fields of an entry besides the word itself. */
@@ -50,9 +35,8 @@ export type ReviewStatus = 'mastered' | 'overdue' | 'due_today' | 'unscheduled' 
 
 /** One optional piece of card content and where it may appear. */
 export interface CardFieldConfig {
+  /** Which stored field this is: a key of `VocabularyRecord.fields`. */
   key: string;
-  /** Exact Notion property name. */
-  property: string;
   label: string;
   side: 'front' | 'back';
   /**

@@ -50,7 +50,7 @@ describe('list', () => {
     expect(list).toMatchObject({
       today: TODAY,
       timeZone: TIME_ZONE,
-      mode: 'notion',
+      mode: 'mock',
       writesEnabled: true,
       defaults: { mastery: 1, reviewDate: 'empty' },
     });
@@ -183,10 +183,10 @@ describe('create', () => {
     expect(catalog.created).toHaveLength(1);
   });
 
-  it('creates nothing and remembers nothing when Notion fails', async () => {
+  it('creates nothing and remembers nothing when the store fails', async () => {
     const { catalog, service } = setup();
-    catalog.failNextWrite = new Error('Notion is down');
-    await expect(service.create(createRequest({ word: 'candid' }))).rejects.toThrow('Notion is down');
+    catalog.failNextWrite = new Error('the database is down');
+    await expect(service.create(createRequest({ word: 'candid' }))).rejects.toThrow('the database is down');
     // The retry is a real attempt, not a replay of a record that was never made.
     await expect(service.create(createRequest({ word: 'candid' }))).resolves.toMatchObject({ created: true });
     expect(catalog.created).toHaveLength(1);
@@ -293,8 +293,8 @@ describe('update', () => {
 
   it('propagates a failed save without changing anything', async () => {
     const { catalog, service } = setup([entryData(1)]);
-    catalog.failNextWrite = new Error('Notion is down');
-    await expect(service.update(pageId(1), updateRequest({ definition: 'x' }))).rejects.toThrow('Notion is down');
+    catalog.failNextWrite = new Error('the database is down');
+    await expect(service.update(pageId(1), updateRequest({ definition: 'x' }))).rejects.toThrow('the database is down');
     expect((await service.get(pageId(1))).definition).toBe('definition of word-1');
   });
 

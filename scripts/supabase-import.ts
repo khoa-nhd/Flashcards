@@ -5,7 +5,7 @@
  *   npm run supabase:import -- --apply          imports, then compares every field with the file
  *   npm run supabase:import -- path/to/file.json [--apply]
  *
- * Without a path, the newest `backups/notion-export-*.json` is used.
+ * Without a path, the newest `backups/*-export-*.json` is used.
  *
  * It signs in as the account that should own the words (MIGRATION_EMAIL, and
  * MIGRATION_PASSWORD or a prompt), so it can do nothing that account could not
@@ -31,10 +31,13 @@ function findBackup(given: string | undefined): string {
     return given;
   }
   const files = existsSync('backups')
-    ? readdirSync('backups').filter((name) => /^notion-export-.*\.json$/.test(name)).sort()
+    ? readdirSync('backups')
+        .filter((name) => /^[a-z]+-export-.*\.json$/.test(name))
+        // Newest last, by the timestamp in the name, whatever the source was.
+        .sort((a, b) => a.slice(a.indexOf('-export-')).localeCompare(b.slice(b.indexOf('-export-'))))
     : [];
   const latest = files.at(-1);
-  if (latest === undefined) throw new Error('No backup found in backups/. Run "npm run notion:export" first.');
+  if (latest === undefined) throw new Error('No backup file found in backups/. Give the path to one.');
   return join('backups', latest);
 }
 
@@ -69,7 +72,7 @@ async function main(): Promise<number> {
 
   const backup: Backup = backupSchema.parse(JSON.parse(readFileSync(file, 'utf8')));
   const project = readProjectConfig();
-  const session = await signIn(project, 'MIGRATION_EMAIL', 'MIGRATION_PASSWORD');
+  const session = await signIn(project, 'MIGRATION_EMAIL', 'MIGRATION_PASSWORD', 'Account that will own the words');
 
   console.log(`Backup:  ${file}`);
   console.log(`         ${backup.count} words from ${backup.source}, exported ${backup.exportedAt}, time zone ${backup.timeZone}`);

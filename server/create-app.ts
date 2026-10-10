@@ -1,11 +1,9 @@
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
-import { deleteCookie, getCookie, setCookie } from 'hono/cookie';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { ZodType } from 'zod';
 import {
   createEntryRequestSchema,
-  loginRequestSchema,
   pageIdSchema,
   reviewActionRequestSchema,
   updateEntryRequestSchema,
@@ -15,18 +13,8 @@ import {
   type AppConfigResponse,
 } from '../shared/api.js';
 import { bearerToken, type AccountGateway, type AccountSession } from './accounts.js';
-import {
-  LoginThrottle,
-  SESSION_COOKIE,
-  SESSION_TTL_SECONDS,
-  accessMode,
-  issueSessionToken,
-  passwordMatches,
-  verifySessionToken,
-} from './auth.js';
 import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
-import { NotionRequestError, notionErrorToHttp } from './notion/notion-errors.js';
 import type { ReviewService } from './review-service.js';
 import { DatabaseError } from './supabase/supabase-database.js';
 import type { VocabularyService } from './vocabulary-service.js';
@@ -39,7 +27,6 @@ export interface AppDependencies {
   vocabulary?: VocabularyService | null;
   /** Present when the app has accounts: every request then gets services of its own. */
   accounts?: AccountGateway | null;
-  now?: () => Date;
 }
 
 /** What the current request may use. With accounts, all of it belongs to one signed-in user. */
@@ -93,16 +80,10 @@ async function parseBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
   return parsed.data;
 }
 
-export function createApp({
-  config,
-  service,
-  vocabulary = null,
-  accounts = null,
-  now = () => new Date(),
-}: AppDependencies): Hono<AppEnv> {
+export function createApp({ config, service, vocabulary = null, accounts = null }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
-  const access = accessMode(config);
-  const throttle = new LoginThrottle();
+  // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
+  const usesAccounts = config.mode === 'supabase';
 
   const notConfigured = () =>
     new HttpError(503, 'setup_incomplete', `The server is not configured yet. ${config.issues.join(' ')}`);
@@ -121,7 +102,6 @@ export function createApp({
 
   app.onError((error, c) => {
     if (error instanceof HttpError) return errorResponse(c, error);
-    if (error instanceof NotionRequestError) return errorResponse(c, notionErrorToHttp(error));
     if (error instanceof DatabaseError) {
       // The code says what went wrong without quoting any stored value.
       if (error.failure !== 'unauthorized') {
@@ -141,7 +121,8 @@ export function createApp({
     await next();
   });
 
-  // The session cookie is SameSite=Strict; this also refuses cross-site writes outright.
+  // Requests carry a token rather than a cookie, so another site cannot make one on a
+  // visitor's behalf. Cross-site writes are refused outright all the same.
   app.use('/api/*', async (c, next) => {
     if (c.req.method !== 'GET' && c.req.method !== 'HEAD') {
       const origin = c.req.header('origin');
@@ -171,16 +152,11 @@ export function createApp({
 
   app.get('/api/health', (c) =>
     c.json({
-      ok: config.issues.length === 0 && access !== 'locked',
+      ok: config.issues.length === 0,
       mode: config.mode,
-      access,
+      access: usesAccounts ? 'account' : 'open',
       writesRequested: config.writesRequested,
-      issues: [
-        ...config.issues,
-        ...(access === 'locked'
-          ? ['No access control is configured. Set APP_ACCESS_PASSWORD (see README, "Keeping the app private").']
-          : []),
-      ],
+      issues: config.issues,
     }),
   );
 
@@ -188,47 +164,16 @@ export function createApp({
   app.get('/api/config', (c) => {
     const body: AppConfigResponse = {
       mode: config.mode,
-      auth: access === 'account' ? 'account' : access === 'password' ? 'password' : 'none',
-      supabase: access === 'account' ? config.supabase : null,
+      auth: usesAccounts ? 'account' : 'none',
+      supabase: usesAccounts ? config.supabase : null,
     };
     return c.json(body);
-  });
-
-  app.post('/api/login', async (c) => {
-    if (config.accessPassword === null || access !== 'password') {
-      throw new HttpError(400, 'login_not_enabled', 'This server does not use a password.');
-    }
-    const wait = throttle.retryAfterSeconds(now());
-    if (wait > 0) {
-      throw new HttpError(429, 'too_many_attempts', 'Too many attempts. Try again in a few minutes.', {
-        headers: { 'Retry-After': String(wait) },
-      });
-    }
-    const { password } = await parseBody(c, loginRequestSchema);
-    if (!passwordMatches(password, config.accessPassword)) {
-      throttle.recordFailure(now());
-      throw new HttpError(401, 'invalid_password', 'That password is not correct.');
-    }
-    throttle.reset();
-    setCookie(c, SESSION_COOKIE, issueSessionToken(config.accessPassword, now()), {
-      httpOnly: true,
-      secure: config.isProduction,
-      sameSite: 'Strict',
-      path: '/',
-      maxAge: SESSION_TTL_SECONDS,
-    });
-    return c.json({ ok: true });
-  });
-
-  app.post('/api/logout', (c) => {
-    deleteCookie(c, SESSION_COOKIE, { path: '/' });
-    return c.json({ ok: true });
   });
 
   // ---- Everything registered below this guard requires access. ----
 
   app.use('/api/*', async (c, next) => {
-    if (access === 'account') {
+    if (usesAccounts) {
       // No account backend means the configuration is incomplete. There is no other data path to fall back to.
       if (accounts === null) throw notConfigured();
       const token = bearerToken(c.req.header('authorization'));
@@ -237,18 +182,6 @@ export function createApp({
       if (session === null) throw new HttpError(401, 'unauthorized', 'Your session has expired. Sign in again.');
       c.set('scope', { review: session.review, vocabulary: session.vocabulary, session });
       return next();
-    }
-    if (access === 'locked') {
-      throw new HttpError(
-        503,
-        'access_not_configured',
-        'This deployment has no access control. Set APP_ACCESS_PASSWORD before using it.',
-      );
-    }
-    if (config.accessPassword !== null) {
-      if (!verifySessionToken(getCookie(c, SESSION_COOKIE), config.accessPassword, now())) {
-        throw new HttpError(401, 'unauthorized', 'Enter the access password to continue.');
-      }
     }
     c.set('scope', { review: service, vocabulary, session: null });
     await next();
@@ -277,7 +210,7 @@ export function createApp({
   app.put('/api/settings', async (c) => {
     const { session } = c.get('scope');
     if (session === null) {
-      throw new HttpError(409, 'not_editable', 'The time zone is part of the server configuration (REVIEW_TIMEZONE).');
+      throw new HttpError(409, 'not_editable', 'The sample data uses the time zone of the computer it runs on.');
     }
     const { timeZone } = await parseBody(c, updateSettingsRequestSchema);
     const saved = await session.saveTimeZone(timeZone);

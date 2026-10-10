@@ -6,7 +6,6 @@ import {
   daysBetween,
   isIsoDate,
   isValidTimeZone,
-  toCalendarDate,
 } from '../../shared/dates.js';
 
 describe('isIsoDate', () => {
@@ -63,26 +62,3 @@ describe('time zones', () => {
   });
 });
 
-describe('toCalendarDate', () => {
-  it('passes date-only values through unchanged', () => {
-    expect(toCalendarDate('2026-10-09', 'Asia/Ho_Chi_Minh')).toBe('2026-10-09');
-  });
-
-  it('places a date-time on the calendar of the review time zone', () => {
-    expect(toCalendarDate('2026-10-09T23:30:00.000+07:00', 'Asia/Ho_Chi_Minh')).toBe('2026-10-09');
-    expect(toCalendarDate('2026-10-09T23:30:00.000+07:00', 'UTC')).toBe('2026-10-09');
-    expect(toCalendarDate('2026-10-09T20:00:00.000Z', 'Asia/Ho_Chi_Minh')).toBe('2026-10-10');
-  });
-
-  it('keeps the wall-clock day of a date-time that has no offset', () => {
-    expect(toCalendarDate('2026-10-09T23:30:00', 'America/Los_Angeles')).toBe('2026-10-09');
-  });
-
-  it('returns null for anything unreadable', () => {
-    expect(toCalendarDate('next tuesday', 'UTC')).toBeNull();
-    expect(toCalendarDate('2026-02-30', 'UTC')).toBeNull();
-    expect(toCalendarDate('', 'UTC')).toBeNull();
-    expect(toCalendarDate(null, 'UTC')).toBeNull();
-    expect(toCalendarDate(undefined, 'UTC')).toBeNull();
-  });
-});

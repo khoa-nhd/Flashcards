@@ -67,7 +67,7 @@ describe('Add vocabulary', () => {
     expect(addButton()).toBeDisabled();
 
     await act(async () => pending.resolve(entry(50, { word: 'luminous', meaning: 'sáng chói', dateAdded: TODAY })));
-    expect(await screen.findByText(/was added/)).toHaveTextContent('luminous was added to Notion.');
+    expect(await screen.findByText(/was added/)).toHaveTextContent('luminous was added to your vocabulary.');
     // Ready for the next word, with the cursor back where typing starts.
     expect(wordField()).toHaveValue('');
     expect(screen.getByLabelText('Vietnamese meaning')).toHaveValue('');
@@ -159,12 +159,12 @@ describe('Add vocabulary', () => {
 
   it('keeps the form filled in when saving fails', async () => {
     const { api, user } = await open('/add');
-    api.createEntry.mockRejectedValueOnce(new ApiError('notion_forbidden', 'The Notion integration is not allowed to do this. Check its capabilities.', 502));
+    api.createEntry.mockRejectedValueOnce(new ApiError('forbidden', 'The database refused this change.', 403));
     await user.type(await screen.findByLabelText(/^Word/), 'zeal');
     await user.type(screen.getByLabelText('Definition'), 'great energy');
     await user.click(addButton());
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('not allowed to do this');
+    expect(await screen.findByRole('alert')).toHaveTextContent('The database refused this change.');
     expect(screen.queryByText(/was added/)).not.toBeInTheDocument();
     expect(wordField()).toHaveValue('zeal');
     expect(screen.getByLabelText('Definition')).toHaveValue('great energy');
@@ -388,7 +388,8 @@ describe('Word details', () => {
     expect(within(panel).getByText('example for word-1')).toBeInTheDocument();
     expect(within(panel).getByText('Overdue')).toBeInTheDocument();
     expect(within(panel).getByText('Sep 20, 2026')).toBeInTheDocument();
-    expect(within(panel).getByRole('link', { name: /Open in Notion/ })).toHaveAttribute('href', 'https://app.notion.com/p/1');
+    // Nothing links out of the app: the word lives here.
+    expect(within(panel).queryByRole('link')).not.toBeInTheDocument();
     // The latest values are fetched when the panel opens.
     expect(api.fetchEntry).toHaveBeenCalledWith(pageId(1));
     expect(window.location.search).toContain(`word=${pageId(1)}`);
@@ -454,14 +455,14 @@ describe('Word details', () => {
 
   it('keeps what was typed when saving fails', async () => {
     const { api, user, panel } = await openWord();
-    api.updateEntry.mockRejectedValueOnce(new ApiError('notion_unavailable', 'Notion is temporarily unavailable.', 502));
+    api.updateEntry.mockRejectedValueOnce(new ApiError('database_unavailable', 'The database is temporarily unavailable.', 503));
     await user.click(within(panel).getByRole('button', { name: /Edit/ }));
     const meaning = within(panel).getByLabelText('Vietnamese meaning');
     await user.clear(meaning);
     await user.type(meaning, 'may mắn bất ngờ');
     await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
 
-    expect(await within(panel).findByRole('alert')).toHaveTextContent('Notion is temporarily unavailable. Your changes are still here.');
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('The database is temporarily unavailable. Your changes are still here.');
     expect(within(panel).getByLabelText('Vietnamese meaning')).toHaveValue('may mắn bất ngờ');
     // Escape must not throw the draft away either.
     await user.keyboard('{Escape}');
@@ -496,7 +497,7 @@ describe('Word details', () => {
     const { api, user, panel } = await openWord();
     await user.click(within(panel).getByRole('button', { name: /Delete/ }));
     const confirm = screen.getByRole('heading', { name: 'Delete “serendipity”?' }).closest('dialog')!;
-    expect(confirm).toHaveTextContent('will be moved to Notion\'s trash');
+    expect(confirm).toHaveTextContent('will be moved to the trash');
     expect(confirm).toHaveTextContent('mastery of 2');
     await user.click(within(confirm).getByRole('button', { name: 'Cancel' }));
     expect(api.deleteEntry).not.toHaveBeenCalled();
@@ -519,10 +520,10 @@ describe('Word details', () => {
 
   it('keeps the word when deleting fails, and says why', async () => {
     const { api, user, panel } = await openWord();
-    api.deleteEntry.mockRejectedValueOnce(new ApiError('notion_forbidden', 'The Notion integration is not allowed to do this.', 502));
+    api.deleteEntry.mockRejectedValueOnce(new ApiError('forbidden', 'The database refused this change.', 403));
     await user.click(within(panel).getByRole('button', { name: /Delete/ }));
     await user.click(screen.getByRole('button', { name: 'Move to trash' }));
-    expect(await screen.findByText('The Notion integration is not allowed to do this.')).toBeInTheDocument();
+    expect(await screen.findByText('The database refused this change.')).toBeInTheDocument();
     expect(rowWords()).toContain('serendipity');
   });
 

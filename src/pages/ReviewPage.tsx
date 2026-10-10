@@ -5,7 +5,6 @@ import { Icon } from '../components/Icon.js';
 import { ReviewScreen } from '../components/ReviewScreen.js';
 import { Spinner } from '../components/Spinner.js';
 import type { SessionMeta } from '../lib/session-machine.js';
-import { wording } from '../lib/source.js';
 
 function ModeBadge({ meta }: { meta: SessionMeta | null }) {
   if (meta === null) return null;
@@ -18,11 +17,7 @@ function ModeBadge({ meta }: { meta: SessionMeta | null }) {
     return (
       <span
         className="rounded-full bg-warn-soft px-2.5 py-1 text-xs font-medium text-warn-ink"
-        title={wording(
-          meta.mode,
-          'Answers are checked against Notion but nothing is written.',
-          'Saving is switched off, so answers are checked but not recorded.',
-        )}
+        title="Saving is switched off, so answers are checked but not recorded."
       >
         Preview · not saving
       </span>
@@ -86,11 +81,7 @@ export function ReviewPage() {
           type="button"
           onClick={reload}
           aria-disabled={status === 'saving' || status === 'loading'}
-          title={wording(
-            state.meta?.mode,
-            'Reload the queue from Notion. Does not change any review data.',
-            'Reload the queue. Does not change any review data.',
-          )}
+          title="Reload the queue. Does not change any review data."
           className="flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-line px-3 text-sm font-medium text-muted transition hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:opacity-50"
         >
           <Icon name="refresh" className="size-4" />

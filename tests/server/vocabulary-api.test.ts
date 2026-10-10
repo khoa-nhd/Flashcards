@@ -1,8 +1,8 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApp } from '../../server/create-app.js';
 import { loadConfig, type AppConfig } from '../../server/env.js';
 import { sampleRules } from '../../server/mock/sample-rules.js';
-import { NotionRequestError } from '../../server/notion/notion-errors.js';
+import { DatabaseError } from '../../server/supabase/supabase-database.js';
 import { VocabularyService } from '../../server/vocabulary-service.js';
 import {
   apiErrorSchema,
@@ -26,7 +26,7 @@ function setup(configOverrides: Partial<AppConfig> = {}, writesRequested = true)
     now: () => NOW,
   });
   const config = { ...loadConfig({ DATA_MODE: 'mock' }), ...configOverrides };
-  return { app: createApp({ config, service: null, vocabulary, now: () => NOW }), catalog };
+  return { app: createApp({ config, service: null, vocabulary }), catalog };
 }
 
 const json = (method: string, body?: unknown) => ({
@@ -101,12 +101,13 @@ describe('POST /api/vocabulary', () => {
     expect(apiErrorSchema.parse(await response.json()).error.message).toContain('word: Enter a word');
   });
 
-  it('passes on a Notion permission problem instead of pretending to succeed', async () => {
+  it('passes on a refusal from the database instead of pretending to succeed', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const { app, catalog } = setup();
-    catalog.failNextWrite = new NotionRequestError('forbidden', 'The Notion integration is not allowed to do this. Check its capabilities.');
+    catalog.failNextWrite = new DatabaseError('forbidden', 'The database refused this change.', '42501');
     const response = await app.request('/api/vocabulary', json('POST', { word: 'candid', requestId: REQUEST_ID }));
-    expect(response.status).toBe(502);
-    expect(apiErrorSchema.parse(await response.json()).error.code).toBe('notion_forbidden');
+    expect(response.status).toBe(403);
+    expect(apiErrorSchema.parse(await response.json()).error.code).toBe('forbidden');
   });
 
   it('answers 403 while saving is switched off', async () => {
@@ -126,7 +127,7 @@ describe('PATCH /api/vocabulary/:id', () => {
     expect(catalog.updated).toEqual([{ id: pageId(1), changes: { definition: 'clearer' } }]);
   });
 
-  it('refuses to set arbitrary Notion properties', async () => {
+  it('refuses to set fields it does not manage', async () => {
     const { app, catalog } = setup();
     for (const body of [{ properties: { Mastery: { number: 10 } } }, { mastery: 10 }, { 'Answer Shown': true }, {}]) {
       const response = await app.request(`/api/vocabulary/${pageId(1)}`, json('PATCH', body));
@@ -160,28 +161,3 @@ describe('DELETE /api/vocabulary/:id and restore', () => {
   });
 });
 
-describe('access control covers the vocabulary routes', () => {
-  it('requires the password when one is configured', async () => {
-    const { app, catalog } = setup({ accessPassword: 'a long passphrase' });
-    expect((await app.request('/api/vocabulary')).status).toBe(401);
-    expect((await app.request('/api/vocabulary', json('POST', { word: 'x', requestId: REQUEST_ID }))).status).toBe(401);
-    expect((await app.request(`/api/vocabulary/${pageId(1)}`, { method: 'DELETE' })).status).toBe(401);
-    expect(catalog.created).toEqual([]);
-    expect(catalog.trashed).toEqual([]);
-  });
-
-  it('is open when the owner opted out of a password in production', async () => {
-    const { app } = setup({ isProduction: true, allowUnauthenticated: true });
-    expect((await app.request('/api/vocabulary')).status).toBe(200);
-  });
-
-  it('still refuses cross-site writes without a password', async () => {
-    const { app, catalog } = setup({ isProduction: true, allowUnauthenticated: true });
-    const response = await app.request('http://flashcards.test/api/vocabulary', {
-      ...json('POST', { word: 'x', requestId: REQUEST_ID }),
-      headers: { 'Content-Type': 'application/json', Origin: 'https://evil.example', Host: 'flashcards.test' },
-    });
-    expect(response.status).toBe(403);
-    expect(catalog.created).toEqual([]);
-  });
-});

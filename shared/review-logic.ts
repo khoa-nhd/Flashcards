@@ -1,6 +1,6 @@
 /**
  * The review rules engine. Everything here is a pure function of its inputs so
- * it can be tested without Notion, a clock, or a browser.
+ * it can be tested without a database, a clock, or a browser.
  *
  * This file deliberately contains NO numbers describing the owner's schedule.
  * The actual rules are data (`ReviewRules`) supplied from

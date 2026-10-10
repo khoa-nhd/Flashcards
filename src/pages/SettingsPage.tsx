@@ -6,7 +6,6 @@ import { BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../com
 import { sortEntries } from '../lib/bank-query.js';
 import { downloadFile, toCsv, toJson } from '../lib/export.js';
 import type { Settings, SortKey } from '../lib/settings.js';
-import { wording } from '../lib/source.js';
 
 const SORT_LABELS: Record<SortKey, string> = {
   word: 'Word',
@@ -16,15 +15,13 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 
 const SOURCE_TEXT = {
-  notion: 'Notion',
   supabase: 'Your account (Supabase)',
-  mock: 'Built-in sample data (not Notion)',
+  mock: 'Built-in sample data (not your own words)',
 } as const;
 
 const SAVING_TEXT = {
-  notion: 'On: reviews, new words and edits are written to Notion',
   supabase: 'On: reviews, new words and edits are saved to your account',
-  mock: 'On, in memory only: nothing reaches Notion',
+  mock: 'On, in memory only: nothing is kept after the server stops',
 } as const;
 
 export function SettingsPage() {
@@ -142,7 +139,7 @@ export function SettingsPage() {
           <h2 className={SECTION_TITLE}>Backup</h2>
           <p className="text-sm text-muted">
             Download every word with its meaning, definition, example, mastery and dates. Exporting only reads; it
-            never changes {wording(meta?.mode, 'Notion', 'anything')}.
+            never changes anything.
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -209,8 +206,7 @@ export function SettingsPage() {
           {meta !== null && <SkippedNotice skipped={meta.skipped} />}
         </section>
 
-        {/* Notion keeps deleted pages in its own trash; every other store lists them here. */}
-        {meta !== null && meta.mode !== 'notion' && <TrashSection />}
+        {meta !== null && <TrashSection />}
       </div>
     </div>
   );

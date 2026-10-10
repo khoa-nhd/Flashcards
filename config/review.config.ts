@@ -1,98 +1,67 @@
 /**
- * The single place that describes YOUR Notion vocabulary system: which
- * properties to read and what the review buttons do.
+ * The single place that describes how reviewing works: which cards are due,
+ * what each answer does, and what a card shows.
  *
- * Status of each value is tracked in docs/review-logic.md. Markers used here:
- *   VERIFIED    — read from the Notion database itself (schema, formulas, the
- *                 "Need review" view) on 2026-10-10.
- *   STATED      — given by the owner. Button steps cannot be read from Notion,
- *                 so these rest on the owner's word and on the stored data.
+ * These rules were defined by the owner's original vocabulary system and are
+ * carried over unchanged. Where each one comes from is recorded in
+ * docs/review-logic.md. Markers used here:
+ *   VERIFIED    — read from the original system's own formulas and views.
+ *   STATED      — given by the owner, and consistent with every stored word.
  *   UNCONFIRMED — still unknown; display only.
  *
- * Saving also requires REVIEW_WRITES_ENABLED=true in the environment.
+ * Changing a value here changes how every account's reviews are scheduled.
  */
 import type { ReviewRules } from '../shared/review-logic.js';
-import type {
-  CardFieldConfig,
-  NewWordDefaults,
-  NotionPropertyConfig,
-  VocabularyFieldConfig,
-} from '../shared/vocabulary.js';
-
-// VERIFIED: property names and types.
-export const notionProperties: NotionPropertyConfig = {
-  word: 'Word', // title
-  mastery: 'Mastery', // number
-  nextReview: 'Review Date', // date (every existing value is date-only)
-};
-
-// VERIFIED: the descriptive properties, all plain text or date in Notion.
-export const vocabularyFields: VocabularyFieldConfig = {
-  meaning: 'Vietnamese Meaning', // rich_text
-  definition: 'Definition', // rich_text
-  example: 'Example Sentences', // rich_text
-  dateAdded: 'Date Added', // date; equals the creation day on 42 of 43 rows
-};
+import type { CardFieldConfig, NewWordDefaults } from '../shared/vocabulary.js';
 
 /**
- * What a word created in the app starts with, mirroring the database's own
- * default template ("New page"), read on 2026-10-10: Mastery 1, no Review Date.
- * An empty Review Date counts as due, so a new word is reviewable at once.
+ * What a word created in the app starts with: mastery 1 and no review date.
+ * An empty review date counts as due, so a new word is reviewable at once.
  * Both can be changed per word in the Add form.
  */
 export const newWordDefaults: NewWordDefaults = {
-  mastery: 1, // VERIFIED from the template; no existing row is below 1
-  reviewDate: 'empty', // VERIFIED from the template
+  mastery: 1, // VERIFIED from the original new-word template; no word has ever been below 1
+  reviewDate: 'empty', // VERIFIED from the same template
 };
 
 export const cardFields: CardFieldConfig[] = [
-  // UNCONFIRMED placement: assumed to be the answer revealed by "Hiện đáp án".
-  { key: 'meaning', property: 'Vietnamese Meaning', label: 'Vietnamese meaning', side: 'back', visibility: 'always' },
-  // VERIFIED: "Review Definition" = if(Mastery <= 5, Definition, "") and
-  // "Review Example" = if(Mastery <= 5, Example Sentences, ""). Reading the
-  // formulas means Notion itself decides what is hidden; `details` makes the
-  // server apply the same threshold again, so the stricter of the two wins.
-  { key: 'definition', property: 'Review Definition', label: 'Definition', side: 'back', visibility: 'details' },
-  { key: 'example', property: 'Review Example', label: 'Example', side: 'back', visibility: 'details' },
+  // UNCONFIRMED placement: the meaning is taken to be the answer the card reveals.
+  { key: 'meaning', label: 'Vietnamese meaning', side: 'back', visibility: 'always' },
+  // VERIFIED: the definition and the example are shown only while mastery is
+  // at most 5. `details` makes the server withhold them above that level.
+  { key: 'definition', label: 'Definition', side: 'back', visibility: 'details' },
+  { key: 'example', label: 'Example', side: 'back', visibility: 'details' },
 ];
 
 /**
- * VERIFIED against the "Due for Review" formula, which the "Need review" view
- * filters on:
- *   prop("Mastery") < 10 and (empty(prop("Review Date")) or dateStart(prop("Review Date")) <= today())
- * and against that view's sort (Review Date, ascending).
+ * VERIFIED: a word is due when
+ *   mastery < 10 and (it has no review date, or its review date is today or earlier)
+ * and due words are ordered by review date, earliest first.
  *
- * The app applies this rule itself instead of reading the formula's value,
- * because through the API Notion evaluates today() in UTC, while in the Notion
- * app it follows your own clock. See docs/review-logic.md, section 2.
+ * "Today" is the calendar day in the account's own time zone, never the
+ * server's. See docs/review-logic.md, section 2.
  */
 export const reviewRules: ReviewRules = {
-  retiredAtMastery: 10, // VERIFIED: Mastery < 10
-  hideDetailsAboveMastery: 5, // VERIFIED: Mastery <= 5 shows definition and example
-  includeDueToday: true, // VERIFIED: Review Date <= today()
-  includeMissingDueDate: true, // VERIFIED: empty(Review Date) counts as due
-  missingMastery: 'exclude', // UNCONFIRMED, and currently moot: no row has an empty Mastery
-  sortDirection: 'ascending', // VERIFIED: "Need review" sorts Review Date ascending
+  retiredAtMastery: 10, // VERIFIED: mastery < 10
+  hideDetailsAboveMastery: 5, // VERIFIED: mastery <= 5 shows definition and example
+  includeDueToday: true, // VERIFIED: review date <= today
+  includeMissingDueDate: true, // VERIFIED: an empty review date counts as due
+  missingMastery: 'exclude', // UNCONFIRMED, and moot: the database does not allow an empty mastery
+  sortDirection: 'ascending', // VERIFIED: earliest review date first
 
-  // STATED by the owner (2026-10-10), and consistent with every stored row:
-  // "Nhớ" raises Mastery by exactly 1 and sets Review Date to the day of the
-  // review plus the OLD Mastery in calendar days. Mastery never exceeds 10.
+  // STATED by the owner (2026-10-10), and consistent with every stored word:
+  // "Nhớ" (Remember) raises mastery by exactly 1 and sets the review date to
+  // the day of the review plus the OLD mastery in calendar days. Mastery never
+  // exceeds 10.
   remember: {
     masteryAfter: (mastery) => Math.min(mastery + 1, 10),
     schedule: { base: 'today', intervalDays: ({ masteryBefore }) => masteryBefore },
   },
 
-  // STATED by the owner: "Không nhớ" leaves Mastery alone and sets Review Date
-  // to the day after the review.
+  // STATED by the owner: "Không nhớ" (Not remember) leaves mastery alone and
+  // sets the review date to the day after the review.
   notRemember: {
     masteryAfter: (mastery) => mastery,
     schedule: { base: 'today', intervalDays: () => 1 },
   },
 };
-
-/** Shown by the inspect script until resolved. None of these block saving. */
-export const pendingConfirmation: string[] = [
-  'Overdue words: the buttons are taken to count days from the day you review, not from the old Review Date. Stored data cannot distinguish the two; one test word settles it (docs/review-logic.md, section 10).',
-  '"Hiện đáp án" and the "Answer Shown" checkbox: the app never touches the checkbox. If "Nhớ" / "Không nhớ" untick it in Notion, say so.',
-  'Card layout: "Vietnamese Meaning" is shown on the back as the answer.',
-];

@@ -84,9 +84,15 @@ export interface SignedInSession {
  * variables, or asked for on the terminal when they are not set. The password
  * is used once to obtain a session and is never stored or printed.
  */
-export async function signIn(project: ProjectConfig, emailVariable: string, passwordVariable: string): Promise<SignedInSession> {
-  const email = process.env[emailVariable]?.trim() || (await ask(`${emailVariable} (account email): `)).trim();
-  const password = process.env[passwordVariable] || (await ask(`Password for ${email}: `, true));
+export async function signIn(
+  project: ProjectConfig,
+  emailVariable: string,
+  passwordVariable: string,
+  /** What to call this account when asking for it on the terminal. */
+  label = 'Account',
+): Promise<SignedInSession> {
+  const email = process.env[emailVariable]?.trim() || (await ask(`${label} - email: `)).trim();
+  const password = process.env[passwordVariable] || (await ask(`${label} - password (not shown while typing): `, true));
   if (email === '' || password === '') throw new Error('An email and a password are needed to sign in.');
 
   const auth = createClient<Database>(project.url, project.publicKey, {

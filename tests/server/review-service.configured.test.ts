@@ -1,6 +1,6 @@
 /**
  * The review service running the owner's real rules and card fields
- * (config/review.config.ts) against an in-memory stand-in for Notion.
+ * (config/review.config.ts) against an in-memory store.
  *
  * The clock is fixed at half past midnight on 10 October in Vietnam, which is
  * still 9 October in UTC, so a mistake in day arithmetic shows up immediately.
@@ -87,7 +87,7 @@ describe('Not Remember', () => {
     const { repository, service } = start(shown);
     const result = await service.submitAction({ pageId: pageId(1), action: 'not_remember', expected: shown });
     expect(result).toEqual({ outcome: 'applied', state: { mastery, nextReview: '2026-10-11' } });
-    // Mastery is not even sent to Notion.
+    // Mastery is not even written.
     expect(repository.updates).toEqual([{ pageId: pageId(1), changes: { nextReview: '2026-10-11' } }]);
   });
 

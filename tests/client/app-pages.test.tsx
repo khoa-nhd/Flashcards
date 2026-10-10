@@ -102,16 +102,15 @@ describe('navigation', () => {
     expect(screen.getByRole('link', { name: 'Go to the dashboard' })).toHaveAttribute('href', '/');
   });
 
-  it('asks for the password when the server requires one, then carries on', async () => {
+  it('reports a refused request as a failure; there is no shared password to ask for', async () => {
     window.history.replaceState(null, '', '/bank');
     const { api } = createFakeApi({ entries: WORDS });
-    api.fetchVocabulary.mockRejectedValueOnce(new ApiError('unauthorized', 'Enter the access password to continue.', 401));
+    api.fetchVocabulary.mockRejectedValueOnce(new ApiError('unauthorized', 'Sign in to continue.', 401));
     render(<App api={api} settings={createSettingsStore(null)} />);
-    const user = userEvent.setup();
-    await user.type(await screen.findByLabelText('Access password'), 'open sesame');
-    await user.click(screen.getByRole('button', { name: 'Unlock' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Sign in to continue.');
+    expect(screen.queryByLabelText('Access password')).not.toBeInTheDocument();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Try again' }));
     expect(await screen.findByRole('table')).toBeInTheDocument();
-    expect(api.login).toHaveBeenCalledWith('open sesame');
   });
 });
 
@@ -427,7 +426,7 @@ describe('Insights and settings', () => {
   it('reports the connection honestly', async () => {
     await open('/settings', { list: { writesEnabled: false } });
     const connection = (await screen.findByRole('heading', { name: 'Connection' })).closest('section')!;
-    expect(connection).toHaveTextContent('Notion');
+    expect(connection).toHaveTextContent('Your account (Supabase)');
     expect(connection).toHaveTextContent('Off: read-only');
     expect(connection).toHaveTextContent(`${TODAY} (Asia/Ho_Chi_Minh)`);
     expect(connection).toHaveTextContent('Mastery 1, no review date');

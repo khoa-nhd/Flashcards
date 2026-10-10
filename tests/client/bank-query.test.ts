@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { pageId } from '../helpers/fixtures.js';
 import {
   BANK_PRESETS,
   activePreset,
@@ -256,11 +257,11 @@ describe('export', () => {
 
   it('writes a header row and one row per word, keeping text and dates as stored', () => {
     const csv = toCsv([
-      entry(1, { word: 'café', meaning: 'quán, "cà phê"', definition: 'a small restaurant', example: null, mastery: 0, reviewDate: null, dateAdded: '2026-10-01', url: 'https://app.notion.com/p/1' }),
+      entry(1, { word: 'café', meaning: 'quán, "cà phê"', definition: 'a small restaurant', example: null, mastery: 0, reviewDate: null, dateAdded: '2026-10-01' }),
     ]);
     expect(csv).toBe(
-      'Word,Vietnamese Meaning,Definition,Example Sentences,Mastery,Review Date,Date Added,Notion URL\r\n' +
-        'café,"quán, ""cà phê""",a small restaurant,,0,,2026-10-01,https://app.notion.com/p/1\r\n',
+      'Word,Vietnamese Meaning,Definition,Example Sentences,Mastery,Review Date,Date Added,ID\r\n' +
+        `café,"quán, ""cà phê""",a small restaurant,,0,,2026-10-01,${pageId(1)}\r\n`,
     );
   });
 
@@ -268,7 +269,7 @@ describe('export', () => {
     const parsed = JSON.parse(toJson([words[0]!], '2026-10-10T00:00:00.000Z'));
     expect(parsed).toMatchObject({ exportedAt: '2026-10-10T00:00:00.000Z', count: 1 });
     expect(Object.keys(parsed.entries[0]).sort()).toEqual(
-      ['dateAdded', 'definition', 'exampleSentences', 'mastery', 'notionPageId', 'notionUrl', 'reviewDate', 'vietnameseMeaning', 'word'].sort(),
+      ['dateAdded', 'definition', 'exampleSentences', 'id', 'mastery', 'reviewDate', 'vietnameseMeaning', 'word'].sort(),
     );
     expect(parsed.entries[0]).toMatchObject({ word: 'Serendipity', mastery: 2, dateAdded: '2026-09-20' });
   });

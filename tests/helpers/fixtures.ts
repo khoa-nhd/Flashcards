@@ -1,6 +1,6 @@
 import type { QueueResponse, ReviewCard } from '../../shared/api.js';
 import type { ReviewState } from '../../shared/review-logic.js';
-import type { VocabularyRecord } from '../../shared/vocabulary.js';
+import type { CardFieldConfig, VocabularyRecord } from '../../shared/vocabulary.js';
 import type {
   ReviewWrite,
   ReviewWriteResult,
@@ -74,9 +74,20 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-/** An in-memory repository that records every write, standing in for Notion. */
+/** Card content used by the service tests: a front field and two that obey the mastery rule. */
+export const TEST_FIELDS: CardFieldConfig[] = [
+  { key: 'partOfSpeech', label: 'Part of speech', side: 'front', visibility: 'always' },
+  { key: 'definition', label: 'Definition', side: 'back', visibility: 'details' },
+  { key: 'example', label: 'Example', side: 'back', visibility: 'details' },
+];
+
+/**
+ * An in-memory repository that records every write. It stands in for a store
+ * that keeps no record of answers, so a repeated answer has to be recognised
+ * by the state it expected alone.
+ */
 export class FakeRepository implements VocabularyRepository {
-  readonly mode = 'notion' as const;
+  readonly mode = 'mock' as const;
   readonly updates: Array<{ pageId: string; changes: Partial<ReviewState> }> = [];
   setup: SetupReport = { readIssues: [], writeIssues: [], warnings: [] };
   /** Lets a test corrupt what the "database" reports back after a write. */
@@ -119,7 +130,7 @@ export class FakeRepository implements VocabularyRepository {
     return this.afterUpdate({ ...updated });
   }
 
-  /** Like Notion: writes only what changed, and keeps no record of answers. */
+  /** Writes only what changed, and keeps no record of answers. */
   async applyReview(write: ReviewWrite): Promise<ReviewWriteResult> {
     const changes: Partial<ReviewState> = {};
     if (write.next.mastery !== write.expected.mastery) changes.mastery = write.next.mastery;
@@ -132,8 +143,8 @@ export class FakeRepository implements VocabularyRepository {
     return null;
   }
 
-  /** Simulates an edit made directly in Notion. */
-  editInNotion(id: string, changes: Partial<VocabularyRecord>) {
+  /** Simulates a change made somewhere else, such as on another device. */
+  editElsewhere(id: string, changes: Partial<VocabularyRecord>) {
     const existing = this.records.get(id);
     if (existing) this.records.set(id, { ...existing, ...changes });
   }

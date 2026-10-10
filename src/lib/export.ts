@@ -1,4 +1,4 @@
-/** Personal backups of the loaded vocabulary. Exporting reads only; it changes nothing in Notion. */
+/** Personal backups of the loaded vocabulary. Exporting reads only; it changes nothing that is stored. */
 import type { VocabularyEntry } from '../../shared/api.js';
 
 const COLUMNS: Array<{ header: string; value: (entry: VocabularyEntry) => string | number | null }> = [
@@ -9,7 +9,7 @@ const COLUMNS: Array<{ header: string; value: (entry: VocabularyEntry) => string
   { header: 'Mastery', value: (entry) => entry.mastery },
   { header: 'Review Date', value: (entry) => entry.reviewDate },
   { header: 'Date Added', value: (entry) => entry.dateAdded },
-  { header: 'Notion URL', value: (entry) => entry.url },
+  { header: 'ID', value: (entry) => entry.id },
 ];
 
 /** Quotes a value when it contains a comma, a quote, a line break or edge whitespace. */
@@ -41,8 +41,7 @@ export function toJson(entries: readonly VocabularyEntry[], exportedAt: string):
         mastery: entry.mastery,
         reviewDate: entry.reviewDate,
         dateAdded: entry.dateAdded,
-        notionUrl: entry.url,
-        notionPageId: entry.id,
+        id: entry.id,
       })),
     },
     null,

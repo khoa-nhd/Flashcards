@@ -2,7 +2,7 @@
 
 How the app stores vocabulary in Supabase. The SQL is in
 [supabase/migrations](../supabase/migrations); this document explains it. For
-the steps to move from Notion, see [supabase-migration.md](supabase-migration.md).
+how the data got here, see [supabase-migration.md](supabase-migration.md).
 
 ## Architecture
 
@@ -11,7 +11,7 @@ Browser ── Supabase Auth (email + password, public key) ──► session (a
    │
    │  every request: Authorization: Bearer <access token>
    ▼
-API server (Hono, the same routes as before)
+API server (Hono)
    │  1. verifies the token
    │  2. computes the review result with the unchanged rules engine
    │  3. queries Supabase with the public key + that user's token
@@ -21,7 +21,7 @@ PostgreSQL ── Row Level Security decides what that user can reach
 
 - The browser uses Supabase for **signing in only**. All vocabulary still goes
   through the app's own API, so the review rules stay in one place on the
-  server, exactly as before.
+  server.
 - The server holds **no privileged key**. It queries the database as the
   signed-in user, so even a bug in the server cannot read another account's
   rows: the database refuses.
@@ -88,7 +88,7 @@ reviewer's calendar day), `duration_ms`, `mastery_before`, `mastery_after`,
 "today"), `preferences` (`jsonb`, unused so far), timestamps.
 
 Display preferences (table or list view, sort order, reduced motion) are not
-stored here. They stay in the browser, as before.
+stored here. They stay in the browser.
 
 ## Row Level Security
 
@@ -126,10 +126,10 @@ empty `search_path`, executable by `authenticated` only.
 | `apply_review(...)` | Saves one answer: updates the state **only if it still equals the state the answer was computed from**, and appends the history row, in one transaction. Returns `applied`, `already_applied` (same `request_id` seen before), `conflict` (state changed meanwhile) or `not_found`. |
 
 The new mastery and review date are computed by the API server with the same
-rules engine as before (`shared/review-logic.ts`) and passed to `apply_review`
+rules engine (`shared/review-logic.ts`) and passed to `apply_review`
 as absolute values. The browser never supplies them.
 
-## Review behaviour (unchanged)
+## Review behaviour
 
 | Answer | Mastery | Review date |
 | --- | --- | --- |

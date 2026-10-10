@@ -5,7 +5,7 @@ import type { ReviewRules } from '../../shared/review-logic.js';
  *
  * They exist so the interface can be exercised against sample data and so the
  * rules engine has something concrete to be tested with. They are only ever
- * used in mock mode and tests; the Notion path reads config/review.config.ts.
+ * used in mock mode and tests; real accounts use config/review.config.ts.
  */
 export const sampleRules: ReviewRules = {
   retiredAtMastery: 10,

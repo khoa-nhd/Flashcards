@@ -1,47 +1,25 @@
 # Vocabulary
 
-A vocabulary learning app on top of an existing Notion database. Notion stays
-the source of truth; this app reads from it and writes back to it.
+A vocabulary learning app with flashcards and spaced review. Your words live
+in your own account on Supabase, so they are the same on every device you sign
+in on.
 
 | Tab | What it does |
 | --- | --- |
 | **Dashboard** | What is ready to review, summary counts, mastery distribution, additions over time, recent words. |
-| **Review** | Flashcards: flip, then answer Remember or Not remember. Saves the same changes as the "Nhớ" and "Không nhớ" buttons in Notion. |
-| **Add vocabulary** | Creates a new word in Notion, with a duplicate check. |
+| **Review** | Flashcards: flip, then answer Remember or Not remember. |
+| **Add vocabulary** | Creates a new word, with a duplicate check. |
 | **Vocabulary bank** | Every word: search, filter, sort, view details, edit, delete, export. |
 | **Calendar** | Words by the day they were added. |
 | **Insights** | Additions by day, week and month, share mastered, busiest days, incomplete entries. |
-| **Settings** | Display preferences, backup export, connection status. |
+| **Settings** | Account, time zone, display preferences, backup export, deleted words, connection status. |
 
 Reference documents:
 
-- [docs/database-schema.md](docs/database-schema.md) — the actual Notion schema and what each operation writes.
 - [docs/review-logic.md](docs/review-logic.md) — the review rules and where each comes from.
+- [docs/supabase-schema.md](docs/supabase-schema.md) — the database, accounts and security.
 - [docs/metrics.md](docs/metrics.md) — the exact definition of every number shown.
-- [docs/supabase-migration.md](docs/supabase-migration.md) — moving from Notion to Supabase: status, steps, rollback.
-- [docs/supabase-schema.md](docs/supabase-schema.md) — the Supabase schema, accounts and security.
-
-## Moving to Supabase (in progress)
-
-The app can also keep its data in Supabase, with an account per person,
-per-account isolation enforced by the database, and a recorded history of
-every review. **That backend is built and tested but not switched on.** Notion
-remains the live data source, unchanged, until a Supabase project exists and
-the checks in [docs/supabase-migration.md](docs/supabase-migration.md) pass.
-
-`DATA_MODE` chooses the data source: `notion` (today), `supabase`, or `mock`.
-Nothing falls back from one to another on its own.
-
-| In Supabase mode | |
-| --- | --- |
-| Sign-in | Email and password (Supabase Auth): sign up, sign in, sign out, password reset. |
-| Data | PostgreSQL. Every row belongs to one account; Row Level Security keeps accounts apart. |
-| Review rules | Identical. The same rules engine computes every answer on the server. |
-| Several devices | The same data everywhere. Changes appear on the next read, not instantly. |
-| Deleting | Moves a word to the trash; restore it from Settings → Deleted words. |
-| Keys | Only the project URL and the public key. No secret key is used anywhere. |
-
-Everything below describes the app as it runs on Notion today.
+- [docs/supabase-migration.md](docs/supabase-migration.md) — the record of the move from Notion to Supabase.
 
 ## Try it with sample data
 
@@ -55,9 +33,9 @@ npm install
 npm run dev:mock
 ```
 
-Open http://localhost:5174. This always uses a dozen built-in sample words kept
-in memory and never contacts Notion, whatever is in `.env`. Adding, editing and
-deleting all work and are forgotten when the server stops.
+Open http://localhost:5174. This uses a dozen built-in sample words kept in
+memory. It needs no account and contacts nothing, whatever is in `.env`.
+Adding, editing and deleting all work and are forgotten when the server stops.
 
 In Windows PowerShell, if `npm` is blocked by the script execution policy, use
 `npm.cmd` instead (for example `npm.cmd run dev:mock`).
@@ -74,33 +52,29 @@ An answer is accepted only after the card has been flipped. The two buttons
 under the card do the same as the keys and swipes. These shortcuts are active
 on the Review tab only.
 
-| Answer | Mastery | Review Date |
+| Answer | Mastery | Review date |
 | --- | --- | --- |
-| Remember ("Nhớ") | + 1, never above 10 | the day of the review + the **old** mastery in days |
-| Not remember ("Không nhớ") | unchanged | the day after the review |
+| Remember | + 1, never above 10 | the day of the review + the **old** mastery in days |
+| Not remember | unchanged | the day after the review |
+
+A word is due when its mastery is below 10 and its review date is empty, today
+or earlier. The definition and example are hidden above mastery 5. "Today" is
+the calendar day in your account's time zone.
 
 A review session survives switching tabs: come back and it is where you left
 it. A finished session reloads the queue when you return.
 
-## Connect it to Notion
+## Set up your own copy
 
-### 1. Create a connection
+### 1. Create a Supabase project
 
-1. In Notion open **Developer tools → Connections → New connection** (also
-   reachable at https://www.notion.so/profile/integrations) and choose
-   **API token**. OAuth is for apps other people sign in to.
-2. Enable these capabilities and no others:
-
-   | Capability | Needed for |
-   | --- | --- |
-   | Read content | Everything |
-   | Update content | Reviewing, editing, deleting and restoring words |
-   | Insert content | Adding vocabulary |
-
-   Leave comments and user information off.
-3. Give the connection access to the vocabulary database and nothing else:
-   open the database as a full page, then `•••` → **Connections** → add it.
-   Until this is done the API reports the database as "not found".
+1. https://supabase.com/dashboard → **New project**. Pick a region near you.
+2. **SQL Editor → New query**: paste the whole of
+   [supabase/migrations/20261010090000_initial_schema.sql](supabase/migrations/20261010090000_initial_schema.sql)
+   and press **Run**. Run it once.
+3. **Authentication → URL Configuration**: set **Site URL** to the address the
+   app will be served from, and add `http://localhost:5173` under **Redirect
+   URLs**. Confirmation and password-reset emails link back to these.
 
 ### 2. Configure
 
@@ -108,60 +82,53 @@ Copy `.env.example` to `.env` and fill in:
 
 | Variable | Purpose |
 | --- | --- |
-| `NOTION_API_KEY` | The connection's secret. Server-side only. |
-| `NOTION_DATABASE_ID` | The 32-character id in the database URL. |
-| `NOTION_DATA_SOURCE_ID` | Only if the database has more than one data source. |
-| `REVIEW_TIMEZONE` | IANA zone deciding which day is "today", e.g. `Asia/Ho_Chi_Minh`. Required. |
-| `REVIEW_WRITES_ENABLED` | `true` lets the app change Notion (reviews, new words, edits, deletes). Anything else makes it read-only. |
-| `APP_ACCESS_PASSWORD` | Optional passphrase for the app. See "Keeping the app private". |
-| `ALLOW_UNAUTHENTICATED_ACCESS` | `true` to run a deployed app with no passphrase. |
+| `SUPABASE_URL` | `https://<project-ref>.supabase.co` |
+| `SUPABASE_ANON_KEY` | The **publishable** key (`sb_publishable_…`), or the older `anon` key. Found under Project Settings → API Keys. `SUPABASE_PUBLISHABLE_KEY` is accepted as another name for it. |
+| `DATA_MODE` | Optional. `supabase` or `mock`. Empty means Supabase in a deployment or when `SUPABASE_URL` is set, sample data otherwise. |
+| `REVIEW_TIMEZONE` | Optional. The zone a new account starts with if its browser reports none. |
+| `REVIEW_WRITES_ENABLED` | Optional. Exactly `false` freezes all changes; anything else leaves saving on. |
 
-`.env` is git-ignored. The key is read only by the server; nothing in the
-browser bundle contains it (Vite exposes only `VITE_`-prefixed variables, and
-this project defines none).
+Both Supabase values are public by design: the server hands them to the
+browser. **Never use the secret / `service_role` key.** The server refuses to
+start with one, and no part of the app needs it. `.env` is git-ignored.
 
-This project uses Notion API version `2025-09-03`, in which rows live in a
-*data source* inside a database. The server resolves the data source from the
-database id automatically.
-
-### 3. Check the schema
-
-```bash
-npm run notion:inspect
-```
-
-This is read-only. It prints every property with its type and formula, each
-view's stored filter and sort, and whether the names in
-`config/review.config.ts` match the database. It cannot show what Notion
-buttons do; Notion does not expose button steps through its API.
-
-### 4. Run it
+### 3. Run it
 
 ```bash
 npm run dev
 ```
 
-Open http://localhost:5173. With `REVIEW_WRITES_ENABLED=false` every page works
-but nothing can be changed; the pages say so. Set it to `true` to save.
+Open http://localhost:5173, choose **Create an account**, and confirm the
+email if your project asks for it.
+
+## Accounts
+
+- Email and password, through Supabase Auth: create an account, sign in, sign
+  out, reset a forgotten password by email.
+- You stay signed in across reloads. Signing out affects only the device you
+  do it on.
+- Each account has its own words, review progress and time zone. Nobody can
+  see or change another account's data; the database enforces this itself
+  (Row Level Security), independently of the app.
+- To keep a deployment to yourself, create your account and then turn off
+  **Allow new users to sign up** in Supabase under Authentication → Sign In /
+  Providers.
 
 ## Adding vocabulary
 
 - Only the word is required. Vietnamese meaning, definition, example sentences
   and date added are optional.
-- A new word starts at **Mastery 1 with no review date**, as the database's own
-  "New page" template does, so it is due for review immediately. Both values
-  are shown under "Starting review settings" and can be changed per word.
-- Date added defaults to today in `REVIEW_TIMEZONE`.
-- Before saving, the word is compared with existing ones, ignoring case and
-  spacing. A match shows the existing entry and asks whether to cancel or add
-  it anyway. Nothing is merged or discarded automatically.
+- A new word starts at **mastery 1 with no review date**, so it is due for
+  review immediately. Both values are shown under "Starting review settings"
+  and can be changed per word.
+- Date added defaults to today in your time zone.
+- Before saving, the word is compared with your existing ones, ignoring case
+  and spacing. A match shows the existing entry and asks whether to cancel or
+  add it anyway. Nothing is merged or discarded automatically.
 - **Quick add** reduces the form to word and meaning; Enter saves and returns
   the cursor to the word field. In the full form, Ctrl + Enter saves from any
   field.
-- Success is shown only after Notion has confirmed the new record.
-
-Duplicate detection is not atomic. Two devices adding the same word at the same
-moment can both succeed; the bank will then show both.
+- Success is shown only after the server has confirmed the new word.
 
 ## Vocabulary bank
 
@@ -173,61 +140,51 @@ moment can both succeed; the bank will then show both.
 - **Views**: table or compact list. Results are paged.
 - Filters, sorting and the open word are kept in the address, so a view can be
   bookmarked and the Back button works.
-- **Details**: click a word to see everything stored about it, with a link to
-  the page in Notion.
+- **Details**: click a word to see everything stored about it.
 - **Edit**: only the fields you change are written. Mastery and the review date
   are in a separate "Review schedule" section and are left alone unless you
   open it.
-- **Delete** asks for confirmation and moves the page to Notion's trash, where
-  it can be restored for 30 days. An Undo appears right after.
+- **Delete** asks for confirmation and moves the word to the trash. An Undo
+  appears right after, and **Settings → Deleted words** restores it at any
+  later time, with its mastery and dates as they were.
 - **Export** downloads all words as CSV or JSON. Exporting only reads.
 
 ## How it protects your data
 
-- **Notion is read fresh for every review answer.** The browser's copy of
-  mastery and due date is used only to detect that the record changed; it is
-  never written.
-- **Writes are limited to known properties**: Word, Vietnamese Meaning,
-  Definition, Example Sentences, Date Added, Mastery and Review Date. A request
-  naming anything else is rejected before Notion is contacted.
+- **Accounts are isolated by the database.** Every row belongs to one account
+  and Row Level Security checks every read and write. The server queries as
+  the signed-in user with the public key, so even a bug in the server cannot
+  reach another account's rows.
+- **The browser never decides a result.** It sends the word, the answer, and
+  the state it was showing. The server computes the new mastery and date from
+  its own read; a request that tries to supply them is rejected.
+- **An answer is saved exactly once.** The new state and its history row are
+  written in one transaction, only if the word has not changed since it was
+  shown, and a repeated request is recognised by its id. Retrying is always
+  safe.
+- **A word cannot be created twice by a repeated request**, for the same
+  reason.
 - **Only what changed is written.** Editing a definition cannot touch mastery
   or the review date.
-- **An answer cannot be applied twice.** If a response is lost and you press
-  Retry, the server sees the record already holds the result and writes
-  nothing.
-- **A word cannot be created twice by a repeated request.** Each submission
-  carries an id; sending it again returns the record already made.
-- **Every write is confirmed.** The app shows success only when Notion has
+- **Nothing is deleted outright.** Delete means the trash; no one, the app
+  included, has permission to remove a word or edit the review history.
+- **Every write is confirmed.** The app shows success only when the server has
   returned the stored record.
-- **Pages outside the vocabulary database are refused**, for reading, editing
-  and deleting alike.
-- **Nothing is hard-deleted.** Delete means Notion's trash.
-- **Automated tests never contact Notion.** They run against hand-built
-  payloads and in-memory stores.
+- **Automated tests never touch a real project.** They run the real schema on
+  an in-process PostgreSQL.
 
-The app never edits the database schema, formulas, views, buttons or templates,
-and never bulk-updates records. The existing Notion views and buttons keep
-working alongside it.
+## Several devices
 
-## Keeping the app private
+Sign in with the same account on each device. The data is the same everywhere.
 
-A deployed copy can add, edit and trash words in your Notion database, so
-decide deliberately who can reach it.
-
-- **No protection** — set `ALLOW_UNAUTHENTICATED_ACCESS=true` and leave
-  `APP_ACCESS_PASSWORD` empty. Anyone who has or guesses the address can use
-  the app as you do. Requests from other websites are still refused, and
-  deleted words remain recoverable from Notion's trash.
-- **Built-in passphrase** — set `APP_ACCESS_PASSWORD`. You enter it once per
-  device; the server issues an `HttpOnly`, `SameSite=Strict`, `Secure` cookie
-  valid for 30 days. Requires HTTPS.
-- **Platform access control** — Vercel Deployment Protection, Cloudflare
-  Access, Tailscale or similar in front of the app, together with
-  `ALLOW_UNAUTHENTICATED_ACCESS=true`.
-- **Local only** — run it on your own machine and do not expose the port.
-
-In production the server refuses to serve anything if neither a passphrase nor
-the explicit opt-out is set, so an unprotected deployment is always a choice.
+- Synchronisation is **refresh-based, not real-time**: a device re-reads your
+  words when a page asks for them and its copy is over a minute old, when you
+  return to the tab, after it saves something itself, and on Refresh.
+- If you answer the same card on two devices, the first answer is saved. The
+  second device is told the card changed on another device and offers to skip
+  it. Nothing is counted twice.
+- There is no offline mode. An answer given without a connection stays on
+  screen with a Retry.
 
 ## Deploying
 
@@ -239,15 +196,15 @@ links work.
 
 1. In Vercel choose **Add New → Project** and import the GitHub repository.
    Keep the detected **Vite** preset and the default build settings.
-2. Add environment variables (all environments): `NOTION_API_KEY`,
-   `NOTION_DATABASE_ID`, `REVIEW_TIMEZONE`, `REVIEW_WRITES_ENABLED`, and either
-   `APP_ACCESS_PASSWORD` or `ALLOW_UNAUTHENTICATED_ACCESS=true`. Mark the key
-   as **Sensitive**.
-3. Deploy, then open `/api/health` and confirm `"ok": true`.
-4. Environment variable changes apply to new deployments only: **Deployments →
+2. Add the environment variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+3. Deploy, then open `/api/health` and confirm `"ok": true` and
+   `"mode": "supabase"`.
+4. In Supabase, set **Authentication → URL Configuration → Site URL** to the
+   deployed address.
+5. Environment variable changes apply to new deployments only: **Deployments →
    ⋯ → Redeploy**. Every push to `main` also deploys.
 
-To see the app working before connecting Notion, set `DATA_MODE=mock`.
+To show the app with sample data only, set `DATA_MODE=mock`.
 
 ### Self-hosted
 
@@ -261,122 +218,101 @@ npm start
 
 `npm start` serves the built frontend and the API from one Node process on
 `PORT` (default 8787). Set `NODE_ENV=production` and the variables above in
-the environment. Put it behind HTTPS if you use the passphrase.
-
-### Opening it from Notion
-
-Add the deployed URL to a Notion page as a **link or bookmark** (`/bookmark`)
-and open it in the browser; on a phone, add it to the home screen. Embedding
-the app inside a Notion page (`/embed`) is not recommended: browsers treat an
-embedded site as third-party, so a passphrase cookie is not sent and keyboard
-shortcuts only work after clicking inside the frame.
+the environment, and put it behind HTTPS.
 
 ## Project layout
 
 ```
-config/review.config.ts     Property names, review rules, new-word defaults
+config/review.config.ts     The review rules and new-word defaults
 shared/                     Pure logic used by browser and server
-  review-logic.ts             Eligibility, ordering, visibility, answers, reconciliation
+  review-logic.ts             Eligibility, ordering, visibility, answers
   vocabulary-status.ts        A word's review state, from the same rules
   metrics.ts                  Dashboard, insights and calendar numbers
   dates.ts, text.ts           Calendar-day arithmetic; word normalisation and search
   api.ts                      Request/response schemas (Zod)
-server/                     The only code that sees the Notion key
-  create-app.ts               Routes, validation, access control, error mapping
+  backup.ts                   The backup file format used by the import
+server/
+  create-app.ts               Routes, validation, sign-in check, error mapping
+  accounts.ts                 What a signed-in request may use
   review-service.ts           Review queue and the safe answer path
   vocabulary-service.ts       List, create, edit, trash, restore
-  notion/                     SDK wrapper, mappers, pagination, repository
   supabase/                   Database gateway, repository, account sessions, backup import
-  accounts.ts                 What a signed-in request may use
   mock/                       Sample words and illustrative rules
   index.ts                    Node entry (self-hosting)
-supabase/migrations/        The Supabase schema, policies and functions (SQL)
 api/index.ts                Vercel entry
+supabase/migrations/        Schema, Row Level Security policies and functions (SQL)
 src/                        React interface
-  App.tsx, app-context.tsx    Shell, routing, shared session and vocabulary
+  App.tsx, app-context.tsx    Start-up, sign-in, routing, shared session and vocabulary
   pages/                      One file per tab
-  components/                 Flashcard, charts, word panel, form fields, navigation
-  lib/                        Router, API client, stores, bank query, export
+  components/                 Flashcard, charts, word panel, sign-in, navigation
+  lib/                        Router, API client, sign-in, stores, bank query, export
   hooks/                      Keyboard shortcuts, swipe detection
-scripts/                    inspect-notion, export-notion, supabase-import, supabase-verify
-tests/                      Vitest: logic, server, API, pages
-docs/                       Schema, review logic, metric definitions
+scripts/                    supabase-import, supabase-verify
+tests/                      Vitest: logic, database, server, API, pages
+docs/                       Review logic, schema and security, metric definitions
 ```
 
 ### API
 
+Every route except the first two needs `Authorization: Bearer <access token>`.
+
 | Route | Purpose |
 | --- | --- |
+| `GET /api/health` | Configuration status. Public; contains no secrets. |
+| `GET /api/config` | Public. How to sign in: the project address and public key. |
 | `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. |
-| `POST /api/review-action` | `{ pageId, action, expected, requestId }` → `applied`, `already_applied` or `dry_run`. `409` if the record changed. |
-| `GET /api/config` | Public. Whether the app uses accounts, a passphrase or neither. |
-| `GET /api/settings`, `PUT /api/settings` | The time zone in force; editable per account with Supabase. |
-| `GET /api/trash` | Deleted words that can be restored (empty with Notion, which has its own trash). |
+| `POST /api/review-action` | `{ pageId, action, expected, requestId }` → `applied`, `already_applied` or `dry_run`. `409` if the word changed. |
 | `GET /api/vocabulary` | Every word, with its review state. |
-| `GET /api/vocabulary/:id` | One word, read fresh from Notion. |
+| `GET /api/vocabulary/:id` | One word, read fresh. |
 | `POST /api/vocabulary` | Create a word. `409` with the existing entries if it is a duplicate. |
 | `PATCH /api/vocabulary/:id` | Edit named fields; `schedule` for mastery and review date. |
-| `DELETE /api/vocabulary/:id` | Move a word to Notion's trash. |
+| `DELETE /api/vocabulary/:id` | Move a word to the trash. |
 | `POST /api/vocabulary/:id/restore` | Take it back out. |
-| `GET /api/health` | Configuration status. Public; contains no secrets or schema detail. |
-| `POST /api/login`, `POST /api/logout` | Passphrase session, when one is configured. |
-
-### How data stays in step
-
-The browser keeps one copy of the vocabulary, shared by every tab, so moving
-between tabs does not refetch the database. It is re-read in the background
-when it is more than a minute old, after a review answer has been saved, and
-on Refresh. A word that was just added, edited or deleted is updated in that
-copy from the record Notion returned, so every tab shows it at once. Review
-data is never cached between sessions.
+| `GET /api/trash` | Deleted words that can be restored. |
+| `GET /api/settings`, `PUT /api/settings` | The account's time zone. |
 
 ## Development
 
 | Command | What it does |
 | --- | --- |
-| `npm run dev` | The app on http://localhost:5173, using `.env` (real Notion if configured) |
+| `npm run dev` | The app on http://localhost:5173, using `.env` (your real Supabase project if configured) |
 | `npm run dev:mock` | The app on http://localhost:5174 with sample data only |
 | `npm test` | All tests |
 | `npm run typecheck` | TypeScript |
 | `npm run lint` | ESLint |
 | `npm run build` | Type-check, build frontend and server |
-| `npm run notion:inspect` | Read-only look at the Notion schema and views |
-| `npm run notion:export` | Read-only export of every Notion row to `backups/` (git-ignored) |
-| `npm run supabase:import` | Dry run of importing a backup into a Supabase account; `-- --apply` to do it |
-| `npm run supabase:verify` | Checks a live Supabase project's isolation with two test accounts |
+| `npm run supabase:verify` | Checks a live project from outside: isolation between two accounts, single saving, append-only history |
+| `npm run supabase:import` | Dry run of importing a backup file into an account; `-- --apply` to do it |
 
 ## Limitations
 
-- What the Notion buttons do cannot be read through Notion's API. The review
-  rules come from the owner and match every stored row; two details are still
-  open (docs/review-logic.md, section 10).
-- The database has no part of speech, pronunciation, tags, topic, notes or
-  similar properties, so the app has no fields for them.
-- Text is edited as plain text. A field with formatting in Notion loses it if
-  that field is changed in the app; the word panel warns when this applies.
-- The whole vocabulary is loaded at once (about one Notion request per 100
-  words) and searched in the browser. That is comfortable into the low
-  thousands of words; beyond that it would need server-side search.
-- Each review answer makes two Notion requests and waits for both.
-- Words that share a review date may appear in a different order than in the
-  Notion table.
-- Duplicate detection can be beaten by two simultaneous submissions.
-- Preferences are stored per browser, not synced.
-- There are no user accounts. This is a single-owner tool.
+- Sync is refresh-based, not real-time, and there is no offline mode.
+- The whole vocabulary is loaded at once and searched in the browser. That is
+  comfortable into the low thousands of words; beyond that it would need
+  server-side search.
+- Text is plain: no bold, links or other formatting.
+- There are no fields for part of speech, pronunciation, tags, topic or notes.
+- Display preferences are stored per browser, not per account.
+- Duplicate detection can be beaten by two simultaneous submissions of the
+  same word from two devices; the bank then shows both.
+- A signed-in user can change their own data directly through the Supabase
+  API, bypassing the review rules. They cannot touch anyone else's.
+- The review history starts on 2026-10-10. Earlier reviews were never
+  recorded individually, so they are not in it.
+- The scheduling is the mastery-based rule above. Columns for a future FSRS
+  scheduler exist in the database but nothing uses them yet.
 
 ## If something goes wrong
 
-- **A word got the wrong value:** open the page in Notion → `•••` → **Version
-  history** to see or restore earlier values (how far back depends on your
-  Notion plan), or correct it by hand.
-- **A word was deleted by mistake:** restore it from Notion's trash within 30
-  days.
-- **Adding fails with "not allowed to do this":** the connection lacks the
-  *Insert content* capability.
+- **A word was deleted by mistake:** Settings → Deleted words → Restore.
+- **A word got the wrong value:** open it in the bank and correct it under
+  "Review schedule". The review history (`review_logs` in Supabase) shows what
+  each answer changed.
 - **You want to stop all changes immediately:** set
-  `REVIEW_WRITES_ENABLED=false` and restart or redeploy, or remove the
-  connection from the database in Notion.
-- **The key may have leaked:** regenerate the connection's secret in Notion and
-  update the environment variable.
-- **The app is unavailable:** use Notion as before. Nothing about the original
-  database, views or buttons has been changed.
+  `REVIEW_WRITES_ENABLED=false` and restart or redeploy.
+- **You are signed out unexpectedly:** sign in again. If it keeps happening,
+  check `/api/health` and the Supabase project's status.
+- **The public key may have been swapped for a secret one:** the server
+  refuses to start and `/api/health` says why. Replace it with the publishable
+  key and rotate the secret key in Supabase.
+- **You want a copy of everything:** Settings → Backup → Export JSON.

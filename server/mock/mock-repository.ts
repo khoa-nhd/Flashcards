@@ -7,11 +7,11 @@ import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vo
 import type { ReviewWrite, ReviewWriteResult, VocabularyRepository } from '../vocabulary-repository.js';
 
 export const mockCardFields: CardFieldConfig[] = [
-  { key: 'partOfSpeech', property: 'Part of Speech', label: 'Part of speech', side: 'front', visibility: 'always' },
-  { key: 'pronunciation', property: 'Pronunciation', label: 'Pronunciation', side: 'front', visibility: 'always' },
-  { key: 'meaning', property: 'Vietnamese Meaning', label: 'Vietnamese meaning', side: 'back', visibility: 'always' },
-  { key: 'definition', property: 'Definition', label: 'Definition', side: 'back', visibility: 'details' },
-  { key: 'example', property: 'Example', label: 'Example', side: 'back', visibility: 'details' },
+  { key: 'partOfSpeech', label: 'Part of speech', side: 'front', visibility: 'always' },
+  { key: 'pronunciation', label: 'Pronunciation', side: 'front', visibility: 'always' },
+  { key: 'meaning', label: 'Vietnamese meaning', side: 'back', visibility: 'always' },
+  { key: 'definition', label: 'Definition', side: 'back', visibility: 'details' },
+  { key: 'example', label: 'Example', side: 'back', visibility: 'details' },
 ];
 
 type Seed = [
@@ -58,7 +58,7 @@ interface StoredWord {
   lastEditedTime: string;
 }
 
-/** In-memory sample vocabulary. Nothing here ever reaches Notion. */
+/** In-memory sample vocabulary. Nothing here is ever stored anywhere. */
 export class MockVocabularyRepository implements VocabularyRepository, VocabularyCatalog {
   readonly mode = 'mock' as const;
   private readonly words = new Map<string, StoredWord>();
@@ -237,8 +237,6 @@ function toEntry(word: StoredWord): EntryData {
     mastery: word.mastery,
     reviewDate: word.reviewDate,
     dateAdded: word.dateAdded,
-    formattedFields: [],
-    url: null,
     createdTime: word.createdTime,
     lastEditedTime: word.lastEditedTime,
   };

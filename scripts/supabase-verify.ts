@@ -3,10 +3,13 @@
  * attacker would reach it: `npm run supabase:verify`.
  *
  * It needs two ordinary accounts (VERIFY_A_EMAIL / VERIFY_A_PASSWORD and
- * VERIFY_B_EMAIL / VERIFY_B_PASSWORD, or it asks). Use two throwaway accounts:
- * the check creates one marker word in account A and leaves it in A's trash,
- * because nothing — this script included — is able to remove a row outright.
- * It never reads, changes or deletes any other word.
+ * VERIFY_B_EMAIL / VERIFY_B_PASSWORD, or it asks). Account A must be a
+ * throwaway: the check creates one marker word in it and leaves that word in
+ * A's trash, because nothing — this script included — is able to remove a row
+ * outright. Account B is only used to try to reach A's data; nothing is
+ * created or changed in it, so it can be a real account. Using your own
+ * account as B also proves the thing that matters most: that the throwaway
+ * cannot see a single one of your words.
  *
  * It proves, against the live database:
  *   - a visitor who is not signed in can read and write nothing;
@@ -67,12 +70,27 @@ async function main(): Promise<number> {
   check('signed-out visitor cannot insert a row', refused(anonInsert) && nothing(anonInsert), 'the insert succeeded');
 
   // ---- 2. Two ordinary accounts ----
-  const a = await signIn(project, 'VERIFY_A_EMAIL', 'VERIFY_A_PASSWORD');
-  const b = await signIn(project, 'VERIFY_B_EMAIL', 'VERIFY_B_PASSWORD');
+  console.log('\nTwo accounts are needed. A must be a throwaway: one marker word is created in it.');
+  console.log('B is only used to try to reach A’s data; nothing is created or changed in B, so it may be your own.\n');
+  const a = await signIn(project, 'VERIFY_A_EMAIL', 'VERIFY_A_PASSWORD', 'A (throwaway test account)');
+  const b = await signIn(project, 'VERIFY_B_EMAIL', 'VERIFY_B_PASSWORD', 'B (any other account)');
   if (a.userId === b.userId) throw new Error('The two accounts are the same one. Two different accounts are needed.');
   const rawA = a.client as unknown as SupabaseClient;
   const rawB = b.client as unknown as SupabaseClient;
   console.log(`\nAccount A: ${a.email}\nAccount B: ${b.email}\n`);
+
+  // Whatever each account already holds, every row it can see must be its own.
+  for (const [name, raw, owner] of [['A', rawA, a.userId], ['B', rawB, b.userId]] as const) {
+    for (const table of ['vocabulary', 'card_states', 'review_logs', 'user_settings', 'vocabulary_cards']) {
+      const visible = await attempt(raw.from(table).select('user_id').limit(5000));
+      const foreign = visible.rows.filter((row) => (row as { user_id: string }).user_id !== owner).length;
+      check(
+        `account ${name} sees only its own rows in ${table} (${visible.rows.length} visible)`,
+        visible.error === null && foreign === 0,
+        visible.error ? `error ${visible.error.code ?? visible.error.message}` : `${foreign} rows belong to someone else`,
+      );
+    }
+  }
 
   const today = calendarDateInTimeZone(new Date(), 'UTC');
   const marker = `zz-isolation-check-${randomUUID().slice(0, 8)}`;

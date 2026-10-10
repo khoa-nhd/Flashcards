@@ -80,13 +80,14 @@ describe('how the browser is told to sign in', () => {
     });
   });
 
-  it('does not use the shared password at all', async () => {
-    const withPassword = createSupabaseTestApp(db, [alice], { env: { APP_ACCESS_PASSWORD: 'a passphrase' } });
-    const login = await call(withPassword, null, '/api/login', { method: 'POST', body: { password: 'a passphrase' } });
-    expect(login.status).toBe(400);
-    // The password opens nothing, and an account still does.
-    expect((await call(withPassword, null, '/api/vocabulary')).status).toBe(401);
-    expect((await call(withPassword, alice, '/api/vocabulary')).status).toBe(200);
+  it('has no shared password: only an account opens anything', async () => {
+    // A setting left over from the old passphrase gate changes nothing.
+    const leftover = createSupabaseTestApp(db, [alice], { env: { APP_ACCESS_PASSWORD: 'a passphrase' } });
+    const login = await call(leftover, null, '/api/login', { method: 'POST', body: { password: 'a passphrase' } });
+    expect(login.status).toBe(401);
+    expect((await call(leftover, alice, '/api/login', { method: 'POST', body: { password: 'a passphrase' } })).status).toBe(404);
+    expect((await call(leftover, null, '/api/vocabulary')).status).toBe(401);
+    expect((await call(leftover, alice, '/api/vocabulary')).status).toBe(200);
   });
 });
 
@@ -179,7 +180,6 @@ describe('adding and editing words', () => {
       dateAdded: TODAY,
       reviewStatus: 'unscheduled',
       reviewable: true,
-      url: null,
     });
     expect((await listOf(alice)).entries.map((item) => item.id)).toEqual([entry.id]);
   });
@@ -619,15 +619,16 @@ describe('when something is wrong', () => {
 });
 
 describe('configuration', () => {
-  const notionToo = {
+  /** Settings a deployment may still carry from before the move to Supabase. */
+  const leftovers = {
     NOTION_API_KEY: 'secret_test_value',
     NOTION_DATABASE_ID: '11111111111141118111111111111111',
     REVIEW_TIMEZONE: 'Asia/Ho_Chi_Minh',
     REVIEW_WRITES_ENABLED: 'true',
   };
 
-  it('answers 503 when Supabase is selected but not configured, and never falls back to Notion', async () => {
-    const { app: incomplete, config } = buildApp({ ...notionToo, DATA_MODE: 'supabase' });
+  it('answers 503 when Supabase is not configured, whatever older settings are still around', async () => {
+    const { app: incomplete, config } = buildApp({ ...leftovers, DATA_MODE: 'supabase' });
     expect(config).toMatchObject({ mode: 'supabase', supabase: null });
 
     const settings = appConfigResponseSchema.parse(await (await incomplete.request('/api/config')).json());
@@ -656,7 +657,7 @@ describe('configuration', () => {
 
   it('builds a working Supabase app from the environment alone', async () => {
     const { app: built, config } = buildApp(SUPABASE_ENV);
-    expect(config).toMatchObject({ mode: 'supabase', issues: [], writesRequested: true, notion: null });
+    expect(config).toMatchObject({ mode: 'supabase', issues: [], writesRequested: true });
     expect((await built.request('/api/health')).status).toBe(200);
     expect((await built.request('/api/vocabulary')).status).toBe(401);
   });

@@ -69,7 +69,7 @@ export function createSupabaseTestApp(db: TestDatabase, users: TestUser[], optio
     now,
   });
 
-  return createApp({ config, service: null, accounts, now });
+  return createApp({ config, service: null, accounts });
 }
 
 export type TestApp = ReturnType<typeof createSupabaseTestApp>;

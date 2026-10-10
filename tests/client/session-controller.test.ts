@@ -226,7 +226,7 @@ describe('when a save fails', () => {
     await session.load();
     session.flip();
     session.grade('remember');
-    saves[0]?.reject(new ApiError('conflict', 'This card was changed in Notion.', 409));
+    saves[0]?.reject(new ApiError('conflict', 'This card was changed after it was loaded.', 409));
     await settled();
     expect(session.getState()).toMatchObject({ status: 'error', index: 0, error: { kind: 'conflict' } });
 

@@ -15,9 +15,8 @@ function apiDevServer(): Plugin {
     apply: (_config, env) => env.command === 'serve' && env.mode !== 'test',
     configureServer(server) {
       if (server.config.mode === 'mock') {
-        // `npm run dev:mock`: built-in sample words, never Notion, whatever .env says.
+        // `npm run dev:mock`: built-in sample words and no database, whatever .env says.
         process.env.DATA_MODE = 'mock';
-        process.env.APP_ACCESS_PASSWORD = '';
       } else {
         try {
           process.loadEnvFile();
