@@ -228,6 +228,23 @@ describe('submitAction', () => {
     ).rejects.toMatchObject({ status: 502, code: 'unconfirmed_write' });
   });
 
+  it('explains why an unchanged card can no longer be reviewed', async () => {
+    const mastered = { mastery: 10, nextReview: '2026-10-01' };
+    const { service } = setup([record(1, mastered)]);
+    await expect(
+      service.submitAction({ pageId: pageId(1), action: 'remember', expected: mastered }),
+    ).rejects.toMatchObject({ message: expect.stringContaining('full mastery') });
+  });
+
+  it('refuses a card whose mastery the schedule cannot use', async () => {
+    const odd = { mastery: 2.5, nextReview: '2026-10-01' };
+    const { repository, service } = setup([record(1, odd)]);
+    await expect(
+      service.submitAction({ pageId: pageId(1), action: 'remember', expected: odd }),
+    ).rejects.toMatchObject({ status: 409, message: expect.stringContaining('whole number') });
+    expect(repository.updates).toEqual([]);
+  });
+
   it('propagates a failed write so the caller can retry safely', async () => {
     const { repository, service } = start();
     const request = { pageId: pageId(1), action: 'remember' as const, expected: shown };
@@ -241,5 +258,39 @@ describe('submitAction', () => {
     // Nothing was written, so the retry applies the answer exactly once.
     await expect(service.submitAction(request)).resolves.toMatchObject({ outcome: 'applied' });
     expect(repository.updates).toHaveLength(1);
+  });
+});
+
+describe('getQueue: why an empty queue is empty', () => {
+  it('says words are still in progress when none happens to be due', async () => {
+    const { service } = setup([record(1, { nextReview: '2026-11-01' })]);
+    expect(await service.getQueue()).toMatchObject({ cards: [], vocabulary: 'in_progress' });
+  });
+
+  it('says every word is mastered only when that is true', async () => {
+    const { service } = setup([record(1, { mastery: 10 }), record(2, { mastery: 10 })]);
+    expect(await service.getQueue()).toMatchObject({ cards: [], vocabulary: 'all_mastered' });
+  });
+
+  it('says the collection is empty when it has no words', async () => {
+    const { service } = setup([]);
+    expect(await service.getQueue()).toMatchObject({ cards: [], vocabulary: 'empty' });
+  });
+
+  it('does not ask when there are cards to review', async () => {
+    const { repository, service } = setup([record(1)]);
+    repository.vocabularyStatus = async () => {
+      throw new Error('should not be called');
+    };
+    expect((await service.getQueue()).vocabulary).toBe('in_progress');
+  });
+
+  it('lists a word whose mastery is not a whole number instead of queueing it', async () => {
+    const { service } = setup([record(1), record(2, { mastery: 3.5 })]);
+    const queue = await service.getQueue();
+    expect(queue.cards.map((item) => item.id)).toEqual([pageId(1)]);
+    expect(queue.skipped).toEqual([
+      { id: pageId(2), word: 'word-2', reason: 'Mastery is not a whole number from 0 to 10.' },
+    ]);
   });
 });

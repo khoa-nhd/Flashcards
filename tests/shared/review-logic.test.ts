@@ -77,6 +77,16 @@ describe('checkEligibility', () => {
     expect(checkEligibility({ mastery: 3, nextReview: null }, TODAY, lenient).eligible).toBe(true);
   });
 
+  it('excludes a mastery that is not a whole number of zero or more', () => {
+    for (const mastery of [2.5, -1, 0.1]) {
+      expect(checkEligibility({ mastery, nextReview: TODAY }, TODAY, sampleRules)).toEqual({
+        eligible: false,
+        reason: 'invalid_mastery',
+      });
+    }
+    expect(checkEligibility({ mastery: 0, nextReview: TODAY }, TODAY, sampleRules).eligible).toBe(true);
+  });
+
   it('excludes a missing mastery unless the rules give it a value', () => {
     expect(checkEligibility({ mastery: null, nextReview: TODAY }, TODAY, sampleRules)).toEqual({
       eligible: false,

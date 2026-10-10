@@ -1,4 +1,4 @@
-import type { SkippedRecord } from '../shared/api.js';
+import type { SkippedRecord, VocabularyStatus } from '../shared/api.js';
 import type { IsoDate } from '../shared/dates.js';
 import type { ReviewState } from '../shared/review-logic.js';
 import type { VocabularyRecord } from '../shared/vocabulary.js';
@@ -21,6 +21,8 @@ export interface VocabularyRepository {
    * queue (the rules engine does the authoritative filtering) but never less.
    */
   listDueCandidates(today: IsoDate): Promise<{ records: VocabularyRecord[]; invalid: SkippedRecord[] }>;
+  /** Whether the collection is empty, fully mastered, or still has words to learn. */
+  vocabularyStatus(): Promise<VocabularyStatus>;
   /** The record's latest state, or `null` if it is not a live row of this database. */
   getRecord(pageId: string): Promise<VocabularyRecord | null>;
   /** Writes only the given review properties and returns the record as stored afterwards. */

@@ -63,6 +63,12 @@ export class MockVocabularyRepository implements VocabularyRepository {
     return { records: [...this.records.values()].map((record) => ({ ...record })), invalid: [] };
   }
 
+  async vocabularyStatus() {
+    const records = [...this.records.values()];
+    if (records.length === 0) return 'empty' as const;
+    return records.every((record) => (record.mastery ?? 0) >= 10) ? ('all_mastered' as const) : ('in_progress' as const);
+  }
+
   async getRecord(pageId: string) {
     const record = this.records.get(normalizeId(pageId));
     return record ? { ...record } : null;

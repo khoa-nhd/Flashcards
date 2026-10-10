@@ -14,7 +14,7 @@ async function renderApp(cards: ReviewCard[] = [card(1), card(2), card(3)], meta
   const saves: Array<Deferred<ReviewActionResponse>> = [];
   const api = {
     fetchQueue: vi.fn(async () => queueResponse(cards, meta)),
-    submitAction: vi.fn(() => {
+    submitAction: vi.fn<ReviewApi['submitAction']>(() => {
       const pending = deferred<ReviewActionResponse>();
       saves.push(pending);
       return pending.promise;
@@ -464,7 +464,7 @@ describe('saving', () => {
     await settle(saves[1]);
 
     expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
-    expect(screen.getByText('You went through 2 cards.')).toBeInTheDocument();
+    expect(screen.getByText('You went through 2 cards in this session.')).toBeInTheDocument();
     expect(screen.getByText('Remembered').previousSibling).toHaveTextContent('1');
     expect(screen.getByText('Not remembered').previousSibling).toHaveTextContent('1');
     expect(screen.queryByTestId('flashcard')).not.toBeInTheDocument();
@@ -473,6 +473,53 @@ describe('saving', () => {
   it('says so when nothing is due', async () => {
     await renderApp([]);
     expect(await screen.findByRole('heading', { name: 'Nothing is due right now' })).toBeInTheDocument();
+  });
+
+  it('tells "nothing due" apart from "everything mastered" and "no words"', async () => {
+    const mastered = await renderApp([], { vocabulary: 'all_mastered' });
+    expect(await screen.findByRole('heading', { name: 'Every word is mastered' })).toBeInTheDocument();
+    mastered.unmount();
+    await renderApp([], { vocabulary: 'empty' });
+    expect(await screen.findByRole('heading', { name: 'No vocabulary yet' })).toBeInTheDocument();
+  });
+
+  it('does not call finishing a session "everything mastered"', async () => {
+    const { saves } = await renderApp([card(1)]);
+    press(' ');
+    press('ArrowRight');
+    await settle(saves[0]);
+    expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(screen.queryByText(/mastered/i)).not.toBeInTheDocument();
+  });
+
+  it('flipping, however often, never sends anything to the server', async () => {
+    const { api } = await renderApp();
+    for (let i = 0; i < 5; i += 1) press(' ');
+    fireEvent.click(flashcard());
+    fireEvent.click(screen.getByRole('button', { name: /Flip card/ }));
+    expect(api.submitAction).not.toHaveBeenCalled();
+    expect(api.fetchQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it('reviews each card once and never brings it back in the same session', async () => {
+    const { api, saves } = await renderApp([card(1), card(2), card(3)]);
+    const seen: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      seen.push(screen.getByText(/Card \d of 3: /).textContent ?? '');
+      press(' ');
+      press(i % 2 === 0 ? 'ArrowRight' : 'ArrowLeft');
+      await settle(saves[i]);
+    }
+    expect(seen.map((text) => text.match(/word-\d/)?.[0])).toEqual(['word-1', 'word-2', 'word-3']);
+    expect(api.submitAction.mock.calls.map(([request]) => request.pageId)).toEqual([
+      card(1).id,
+      card(2).id,
+      card(3).id,
+    ]);
+    // Further key presses after the last card have nothing left to act on.
+    press(' ');
+    press('ArrowRight');
+    expect(api.submitAction).toHaveBeenCalledTimes(3);
   });
 });
 

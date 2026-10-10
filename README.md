@@ -6,10 +6,11 @@ back to Notion. Notion stays the source of truth; this app only replaces the
 review screen.
 
 > **Current state:** the app reads the real review queue from Notion, using the
-> same rule and order as the "Need review" view. It is a **read-only preview**:
-> it will not write until what the "Nhớ" and "Không nhớ" buttons do has been
-> confirmed. See [docs/review-logic.md](docs/review-logic.md) for what has been
-> verified and what is still needed.
+> same rule and order as the "Need review" view, and applies the same changes
+> as the "Nhớ" and "Không nhớ" buttons. Saving happens only where
+> `REVIEW_WRITES_ENABLED=true` is set; otherwise the app is a read-only
+> preview. See [docs/review-logic.md](docs/review-logic.md) for every rule and
+> where it comes from.
 
 ## Try it now (sample data, no Notion)
 
@@ -94,18 +95,24 @@ record, but nothing is written.
 
 ### 5. Enable saving
 
-1. Fill in `remember` and `notRemember` in `config/review.config.ts` with the
-   exact behaviour of your buttons.
-2. Replace the "keeps writes locked" test in
-   `tests/shared/review-config.test.ts` with before/after cases for your
-   schedule, and run `npm test`.
-3. Point the app at a **duplicate** of the database first (Notion: `•••` →
-   Duplicate, then add the integration to the duplicate's Connections), set
-   `REVIEW_WRITES_ENABLED=true`, and review a few cards. Compare each result
-   with what the original buttons produce.
-4. Switch `NOTION_DATABASE_ID` to the real database.
+The two answers do what the Notion buttons do:
 
-Until step 1 is done the server ignores `REVIEW_WRITES_ENABLED=true`.
+| Answer | Mastery | Review Date |
+| --- | --- | --- |
+| Remember ("Nhớ") | + 1, never above 10 | the day of the review + the **old** mastery in days |
+| Not remember ("Không nhớ") | unchanged | the day after the review |
+
+These rules live in `config/review.config.ts` and are pinned by
+`tests/shared/review-config.test.ts`.
+
+To switch saving on, set `REVIEW_WRITES_ENABLED=true` (in `.env` locally, in
+the project's environment variables on Vercel) and restart or redeploy. The
+**Preview · not saving** badge disappears.
+
+For a first check that risks nothing you care about, add a throwaway word to
+the database, answer it in the app, and look at its Mastery and Review Date in
+Notion. Every save is also confirmed by the server: it compares what Notion
+stored with what it meant to write, and the app only advances if they match.
 
 ## How it protects your data
 
@@ -253,8 +260,10 @@ Swipe distance and tap tolerance are set in `src/config.ts`.
 
 ## Limitations
 
-- The review rules for your database are not configured yet, so against Notion
-  the app is a read-only preview.
+- What the Notion buttons do cannot be read through Notion's API. The rules
+  come from the owner and match every stored row, but two details are still
+  open (overdue words, the "Answer Shown" checkbox); see
+  docs/review-logic.md, section 10.
 - Each answer makes two Notion requests (read, then write) and waits for both,
   so advancing takes roughly as long as Notion takes to respond.
 - Dates are written as date-only values, which is how every review date in

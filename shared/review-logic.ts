@@ -67,7 +67,12 @@ export function resolveMastery(mastery: number | null, rules: ReviewRules): numb
   return rules.missingMastery === 'exclude' ? null : rules.missingMastery.treatAs;
 }
 
-export type IneligibleReason = 'retired' | 'not_due' | 'missing_due_date' | 'missing_mastery';
+export type IneligibleReason =
+  | 'retired'
+  | 'not_due'
+  | 'missing_due_date'
+  | 'missing_mastery'
+  | 'invalid_mastery';
 
 export type Eligibility = { eligible: true } | { eligible: false; reason: IneligibleReason };
 
@@ -78,6 +83,8 @@ export function checkEligibility(
 ): Eligibility {
   const mastery = resolveMastery(record.mastery, rules);
   if (mastery === null) return { eligible: false, reason: 'missing_mastery' };
+  // The schedule counts whole days from the mastery level, so anything else cannot be reviewed.
+  if (!Number.isInteger(mastery) || mastery < 0) return { eligible: false, reason: 'invalid_mastery' };
   if (mastery >= rules.retiredAtMastery) return { eligible: false, reason: 'retired' };
   if (record.nextReview === null || !isIsoDate(record.nextReview)) {
     return rules.includeMissingDueDate

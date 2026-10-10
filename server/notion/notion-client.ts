@@ -20,6 +20,7 @@ export interface DataSourceQuery {
   filter?: unknown;
   sorts?: unknown;
   startCursor?: string;
+  pageSize?: number;
 }
 
 /** Responses are `unknown` on purpose: they are validated in notion-mappers.ts. */
@@ -49,14 +50,14 @@ export function createNotionApi(apiKey: string): NotionApi {
     retrieveDatabase: (databaseId) => call(() => client.databases.retrieve({ database_id: databaseId })),
     retrieveDataSource: (dataSourceId) =>
       call(() => client.dataSources.retrieve({ data_source_id: dataSourceId })),
-    queryDataSource: ({ dataSourceId, filter, sorts, startCursor }) =>
+    queryDataSource: ({ dataSourceId, filter, sorts, startCursor, pageSize }) =>
       call(() =>
         client.dataSources.query({
           data_source_id: dataSourceId,
           filter: filter as QueryDataSourceParameters['filter'],
           sorts: sorts as QueryDataSourceParameters['sorts'],
           start_cursor: startCursor,
-          page_size: 100,
+          page_size: pageSize ?? 100,
           result_type: 'page',
         }),
       ),

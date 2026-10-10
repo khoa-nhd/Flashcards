@@ -55,6 +55,11 @@ export const queueResponseSchema = z.object({
   writesEnabled: z.boolean(),
   /** Records the source returned that could not be used, so nothing vanishes silently. */
   skipped: z.array(skippedRecordSchema),
+  /**
+   * Why an empty queue is empty: no words at all, every word mastered, or
+   * simply nothing due yet. Always `in_progress` when there are cards.
+   */
+  vocabulary: z.enum(['empty', 'all_mastered', 'in_progress']),
 });
 
 export const reviewActionRequestSchema = z.strictObject({
@@ -89,6 +94,7 @@ export type CardField = z.infer<typeof cardFieldSchema>;
 export type ReviewCard = z.infer<typeof reviewCardSchema>;
 export type SkippedRecord = z.infer<typeof skippedRecordSchema>;
 export type QueueResponse = z.infer<typeof queueResponseSchema>;
+export type VocabularyStatus = QueueResponse['vocabulary'];
 export type ReviewActionRequest = z.infer<typeof reviewActionRequestSchema>;
 export type ReviewActionResponse = z.infer<typeof reviewActionResponseSchema>;
 export type ApiErrorBody = z.infer<typeof apiErrorSchema>;

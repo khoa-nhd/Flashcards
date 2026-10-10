@@ -41,7 +41,16 @@ export function card(n: number, overrides: Partial<ReviewCard> = {}): ReviewCard
 }
 
 export function queueResponse(cards: ReviewCard[], overrides: Partial<QueueResponse> = {}): QueueResponse {
-  return { cards, today: TODAY, timeZone: TIME_ZONE, mode: 'mock', writesEnabled: true, skipped: [], ...overrides };
+  return {
+    cards,
+    today: TODAY,
+    timeZone: TIME_ZONE,
+    mode: 'mock',
+    writesEnabled: true,
+    skipped: [],
+    vocabulary: 'in_progress',
+    ...overrides,
+  };
 }
 
 export interface Deferred<T> {
@@ -82,6 +91,12 @@ export class FakeRepository implements VocabularyRepository {
 
   async listDueCandidates() {
     return { records: this.listed.map((item) => ({ ...item })), invalid: [] };
+  }
+
+  async vocabularyStatus() {
+    const all = [...this.records.values()];
+    if (all.length === 0) return 'empty' as const;
+    return all.every((item) => (item.mastery ?? 0) >= 10) ? ('all_mastered' as const) : ('in_progress' as const);
   }
 
   async getRecord(id: string) {

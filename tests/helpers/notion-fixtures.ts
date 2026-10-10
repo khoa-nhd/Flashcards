@@ -108,9 +108,16 @@ export class FakeNotionApi implements NotionApi {
     return { object: 'data_source', id: dataSourceId, properties: this.schema };
   }
 
+  /** When set, decides the rows for a query from its filter instead of `resultPages`. */
+  rowsFor: ((query: DataSourceQuery) => unknown[]) | null = null;
+
   async queryDataSource(query: DataSourceQuery) {
     this.maybeFail();
     this.queries.push(query);
+    if (this.rowsFor !== null) {
+      const rows = this.rowsFor(query).slice(0, query.pageSize ?? 100);
+      return { object: 'list', results: rows, has_more: false, next_cursor: null };
+    }
     const index = query.startCursor === undefined ? 0 : Number(query.startCursor.replace('cursor-', ''));
     const hasMore = index < this.resultPages.length - 1;
     return {

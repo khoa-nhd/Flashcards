@@ -1,4 +1,4 @@
-import { normalizeId, type SkippedRecord } from '../../shared/api.js';
+import { normalizeId, type SkippedRecord, type VocabularyStatus } from '../../shared/api.js';
 import { addDays, type IsoDate } from '../../shared/dates.js';
 import type { ReviewRules, ReviewState } from '../../shared/review-logic.js';
 import type { CardFieldConfig, NotionPropertyConfig, VocabularyRecord } from '../../shared/vocabulary.js';
@@ -15,7 +15,7 @@ import {
   mapPageToRecord,
   pageSchema,
 } from './notion-mappers.js';
-import { collectPaginated } from './pagination.js';
+import { collectPaginated, listPageSchema } from './pagination.js';
 
 export interface NotionRepositoryOptions {
   databaseId: string | null;
@@ -73,6 +73,30 @@ export class NotionVocabularyRepository implements VocabularyRepository {
       else invalid.push(mapped.skipped);
     }
     return { records, invalid };
+  }
+
+  /** Two one-row queries, only ever run when the due queue came back empty. */
+  async vocabularyStatus(): Promise<VocabularyStatus> {
+    const schema = await this.readableSchema();
+    const { properties, rules } = this.options;
+    const anyRow = async (filter?: unknown) => {
+      const page = listPageSchema.safeParse(
+        await this.api.queryDataSource({ dataSourceId: schema.dataSourceId, filter, pageSize: 1 }),
+      );
+      if (!page.success) throw new Error('Notion returned a malformed list response.');
+      return page.data.results.length > 0;
+    };
+
+    const unfinished = this.condition(schema, properties.mastery, 'number', {
+      less_than: rules.retiredAtMastery,
+    });
+    if (unfinished === null) {
+      // Mastery cannot be filtered server-side, so completion is never claimed.
+      return (await anyRow()) ? 'in_progress' : 'empty';
+    }
+    const ungraded = this.condition(schema, properties.mastery, 'number', { is_empty: true });
+    if (await anyRow({ or: [unfinished, ungraded] })) return 'in_progress';
+    return (await anyRow()) ? 'all_mastered' : 'empty';
   }
 
   async getRecord(pageId: string): Promise<VocabularyRecord | null> {
@@ -136,13 +160,8 @@ export class NotionVocabularyRepository implements VocabularyRepository {
   private buildCandidateFilter(schema: ResolvedSchema, today: IsoDate): unknown {
     const { properties, rules } = this.options;
     const horizon = addDays(today, 1);
-
-    const condition = (property: string, kind: 'date' | 'number', test: Record<string, unknown>) => {
-      const type = schema.types.get(property);
-      if (type === kind) return { property, [kind]: test };
-      if (type === 'formula') return { property, formula: { [kind]: test } };
-      return null; // Rollups and anything else are filtered locally only.
-    };
+    const condition = (property: string, kind: 'date' | 'number', test: Record<string, unknown>) =>
+      this.condition(schema, property, kind, test);
 
     const clauses: unknown[] = [];
 
@@ -159,6 +178,19 @@ export class NotionVocabularyRepository implements VocabularyRepository {
     }
 
     return clauses.length > 0 ? { and: clauses } : undefined;
+  }
+
+  /** A Notion filter clause for a property, in the form its type requires. */
+  private condition(
+    schema: ResolvedSchema,
+    property: string,
+    kind: 'date' | 'number',
+    test: Record<string, unknown>,
+  ): unknown {
+    const type = schema.types.get(property);
+    if (type === kind) return { property, [kind]: test };
+    if (type === 'formula') return { property, formula: { [kind]: test } };
+    return null; // Rollups and anything else are filtered locally only.
   }
 
   private async readableSchema(): Promise<ResolvedSchema> {

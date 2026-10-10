@@ -180,6 +180,39 @@ describe('listDueCandidates', () => {
   });
 });
 
+describe('vocabularyStatus', () => {
+  const isFiltered = (filter: unknown) => filter !== undefined;
+
+  it('reports words still in progress', async () => {
+    const { api, repository } = setup();
+    api.rowsFor = () => [notionPage({ id: pageId(1) })];
+    await expect(repository.vocabularyStatus()).resolves.toBe('in_progress');
+    // One row is enough to know, and only unfinished words are asked for.
+    expect(api.queries).toHaveLength(1);
+    expect(api.queries[0]).toMatchObject({
+      pageSize: 1,
+      filter: {
+        or: [
+          { property: 'Mastery', number: { less_than: 10 } },
+          { property: 'Mastery', number: { is_empty: true } },
+        ],
+      },
+    });
+  });
+
+  it('reports everything mastered when words exist but none is unfinished', async () => {
+    const { api, repository } = setup();
+    api.rowsFor = (query) => (isFiltered(query.filter) ? [] : [notionPage({ id: pageId(1), mastery: 10 })]);
+    await expect(repository.vocabularyStatus()).resolves.toBe('all_mastered');
+  });
+
+  it('reports an empty collection', async () => {
+    const { api, repository } = setup();
+    api.rowsFor = () => [];
+    await expect(repository.vocabularyStatus()).resolves.toBe('empty');
+  });
+});
+
 describe('getRecord', () => {
   it('returns a live row of the configured data source', async () => {
     const { api, repository } = setup();

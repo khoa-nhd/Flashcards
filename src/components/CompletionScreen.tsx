@@ -12,6 +12,17 @@ export interface CompletionScreenProps {
 export function CompletionScreen({ total, tally, meta, onReload }: CompletionScreenProps) {
   const preview = meta !== null && !meta.writesEnabled;
 
+  // An empty queue has three different causes; say which one this is.
+  let emptyTitle = 'Nothing is due right now';
+  let emptyDetail = 'No vocabulary is waiting for review.';
+  if (meta?.vocabulary === 'all_mastered') {
+    emptyTitle = 'Every word is mastered';
+    emptyDetail = 'All of your vocabulary has reached full mastery, so there is nothing left to review.';
+  } else if (meta?.vocabulary === 'empty') {
+    emptyTitle = 'No vocabulary yet';
+    emptyDetail = 'The vocabulary database has no words in it.';
+  }
+
   return (
     <div className="mx-auto flex h-full w-full max-w-md flex-col items-center justify-center gap-6 px-6 text-center">
       <div
@@ -25,12 +36,12 @@ export function CompletionScreen({ total, tally, meta, onReload }: CompletionScr
 
       <div>
         <h2 className="font-serif text-3xl font-semibold">
-          {total === 0 ? 'Nothing is due right now' : 'Review complete'}
+          {total === 0 ? emptyTitle : 'Review complete'}
         </h2>
         <p className="mt-2 text-muted">
           {total === 0
-            ? 'No vocabulary is waiting for review.'
-            : `You went through ${total} ${total === 1 ? 'card' : 'cards'}.`}
+            ? emptyDetail
+            : `You went through ${total} ${total === 1 ? 'card' : 'cards'} in this session.`}
           {total > 0 && preview && ' This was a preview, so no answers were saved.'}
         </p>
       </div>

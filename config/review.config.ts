@@ -5,9 +5,11 @@
  * Status of each value is tracked in docs/review-logic.md. Markers used here:
  *   VERIFIED    — read from the Notion database itself (schema, formulas, the
  *                 "Need review" view) on 2026-10-10.
- *   STATED      — taken from the project brief, consistent with Notion so far.
- *   UNCONFIRMED — still unknown. While either action rule is `null` the app
- *                 stays a read-only preview and never writes to Notion.
+ *   STATED      — given by the owner. Button steps cannot be read from Notion,
+ *                 so these rest on the owner's word and on the stored data.
+ *   UNCONFIRMED — still unknown; display only.
+ *
+ * Saving also requires REVIEW_WRITES_ENABLED=true in the environment.
  */
 import type { ReviewRules } from '../shared/review-logic.js';
 import type { CardFieldConfig, NotionPropertyConfig } from '../shared/vocabulary.js';
@@ -48,27 +50,25 @@ export const reviewRules: ReviewRules = {
   missingMastery: 'exclude', // UNCONFIRMED, and currently moot: no row has an empty Mastery
   sortDirection: 'ascending', // VERIFIED: "Need review" sorts Review Date ascending
 
-  // UNCONFIRMED — what the "Nhớ" button does. The stored data is consistent
-  // with "Mastery + 1, Review Date = today + (old Mastery) days", but that is
-  // an inference, not something Notion's API can show. Awaiting confirmation:
-  //   remember: {
-  //     masteryAfter: (mastery) => mastery + 1,
-  //     schedule: { base: 'today', intervalDays: ({ masteryBefore }) => masteryBefore },
-  //   },
-  remember: null,
+  // STATED by the owner (2026-10-10), and consistent with every stored row:
+  // "Nhớ" raises Mastery by exactly 1 and sets Review Date to the day of the
+  // review plus the OLD Mastery in calendar days. Mastery never exceeds 10.
+  remember: {
+    masteryAfter: (mastery) => Math.min(mastery + 1, 10),
+    schedule: { base: 'today', intervalDays: ({ masteryBefore }) => masteryBefore },
+  },
 
-  // UNCONFIRMED — what the "Không nhớ" button does. Awaiting confirmation:
-  //   notRemember: {
-  //     masteryAfter: (mastery) => mastery,
-  //     schedule: { base: 'today', intervalDays: () => 1 },
-  //   },
-  notRemember: null,
+  // STATED by the owner: "Không nhớ" leaves Mastery alone and sets Review Date
+  // to the day after the review.
+  notRemember: {
+    masteryAfter: (mastery) => mastery,
+    schedule: { base: 'today', intervalDays: () => 1 },
+  },
 };
 
-/** Shown by the inspect script until resolved. */
+/** Shown by the inspect script until resolved. None of these block saving. */
 export const pendingConfirmation: string[] = [
-  '"Nhớ": the exact steps (Mastery change, Review Date formula, anything else it edits)',
-  '"Không nhớ": the exact steps (does Mastery stay the same? is the date today + 1?)',
-  '"Hiện đáp án" and the "Answer Shown" checkbox: what they do, and whether the two answer buttons reset it',
-  'Card layout: is "Vietnamese Meaning" the answer, and do definition and example belong on the back?',
+  'Overdue words: the buttons are taken to count days from the day you review, not from the old Review Date. Stored data cannot distinguish the two; one test word settles it (docs/review-logic.md, section 10).',
+  '"Hiện đáp án" and the "Answer Shown" checkbox: the app never touches the checkbox. If "Nhớ" / "Không nhớ" untick it in Notion, say so.',
+  'Card layout: "Vietnamese Meaning" is shown on the back as the answer.',
 ];

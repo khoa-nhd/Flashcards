@@ -66,9 +66,11 @@ export class ReviewService {
 
     const skipped = [...invalid];
     for (const { record, reason } of excluded) {
-      // Rule-based exclusions are normal. An empty mastery is a data gap worth surfacing.
+      // Rule-based exclusions are normal. A mastery the schedule cannot use is a data gap worth surfacing.
       if (reason === 'missing_mastery') {
         skipped.push({ id: record.id, word: record.word, reason: 'Mastery is empty.' });
+      } else if (reason === 'invalid_mastery') {
+        skipped.push({ id: record.id, word: record.word, reason: 'Mastery is not a whole number from 0 to 10.' });
       }
     }
 
@@ -79,6 +81,8 @@ export class ReviewService {
       mode: repository.mode,
       writesEnabled: await this.writesEnabled(),
       skipped,
+      // Only worth asking when there is nothing to review.
+      vocabulary: queue.length > 0 ? 'in_progress' : await repository.vocabularyStatus(),
     };
   }
 
@@ -111,13 +115,27 @@ export class ReviewService {
 
     const decision = reconcile(action, expected, current, today, rules);
     if (decision === 'already_applied') return { outcome: 'already_applied', state: current };
-    if (decision === 'conflict' || !checkEligibility(current, today, rules).eligible) {
+    if (decision === 'conflict') {
       throw new HttpError(
         409,
         'conflict',
         'This card was changed in Notion after it was loaded, so nothing was saved.',
         { body: { current } },
       );
+    }
+    // Unchanged since it was shown, but still not something that may be reviewed now.
+    const eligibility = checkEligibility(current, today, rules);
+    if (!eligibility.eligible) {
+      const why: Record<typeof eligibility.reason, string> = {
+        retired: 'This word has already reached full mastery',
+        not_due: 'This word is not due for review yet',
+        missing_due_date: 'This word has no review date',
+        missing_mastery: 'This word has no mastery value',
+        invalid_mastery: 'The mastery stored for this word is not a whole number from 0 to 10',
+      };
+      throw new HttpError(409, 'conflict', `${why[eligibility.reason]}, so nothing was saved.`, {
+        body: { current },
+      });
     }
 
     const next = ruleFor(action, rules) === null ? null : applyAction(action, current, today, rules);
