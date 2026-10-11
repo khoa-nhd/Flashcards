@@ -87,3 +87,71 @@ describe('shortcutFor', () => {
     document.body.removeEventListener('keydown', consume);
   });
 });
+
+describe('shortcutFor with the optional keys', () => {
+  const key = (value: string, init: KeyboardEventInit = {}) => ({ key: value, ...init });
+  const intentWith = (options: Parameters<typeof shortcutFor>[1], init: KeyboardEventInit, target: Element = document.body) => {
+    let intent: ShortcutIntent | null = null;
+    const capture = (event: KeyboardEvent) => {
+      intent = shortcutFor(event, options);
+    };
+    window.addEventListener('keydown', capture);
+    target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+    window.removeEventListener('keydown', capture);
+    return intent;
+  };
+
+  it('opens the shortcut list with ?, which is typed with Shift', () => {
+    expect(intentFor(document.body, key('?', { shiftKey: true }))).toBe('help');
+    expect(intentFor(document.body, key('?'))).toBe('help');
+  });
+
+  it('does not open it while typing, or with another modifier held', () => {
+    expect(intentFor(mount('<input type="text" />'), key('?', { shiftKey: true }))).toBeNull();
+    expect(intentFor(mount('<textarea></textarea>'), key('?', { shiftKey: true }))).toBeNull();
+    expect(intentFor(document.body, key('?', { shiftKey: true, ctrlKey: true }))).toBeNull();
+    expect(intentFor(document.body, key('?', { shiftKey: true, metaKey: true }))).toBeNull();
+  });
+
+  it('takes back the last answer with U', () => {
+    expect(intentFor(document.body, key('u'))).toBe('undo');
+    expect(intentFor(document.body, key('U'))).toBe('undo');
+    expect(intentFor(mount('<input type="text" />'), key('u'))).toBeNull();
+  });
+
+  it('has no extra answer keys unless a pair is chosen', () => {
+    for (const value of ['j', 'k', 'f', '1', '2', '3']) expect(intentFor(document.body, key(value)), value).toBeNull();
+  });
+
+  it.each([
+    ['jk', 'j', 'k'],
+    ['fj', 'f', 'j'],
+    ['numbers', '1', '2'],
+  ] as const)('maps the %s pair to Not remember and Remember, in either case', (answerKeys, no, yes) => {
+    expect(intentWith({ answerKeys }, key(no))).toBe('not_remember');
+    expect(intentWith({ answerKeys }, key(yes))).toBe('remember');
+    expect(intentWith({ answerKeys }, key(yes.toUpperCase()))).toBe('remember');
+    // The arrows are never replaced.
+    expect(intentWith({ answerKeys }, LEFT)).toBe('not_remember');
+    expect(intentWith({ answerKeys }, RIGHT)).toBe('remember');
+  });
+
+  it('keeps a chosen pair away from a field being typed in, and from modified keys', () => {
+    expect(intentWith({ answerKeys: 'jk' }, key('j'), mount('<input type="text" />'))).toBeNull();
+    expect(intentWith({ answerKeys: 'jk' }, key('k', { ctrlKey: true }))).toBeNull();
+    expect(intentWith({ answerKeys: 'jk' }, key('K', { shiftKey: true }))).toBeNull();
+  });
+
+  it('reads 1, 2 and 3 as a confidence rating only while one is being asked for', () => {
+    expect(intentWith({ ratingConfidence: true }, key('1'))).toEqual({ confidence: 1 });
+    expect(intentWith({ ratingConfidence: true }, key('2'))).toEqual({ confidence: 2 });
+    expect(intentWith({ ratingConfidence: true }, key('3'))).toEqual({ confidence: 3 });
+    expect(intentWith({ ratingConfidence: true }, key('4'))).toBeNull();
+    expect(intentWith({ ratingConfidence: false }, key('3'))).toBeNull();
+  });
+
+  it('gives the number keys to the rating before the answer pair', () => {
+    expect(intentWith({ answerKeys: 'numbers', ratingConfidence: true }, key('1'))).toEqual({ confidence: 1 });
+    expect(intentWith({ answerKeys: 'numbers', ratingConfidence: false }, key('1'))).toBe('not_remember');
+  });
+});

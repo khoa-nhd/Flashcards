@@ -59,6 +59,11 @@ export function WeakWordsPage() {
               <Icon name="refresh" className="size-4" />
               Refresh
             </button>
+            {words.length > 0 && (
+              <Link to={buildHref(ROUTES.practice, { source: 'weak' })} className={BUTTON_SECONDARY}>
+                <Icon name="practice" className="size-4" /> Practise these
+              </Link>
+            )}
             {dueNow > 0 && (
               <Link to={buildHref(ROUTES.review, { focus: 'weak' })} className={BUTTON_PRIMARY}>
                 <Icon name="review" className="size-4" /> Review my weakest words

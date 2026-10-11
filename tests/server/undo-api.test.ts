@@ -5,7 +5,9 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { LATEST_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
+import { capabilitiesAt } from '../../server/supabase/supabase-repository.js';
 import {
+  NO_CAPABILITIES,
   accountSettingsSchema,
   apiErrorSchema,
   entryResponseSchema,
@@ -97,7 +99,7 @@ describe('the schema version', () => {
     const settings = accountSettingsSchema.parse(await (await call(app, alice, '/api/settings')).json());
     expect(settings.database).toEqual({ version: LATEST_SCHEMA_VERSION, latest: LATEST_SCHEMA_VERSION });
     const queue = queueResponseSchema.parse(await (await call(app, alice, '/api/review-queue')).json());
-    expect(queue.capabilities).toEqual({ sessions: true, undo: true, fsrs: true, analytics: true });
+    expect(queue.capabilities).toEqual(capabilitiesAt(LATEST_SCHEMA_VERSION));
   });
 });
 
@@ -387,7 +389,7 @@ describe('a database that has not had this migration yet', () => {
     const settings = accountSettingsSchema.parse(await (await call(legacy, owner, '/api/settings')).json());
     expect(settings.database).toEqual({ version: 1, latest: LATEST_SCHEMA_VERSION });
     const queue = queueResponseSchema.parse(await (await call(legacy, owner, '/api/review-queue')).json());
-    expect(queue.capabilities).toEqual({ sessions: false, undo: false, fsrs: false, analytics: false });
+    expect(queue.capabilities).toEqual(NO_CAPABILITIES);
   });
 
   it('saves reviews exactly as before, session id or not', async () => {
@@ -431,7 +433,7 @@ describe('a database that has not had this migration yet', () => {
       // …and a minute later the server has noticed.
       clock = new Date('2026-10-09T05:01:30Z');
       const after = queueResponseSchema.parse(await (await call(running, user, '/api/review-queue')).json());
-      expect(after.capabilities).toEqual({ sessions: true, undo: true, fsrs: true, analytics: true });
+      expect(after.capabilities).toEqual(capabilitiesAt(LATEST_SCHEMA_VERSION));
     } finally {
       await upgrading.close();
     }

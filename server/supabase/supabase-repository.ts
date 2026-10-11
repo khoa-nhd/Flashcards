@@ -1,13 +1,19 @@
-import type { Capabilities, SessionSummary, SkippedRecord, VocabularyStatus } from '../../shared/api.js';
+import type { Capabilities, Confidence, SessionSummary, SkippedRecord, VocabularyStatus } from '../../shared/api.js';
 import type { DailyStat } from '../../shared/analytics.js';
 import type { IsoDate } from '../../shared/dates.js';
+import type { HistoryEvent } from '../../shared/export-format.js';
 import type { CardHistory } from '../../shared/weak-words.js';
 import type { ReviewRules } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
+import { DEFAULT_SCHEDULER, isSchedulerId } from '../../shared/scheduler/active.js';
 import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
 import type { StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
 import type {
+  ConfidenceStat,
+  PracticeDailyStat,
+  PracticeWrite,
+  PracticeWriteResult,
   ReviewWrite,
   ReviewWriteResult,
   SetupReport,
@@ -32,6 +38,7 @@ function toEntry(row: CardRow): EntryData {
     example: row.example,
     mastery: row.mastery,
     reviewDate: row.review_date,
+    fsrsDue: fsrsOfCard(row)?.state.due ?? null,
     dateAdded: row.date_added,
     createdTime: row.created_at,
     lastEditedTime: row.updated_at,
@@ -55,6 +62,20 @@ function storedFsrs(row: CardRow): StoredFsrs | null {
   return found === null ? null : { state: found.state, engine: found.version };
 }
 
+/** What a database that has reached this schema version can do. */
+export function capabilitiesAt(schemaVersion: number): Capabilities {
+  return {
+    sessions: schemaVersion >= 2,
+    undo: schemaVersion >= 2,
+    fsrs: schemaVersion >= 3,
+    analytics: schemaVersion >= 4,
+    goals: schemaVersion >= 5,
+    confidence: schemaVersion >= 5,
+    practice: schemaVersion >= 6,
+    library: schemaVersion >= 7,
+  };
+}
+
 const NO_ISSUES: SetupReport = { readIssues: [], writeIssues: [], warnings: [], entryWriteIssues: [] };
 
 /**
@@ -71,12 +92,7 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     /** The newest migration the database has. Anything it lacks stays switched off. */
     schemaVersion: number = LATEST_SCHEMA_VERSION,
   ) {
-    this.capabilities = {
-      sessions: schemaVersion >= 2,
-      undo: schemaVersion >= 2,
-      fsrs: schemaVersion >= 3,
-      analytics: schemaVersion >= 4,
-    };
+    this.capabilities = capabilitiesAt(schemaVersion);
   }
 
   async checkSetup(): Promise<SetupReport> {
@@ -91,6 +107,10 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     // rows; the rules engine does the authoritative filtering either way.
     const rows = await this.database.listDueCards(today, this.rules.retiredAtMastery);
     return { records: rows.map(toRecord), invalid: [] };
+  }
+
+  async listLiveRecords(): Promise<{ records: VocabularyRecord[]; invalid: SkippedRecord[] }> {
+    return { records: (await this.database.listCards()).map(toRecord), invalid: [] };
   }
 
   async vocabularyStatus(): Promise<VocabularyStatus> {
@@ -117,7 +137,12 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     };
     // A database that has not had the sessions migration still saves the answer, the way it always did.
     const result = this.capabilities.sessions
-      ? await this.database.recordReview({ ...args, sessionId: write.sessionId, fsrs: this.fsrsOf(write) })
+      ? await this.database.recordReview({
+          ...args,
+          sessionId: write.sessionId,
+          fsrs: this.fsrsOf(write),
+          confidence: this.capabilities.confidence ? (write.confidence ?? null) : null,
+        })
       : await this.database.applyReview(args);
     if (result.outcome === 'not_found' || result.mastery === null) return { outcome: 'not_found' };
     return { outcome: result.outcome, state: { mastery: result.mastery, nextReview: result.review_date } };
@@ -169,6 +194,59 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
         },
       ]),
     );
+  }
+
+  async listHistory(): Promise<HistoryEvent[]> {
+    return (await this.database.listReviewLogs()).map((row) => ({
+      id: row.id,
+      vocabularyId: row.vocabulary_id,
+      // Before the column existed every row was a review.
+      kind: row.kind === 'undo' || row.kind === 'practice' ? row.kind : 'review',
+      action: row.action === 'remember' ? 'remember' : 'not_remember',
+      mode: row.review_mode,
+      reviewedAt: new Date(row.reviewed_at).toISOString(),
+      reviewedOn: row.reviewed_on,
+      durationMs: row.duration_ms,
+      masteryBefore: row.mastery_before,
+      masteryAfter: row.mastery_after,
+      reviewDateBefore: row.review_date_before,
+      reviewDateAfter: row.review_date_after,
+      sessionId: row.session_id ?? null,
+      undoesId: row.undoes_log_id ?? null,
+      scheduler: isSchedulerId(row.scheduler) ? row.scheduler : DEFAULT_SCHEDULER,
+      rating: row.rating ?? null,
+      confidence: row.confidence ?? null,
+      answerCorrect: row.answer_correct ?? null,
+      submittedAnswer: row.submitted_answer ?? null,
+      grading: row.grading === 'self' || row.grading === 'auto' ? row.grading : null,
+    }));
+  }
+
+  async recordPractice(write: PracticeWrite): Promise<PracticeWriteResult> {
+    if (!this.capabilities.practice) return 'unsupported';
+    return this.database.recordPractice(write);
+  }
+
+  async practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeDailyStat[]> {
+    if (!this.capabilities.practice) return [];
+    return (await this.database.practiceDailyStats(from, to)).map((row) => ({
+      day: row.day,
+      mode: row.review_mode,
+      answers: row.answers,
+      correct: row.correct,
+      durationMs: row.duration_ms,
+      timedAnswers: row.timed_answers,
+      cards: row.cards,
+    }));
+  }
+
+  async confidenceStats(since: IsoDate): Promise<ConfidenceStat[]> {
+    if (!this.capabilities.confidence) return [];
+    return (await this.database.confidenceStats(since)).map((row) => ({
+      confidence: row.confidence as Confidence,
+      reviews: row.reviews,
+      remembered: row.remembered,
+    }));
   }
 
   async listSchedules(): Promise<ScheduleCard[]> {
@@ -292,4 +370,5 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     const row = await this.database.getCard(id);
     return row === null || row.deleted_at !== null ? null : toEntry(row);
   }
+
 }

@@ -3,7 +3,7 @@
  * over the already-loaded entries; none of this touches the review queue or
  * its order.
  */
-import type { VocabularyEntry } from '../../shared/api.js';
+import { RECENTLY_ADDED_DAYS, type VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates, isIsoDate, type IsoDate } from '../../shared/dates.js';
 import { matchesQuery } from '../../shared/text.js';
 import type { ReviewStatus, TextFieldKey } from '../../shared/vocabulary.js';
@@ -104,7 +104,7 @@ type Filters = Pick<BankQuery, 'status' | 'mastery' | 'addedFrom' | 'addedTo' | 
 const NO_FILTERS: Filters = { status: null, mastery: null, addedFrom: null, addedTo: null, missing: null };
 
 /** How many days back "Recently added" reaches, today included. */
-export const RECENT_DAYS = 7;
+export const RECENT_DAYS = RECENTLY_ADDED_DAYS;
 
 export interface BankPreset {
   key: string;

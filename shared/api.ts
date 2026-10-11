@@ -1,8 +1,14 @@
 /** The HTTP contract between the browser and the server, validated on both ends. */
 import { z } from 'zod';
 import { isIsoDate, isValidTimeZone } from './dates.js';
+import { LIBRARY_LIMITS, RELATION_KINDS } from './library.js';
+import { DEFAULT_SCHEDULER, SCHEDULERS } from './scheduler/active.js';
+import { STUDY_MODES } from './study-modes.js';
 
 export const isoDateSchema = z.string().refine(isIsoDate, 'Expected a YYYY-MM-DD calendar date');
+
+/** Which schedule decides when a word is due. */
+export const schedulerIdSchema = z.enum(SCHEDULERS);
 
 export const reviewActionSchema = z.enum(['remember', 'not_remember']);
 
@@ -36,6 +42,11 @@ export const reviewCardSchema = z.object({
   word: z.string(),
   mastery: z.number(),
   nextReview: isoDateSchema.nullable(),
+  /**
+   * The day the schedule in charge has this word due, sent only when that is
+   * not the mastery review date above: FSRS is in charge and has seen the word.
+   */
+  dueOn: isoDateSchema.optional(),
   /** Metadata safe to show before the card is flipped. */
   front: z.array(cardFieldSchema),
   /** Answer fields the current mastery permits. Withheld fields are never sent. */
@@ -60,7 +71,42 @@ export const capabilitiesSchema = z.object({
   fsrs: z.boolean().default(false),
   /** Saved reviews can be summarised: activity, accuracy, and how each word has gone. */
   analytics: z.boolean().default(false),
+  /** A daily goal can be kept with the account. */
+  goals: z.boolean().default(false),
+  /** A confidence rating given before the answer is stored with the answer. */
+  confidence: z.boolean().default(false),
+  /** Answers in the practice modes are recorded. They never move the schedule. */
+  practice: z.boolean().default(false),
+  /** Collections, further examples and relationships between words can be kept. */
+  library: z.boolean().default(false),
 });
+
+/** A store that supports none of the optional features: the starting point for one that supports some. */
+export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
+  sessions: false,
+  undo: false,
+  fsrs: false,
+  analytics: false,
+  goals: false,
+  confidence: false,
+  practice: false,
+  library: false,
+};
+
+/**
+ * Ways to narrow the review queue. Every one of them selects among the words
+ * that are already due; none can make a word due.
+ */
+export const REVIEW_FOCUSES = ['weak', 'overdue', 'due_today', 'recent'] as const;
+export const reviewFocusSchema = z.enum(REVIEW_FOCUSES);
+export type ReviewFocus = z.infer<typeof reviewFocusSchema>;
+
+/** How many days back "recently added" looks, today included. */
+export const RECENTLY_ADDED_DAYS = 7;
+
+/** How sure the reviewer was before the answer was shown: 1 low, 2 medium, 3 high. */
+export const confidenceSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]);
+export type Confidence = z.infer<typeof confidenceSchema>;
 
 export const queueResponseSchema = z.object({
   cards: z.array(reviewCardSchema),
@@ -69,9 +115,13 @@ export const queueResponseSchema = z.object({
   mode: dataModeSchema,
   /** False while the app is a read-only preview: grading saves nothing. */
   writesEnabled: z.boolean(),
-  capabilities: capabilitiesSchema.default({ sessions: false, undo: false, fsrs: false, analytics: false }),
-  /** Set when the queue was narrowed on request: `weak` holds only due words that need attention, weakest first. */
-  focus: z.enum(['weak']).nullable().default(null),
+  capabilities: capabilitiesSchema.default(NO_CAPABILITIES),
+  /** The schedule that decided what is in this queue. */
+  scheduler: schedulerIdSchema.default(DEFAULT_SCHEDULER),
+  /** Set when the queue was narrowed on request. `weak` is ordered weakest first; the others keep the usual order. */
+  focus: reviewFocusSchema.nullable().default(null),
+  /** Set when the queue was narrowed to one collection instead: the due words in it, in the usual order. */
+  collection: z.object({ id: z.string(), name: z.string() }).nullable().default(null),
   /** Records the source returned that could not be used, so nothing vanishes silently. */
   skipped: z.array(skippedRecordSchema),
   /**
@@ -100,6 +150,11 @@ export const reviewActionRequestSchema = z.strictObject({
   durationMs: z.number().int().min(0).max(86_400_000).optional(),
   /** The sitting this answer belongs to. Chosen by the browser when a review session starts. */
   sessionId: z.uuid().optional(),
+  /**
+   * How sure the reviewer said they were before the answer was shown. Stored
+   * beside the answer; it never changes what the answer does.
+   */
+  confidence: confidenceSchema.optional(),
 });
 
 export const reviewActionResponseSchema = z.object({
@@ -141,12 +196,17 @@ export const sessionSummarySchema = z.object({
 
 // ---- Scheduling ----
 
+/** Choosing which schedule is in charge. */
+export const schedulerChoiceRequestSchema = z.strictObject({ scheduler: schedulerIdSchema });
+
 /**
  * The two schedules side by side. `active` is the one that decides what is
- * due; FSRS is only ever calculated beside it here, for comparison.
+ * due. Both are kept up to date by every saved answer, whichever it is.
  */
 export const schedulerReportSchema = z.object({
-  active: z.literal('mastery_v1'),
+  active: schedulerIdSchema,
+  /** False where the choice cannot be stored yet, or FSRS is not being calculated. */
+  switchable: z.boolean().default(false),
   today: isoDateSchema,
   timeZone: z.string(),
   fsrs: z.object({
@@ -171,9 +231,76 @@ export const schedulerReportSchema = z.object({
       fsrsDue: isoDateSchema,
       fsrsIntervalDays: z.number().int(),
       differenceDays: z.number().int().nullable(),
+      /**
+       * FSRS's own estimate of the chance the word would be recalled right now,
+       * from 0 to 1. A model's estimate, not a measurement; `null` while FSRS
+       * has too few answers for the word to give one.
+       */
+      recall: z.number().min(0).max(1).nullable().default(null),
     }),
   ),
   workload: z.array(z.object({ date: isoDateSchema, legacy: z.number().int(), fsrs: z.number().int() })),
+});
+
+// ---- Simulation ----
+
+const simulationDaySchema = z.object({ date: isoDateSchema, mastery: z.number().int(), fsrs: z.number().int() });
+
+/**
+ * A what-if comparison of the two schedules at a chosen target retention. The
+ * mastery side is the live schedule; the FSRS side replays the answers that
+ * were actually saved. Nothing in it is stored, and no due date changes.
+ */
+export const simulationResponseSchema = z.object({
+  /** False where FSRS is not calculated at all yet (the database predates it). */
+  available: z.boolean(),
+  today: isoDateSchema,
+  timeZone: z.string(),
+  /** The target retention FSRS was run at, from 0 to 1. */
+  retention: z.number(),
+  /** How many days ahead the counts cover, today included. */
+  days: z.number().int(),
+  /** The saved answers the FSRS side rests on. */
+  history: z.object({
+    reviews: z.number().int(),
+    firstDay: isoDateSchema.nullable(),
+    lastDay: isoDateSchema.nullable(),
+    leftOut: z.object({ undone: z.number().int(), practice: z.number().int(), otherWords: z.number().int() }),
+  }),
+  words: z.object({
+    /** Live words the mastery level has not retired. */
+    active: z.number().int(),
+    /** Of those, words with at least one saved answer. */
+    replayed: z.number().int(),
+    /** Of those, words with none: they keep their mastery dates under both schedules. */
+    unseen: z.number().int(),
+    retired: z.number().int(),
+  }),
+  /** Where each active word next falls due. Anything already due counts on the first day. */
+  nextDue: z.object({
+    days: z.array(simulationDaySchema),
+    later: z.object({ mastery: z.number().int(), fsrs: z.number().int() }),
+  }),
+  /** A stated scenario, not a forecast: every review answered Remember on the day it falls due. */
+  ifAllRemembered: z
+    .object({
+      days: z.array(simulationDaySchema),
+      totals: z.object({ mastery: z.number().int(), fsrs: z.number().int() }),
+    })
+    .nullable(),
+  cards: z.array(
+    z.object({
+      id: z.string(),
+      word: z.string(),
+      mastery: z.number(),
+      /** Saved answers replayed for this word. */
+      reviews: z.number().int(),
+      masteryDue: isoDateSchema,
+      fsrsDue: isoDateSchema,
+      fsrsIntervalDays: z.number().int().nullable(),
+      differenceDays: z.number().int(),
+    }),
+  ),
 });
 
 // ---- Analytics ----
@@ -217,8 +344,202 @@ export const analyticsResponseSchema = z.object({
       durationMs: z.number(),
     }),
   ),
+  /**
+   * The same figures for each of the last twelve weeks, oldest first. A week
+   * here is seven days ending on today's weekday, so the last one ends today.
+   */
+  weeks: z.array(periodStatsSchema).default([]),
   firstReviewOn: isoDateSchema.nullable(),
   windowDays: z.number().int(),
+  /**
+   * How answers went at each level of confidence given beforehand, over the
+   * thirty days ending today. Only answers that carried a rating are counted.
+   */
+  calibration: z
+    .object({
+      /** False where the store does not keep confidence ratings. */
+      available: z.boolean(),
+      levels: z.array(
+        z.object({
+          confidence: confidenceSchema,
+          reviews: z.number().int(),
+          remembered: z.number().int(),
+          /** Remembered ÷ answers at this level; `null` on too few to say. */
+          accuracy: z.number().nullable(),
+        }),
+      ),
+    })
+    .default({ available: false, levels: [] }),
+  /**
+   * Practice in the other study modes over the thirty days ending today.
+   * Kept apart from everything above, which counts scheduled reviews only,
+   * and one row per mode: the modes test different skills.
+   */
+  practice: z
+    .object({
+      /** False where the store does not record practice. */
+      available: z.boolean(),
+      modes: z.array(
+        z.object({
+          mode: z.string(),
+          answers: z.number().int(),
+          correct: z.number().int(),
+          /** Correct ÷ answers in this mode; `null` on too few to say. */
+          accuracy: z.number().nullable(),
+        }),
+      ),
+      today: z.object({ answers: z.number().int(), correct: z.number().int() }),
+    })
+    .default({ available: false, modes: [], today: { answers: 0, correct: 0 } }),
+});
+
+// ---- Collections, further examples, relationships ----
+
+export const collectionSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  /** Live words in the collection. */
+  wordIds: z.array(z.string()),
+});
+
+export const extraExampleSchema = z.object({
+  id: z.string(),
+  vocabularyId: z.string(),
+  sentence: z.string(),
+  source: z.string().nullable(),
+  preferred: z.boolean(),
+});
+
+export const relationSchema = z.object({
+  id: z.string(),
+  kind: z.enum(RELATION_KINDS),
+  /** The two related words. Their order carries no meaning. */
+  a: z.string(),
+  b: z.string(),
+});
+
+/** Everything the account has organised, in one read. Words in the trash are left out of every list. */
+export const libraryResponseSchema = z.object({
+  /** False where the store cannot keep any of this yet. */
+  available: z.boolean(),
+  collections: z.array(collectionSchema),
+  examples: z.array(extraExampleSchema),
+  relations: z.array(relationSchema),
+});
+
+export const collectionNameRequestSchema = z.strictObject({ name: z.string().max(200) });
+export const membershipRequestSchema = z.strictObject({ member: z.boolean() });
+
+export const createExampleRequestSchema = z.strictObject({
+  sentence: z.string().max(LIBRARY_LIMITS.example + 200),
+  source: z.string().max(LIBRARY_LIMITS.source + 100).nullable().optional(),
+  preferred: z.boolean().optional(),
+});
+
+export const updateExampleRequestSchema = z
+  .strictObject({
+    sentence: z.string().max(LIBRARY_LIMITS.example + 200).optional(),
+    source: z.string().max(LIBRARY_LIMITS.source + 100).nullable().optional(),
+    preferred: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'Nothing to change');
+
+export const createRelationRequestSchema = z.strictObject({
+  fromId: pageIdSchema,
+  toId: pageIdSchema,
+  kind: z.enum(RELATION_KINDS),
+});
+
+export const deletedResponseSchema = z.object({ id: z.string(), deleted: z.literal(true) });
+
+// ---- Practice ----
+
+export const studyModeSchema = z.enum(STUDY_MODES);
+
+export const practiceAnswerSchema = z.discriminatedUnion('kind', [
+  /** Recall: the reviewer says whether they had it. */
+  z.strictObject({ kind: z.literal('self'), correct: z.boolean() }),
+  /** Recognition: the word whose meaning was chosen. */
+  z.strictObject({ kind: z.literal('choice'), selectedId: pageIdSchema }),
+  /** Typing and cloze. */
+  z.strictObject({ kind: z.literal('typed'), text: z.string().max(500) }),
+]);
+
+/**
+ * One practice answer. The server judges it from its own copy of the word;
+ * nothing here can change a word's mastery or review date.
+ */
+export const practiceRequestSchema = z.strictObject({
+  pageId: pageIdSchema,
+  mode: studyModeSchema,
+  answer: practiceAnswerSchema,
+  /** Generated once per answer and repeated on a retry, so one answer is recorded once. */
+  requestId: z.uuid(),
+  sessionId: z.uuid().optional(),
+  durationMs: z.number().int().min(0).max(86_400_000).optional(),
+  confidence: confidenceSchema.optional(),
+});
+
+export const practiceResponseSchema = z.object({
+  /** `dry_run`: judged, but saving is switched off so nothing was recorded. */
+  outcome: z.enum(['recorded', 'already_recorded', 'dry_run']),
+  correct: z.boolean(),
+  /** For a typed answer, how it matched. */
+  typed: z.enum(['exact', 'variant', 'incorrect']).nullable(),
+  /** The right answer, as the server has it. */
+  expected: z.string(),
+});
+
+// ---- Daily goal ----
+
+const goalPartSchema = (max: number) => z.number().int().min(1).max(max).nullable();
+
+/** A daily target. Either part may be empty; both set means both are wanted. */
+export const dailyGoalSchema = z.strictObject({
+  reviews: goalPartSchema(1000),
+  minutes: goalPartSchema(600),
+});
+
+const goalProgressSchema = z.object({
+  target: z.number(),
+  done: z.number(),
+  remaining: z.number(),
+  met: z.boolean(),
+});
+
+/**
+ * Today's reviewing set against the goal. A goal never changes what is due:
+ * `beyondGoal` cards are still in the queue.
+ */
+/** The longest range the calendar may ask about at once: a month's grid with room to spare. */
+export const REVIEW_DAYS_MAX = 100;
+
+/** Saved reviews per day in a range of the reviewer's days. Days without any are simply absent. */
+export const reviewDaysResponseSchema = z.object({
+  /** False where the store keeps no review history to count. */
+  available: z.boolean(),
+  from: isoDateSchema,
+  to: isoDateSchema,
+  days: z.array(z.object({ date: isoDateSchema, reviews: z.number().int(), remembered: z.number().int() })),
+});
+
+export const dayPlanSchema = z.object({
+  /** False where the store cannot keep a goal. */
+  available: z.boolean(),
+  today: isoDateSchema,
+  timeZone: z.string(),
+  goal: dailyGoalSchema,
+  done: z.object({ reviews: z.number().int(), durationMs: z.number() }),
+  due: z.object({ total: z.number().int(), overdue: z.number().int() }),
+  /** The reviewer's own mean time per card; `null` on too few timed answers. */
+  averageMs: z.number().nullable(),
+  reviews: goalProgressSchema.nullable(),
+  /** In milliseconds. */
+  time: goalProgressSchema.nullable(),
+  met: z.boolean().nullable(),
+  estimatedDueMs: z.number().nullable(),
+  cardsToGoal: z.number().int().nullable(),
+  beyondGoal: z.number().int().nullable(),
 });
 
 export const weakWordSchema = z.object({
@@ -267,7 +588,13 @@ export const vocabularyEntrySchema = z.object({
   definition: z.string().nullable(),
   example: z.string().nullable(),
   mastery: z.number().nullable(),
+  /** The day the word is next due under the schedule in charge. */
   reviewDate: isoDateSchema.nullable(),
+  /**
+   * Sent as `fsrs` when FSRS, not the mastery schedule, set the date above.
+   * Such a date is FSRS's own and cannot be edited by hand.
+   */
+  scheduledBy: schedulerIdSchema.optional(),
   dateAdded: isoDateSchema.nullable(),
   reviewStatus: reviewStatusSchema,
   /** Whether the word is in the review queue right now, by the same rule the Review tab uses. */
@@ -323,6 +650,44 @@ export const createEntryRequestSchema = z.strictObject({
   allowDuplicate: z.boolean().optional(),
   /** Identifies one submission, so a repeated request cannot create a second record. */
   requestId: z.uuid(),
+});
+
+/** The most words one import request may carry. A longer list is sent as several requests. */
+export const IMPORT_BATCH_MAX = 50;
+
+/**
+ * One word to import: content only. A mastery or a review date is not
+ * accepted here, so an imported word always starts as a newly added one does.
+ */
+export const importItemSchema = z.strictObject({
+  /** Chosen once per row and repeated on a retry, so a row is never imported twice. */
+  requestId: z.uuid(),
+  word: wordSchema,
+  meaning: textSchema.optional(),
+  definition: textSchema.optional(),
+  example: textSchema.optional(),
+  dateAdded: isoDateSchema.optional(),
+  /** Set for a row the owner chose to import although the word already exists. */
+  allowDuplicate: z.boolean().optional(),
+});
+
+/** Rows are checked one by one on the server, so a bad one does not sink the rest. */
+export const importRequestSchema = z.strictObject({
+  items: z.array(z.unknown()).min(1).max(IMPORT_BATCH_MAX),
+});
+
+export const importResponseSchema = z.object({
+  /** One result per row that was reached, in the order sent. */
+  results: z.array(
+    z.object({
+      /** `already_imported`: this very row was imported by an earlier request. */
+      outcome: z.enum(['imported', 'already_imported', 'duplicate', 'invalid']),
+      entry: vocabularyEntrySchema.nullable(),
+      message: z.string().nullable(),
+    }),
+  ),
+  /** Set when the store failed part-way: rows from `index` on were not attempted. */
+  stopped: z.object({ index: z.number().int(), message: z.string() }).nullable(),
 });
 
 export const updateEntryRequestSchema = z
@@ -411,7 +776,14 @@ export type ReviewUndoRequest = z.infer<typeof reviewUndoRequestSchema>;
 export type ReviewUndoResponse = z.infer<typeof reviewUndoResponseSchema>;
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 export type SchedulerReport = z.infer<typeof schedulerReportSchema>;
+export type SimulationResponse = z.infer<typeof simulationResponseSchema>;
 export type AnalyticsResponse = z.infer<typeof analyticsResponseSchema>;
+export type DayPlanResponse = z.infer<typeof dayPlanSchema>;
+export type ReviewDaysResponse = z.infer<typeof reviewDaysResponseSchema>;
+export type LibraryResponse = z.infer<typeof libraryResponseSchema>;
+export type ImportResponse = z.infer<typeof importResponseSchema>;
+export type PracticeRequest = z.infer<typeof practiceRequestSchema>;
+export type PracticeResponse = z.infer<typeof practiceResponseSchema>;
 export type WeakWordsResponse = z.infer<typeof weakWordsResponseSchema>;
 export type WeakWordView = z.infer<typeof weakWordSchema>;
 export type ApiErrorBody = z.infer<typeof apiErrorSchema>;

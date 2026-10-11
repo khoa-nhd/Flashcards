@@ -15,8 +15,11 @@ import type { SettingsStore } from './lib/settings.js';
 import { AddPage } from './pages/AddPage.js';
 import { BankPage } from './pages/BankPage.js';
 import { CalendarPage } from './pages/CalendarPage.js';
+import { CollectionsPage } from './pages/CollectionsPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
+import { ImportPage } from './pages/ImportPage.js';
 import { InsightsPage } from './pages/InsightsPage.js';
+import { PracticePage } from './pages/PracticePage.js';
 import { ReviewPage } from './pages/ReviewPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
 import { WeakWordsPage } from './pages/WeakWordsPage.js';
@@ -25,8 +28,11 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   dashboard: { title: 'Dashboard', render: () => <DashboardPage /> },
   review: { title: 'Review', render: () => <ReviewPage /> },
   add: { title: 'Add vocabulary', render: () => <AddPage /> },
+  import: { title: 'Import', render: () => <ImportPage /> },
   bank: { title: 'Vocabulary bank', render: () => <BankPage /> },
   calendar: { title: 'Calendar', render: () => <CalendarPage /> },
+  practice: { title: 'Practice', render: () => <PracticePage /> },
+  collections: { title: 'Collections', render: () => <CollectionsPage /> },
   weak: { title: 'Weak words', render: () => <WeakWordsPage /> },
   insights: { title: 'Insights', render: () => <InsightsPage /> },
   settings: { title: 'Settings', render: () => <SettingsPage /> },

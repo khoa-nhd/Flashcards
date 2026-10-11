@@ -2,7 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { QueueResponse, ReviewActionResponse, ReviewCard } from '../../shared/api.js';
+import { NO_CAPABILITIES, type QueueResponse, type ReviewActionResponse, type ReviewCard } from '../../shared/api.js';
 import { App } from '../../src/App.js';
 import { Flashcard } from '../../src/components/Flashcard.js';
 import { ApiError } from '../../src/lib/api-client.js';
@@ -642,7 +642,7 @@ describe('the session as a whole', () => {
 });
 
 describe('undoing the last answer', () => {
-  const withUndo = { capabilities: { sessions: true, undo: true, fsrs: false, analytics: false } };
+  const withUndo = { capabilities: { ...NO_CAPABILITIES, sessions: true, undo: true } };
 
   async function answerFirst(cards: ReviewCard[] = [card(1), card(2), card(3)]) {
     const context = await renderApp(cards, withUndo);
@@ -724,7 +724,7 @@ describe('undoing the last answer', () => {
 });
 
 describe('the session summary', () => {
-  const withSessions = { capabilities: { sessions: true, undo: true, fsrs: false, analytics: false } };
+  const withSessions = { capabilities: { ...NO_CAPABILITIES, sessions: true, undo: true } };
   const saved = {
     sessionId: 'ignored',
     reviewed: 2,

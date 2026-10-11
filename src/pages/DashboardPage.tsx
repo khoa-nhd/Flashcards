@@ -5,6 +5,7 @@ import { additionsByPeriod, computeSummary, masteryDistribution } from '../../sh
 import { useApp, useSettings, useVocabulary } from '../app-context.js';
 import { BarChart } from '../components/BarChart.js';
 import { MasteryPill, StatusBadge, formatDate } from '../components/badges.js';
+import { GoalProgress, hasGoal, useDayPlan } from '../components/GoalStatus.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -34,6 +35,7 @@ export function DashboardPage() {
   const { vocabulary } = useApp();
   const settings = useSettings();
   const activity = useReviewActivity();
+  const plan = useDayPlan();
   const { entries, meta } = state;
   const today = meta?.today ?? null;
 
@@ -58,6 +60,7 @@ export function DashboardPage() {
             onClick={() => {
               void vocabulary.reload();
               activity.reload();
+              plan.reload();
             }}
             disabled={state.refreshing || state.status === 'loading'}
           >
@@ -94,6 +97,21 @@ export function DashboardPage() {
                 </Link>
               </div>
             </section>
+
+            {plan.status === 'ready' && plan.data.available && (
+              <section className={`${CARD} p-5`} aria-label="Daily goal">
+                {hasGoal(plan.data) ? (
+                  <GoalProgress plan={plan.data} />
+                ) : (
+                  <p className="text-sm text-muted">
+                    No daily goal is set.{' '}
+                    <Link to={ROUTES.settings} className="font-medium text-accent hover:underline">
+                      Set one in Settings
+                    </Link>
+                  </p>
+                )}
+              </section>
+            )}
 
             <ReviewActivityCard activity={activity} />
 

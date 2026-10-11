@@ -1,11 +1,13 @@
 import { useEffect, useRef, type ReactNode } from 'react';
 import { Spinner } from './Spinner.js';
-import { BUTTON_DANGER, BUTTON_SECONDARY } from './ui.js';
+import { BUTTON_DANGER, BUTTON_PRIMARY, BUTTON_SECONDARY } from './ui.js';
 
 export interface ConfirmDialogProps {
   title: string;
   children: ReactNode;
   confirmLabel: string;
+  /** How the confirming button looks. Red unless the action is one that can simply be taken back. */
+  tone?: 'danger' | 'primary';
   busy?: boolean;
   /** Shown inside the dialog when the confirmed action failed. */
   error?: string | null;
@@ -14,10 +16,19 @@ export interface ConfirmDialogProps {
 }
 
 /**
- * A modal confirmation for a destructive action. Focus starts on Cancel, so
+ * A modal confirmation for an action worth a second look. Focus starts on Cancel, so
  * pressing Enter by reflex does not confirm; Escape and the backdrop cancel.
  */
-export function ConfirmDialog({ title, children, confirmLabel, busy = false, error, onConfirm, onCancel }: ConfirmDialogProps) {
+export function ConfirmDialog({
+  title,
+  children,
+  confirmLabel,
+  tone = 'danger',
+  busy = false,
+  error,
+  onConfirm,
+  onCancel,
+}: ConfirmDialogProps) {
   const dialog = useRef<HTMLDialogElement>(null);
 
   useEffect(() => {
@@ -58,7 +69,12 @@ export function ConfirmDialog({ title, children, confirmLabel, busy = false, err
           <button type="button" autoFocus className={BUTTON_SECONDARY} onClick={onCancel} disabled={busy}>
             Cancel
           </button>
-          <button type="button" className={BUTTON_DANGER} onClick={onConfirm} disabled={busy}>
+          <button
+            type="button"
+            className={tone === 'danger' ? BUTTON_DANGER : BUTTON_PRIMARY}
+            onClick={onConfirm}
+            disabled={busy}
+          >
             {busy && <Spinner />}
             {confirmLabel}
           </button>

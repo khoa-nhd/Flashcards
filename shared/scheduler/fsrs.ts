@@ -121,3 +121,26 @@ export function fsrsReview(
 export function fsrsDueDay(state: FsrsState, timeZone: string): IsoDate {
   return calendarDateInTimeZone(new Date(state.due), timeZone);
 }
+
+/** Below this many answers FSRS has too little to go on for its estimate to be worth a percentage. */
+export const MIN_REVIEWS_FOR_ESTIMATE = 2;
+
+/**
+ * FSRS's own estimate of the chance a word would be recalled at `now`, from
+ * 0 to 1: the library's `get_retrievability`, nothing computed here. It is a
+ * model's estimate from the answers given so far, not a measurement.
+ *
+ * `null` where there is nothing sound to estimate from: no FSRS state, a card
+ * the library still counts as new, or fewer answers than
+ * `MIN_REVIEWS_FOR_ESTIMATE`.
+ */
+export function fsrsRetrievability(
+  state: FsrsState | null,
+  now: Date,
+  settings: FsrsSettings = DEFAULT_FSRS_SETTINGS,
+): number | null {
+  if (state === null || state.state === 0 || state.lastReview === null) return null;
+  if (state.reps < MIN_REVIEWS_FOR_ESTIMATE) return null;
+  const value = schedulerFor(settings).get_retrievability(toCard(state), now, false);
+  return Number.isFinite(value) && value >= 0 && value <= 1 ? value : null;
+}

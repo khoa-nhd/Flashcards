@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import type { SessionSummary } from '../../shared/api.js';
+import type { DayPlanResponse, SessionSummary } from '../../shared/api.js';
 import { useApp } from '../app-context.js';
+import { formatDuration } from '../lib/format.js';
+import { FOCUS_TEXT, type FocusText } from '../lib/review-focus.js';
 import { ROUTES } from '../lib/router.js';
 import { canUndo, type SessionState } from '../lib/session-machine.js';
+import { GoalProgress, hasGoal } from './GoalStatus.js';
 import { Link } from './Link.js';
 import { SkippedNotice } from './SkippedNotice.js';
 
@@ -12,13 +15,6 @@ export interface CompletionScreenProps {
   sessionId: string;
   onReload: () => void;
   onUndo: () => void;
-}
-
-/** "1 min 05 s", or "42 s" under a minute. */
-export function formatDuration(milliseconds: number): string {
-  const seconds = Math.round(milliseconds / 1000);
-  const minutes = Math.floor(seconds / 60);
-  return minutes === 0 ? `${seconds} s` : `${minutes} min ${String(seconds % 60).padStart(2, '0')} s`;
 }
 
 type Loaded = { for: string; summary: SessionSummary | null };
@@ -64,11 +60,37 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo }: Complet
     emptyDetail = 'Add your first word to start reviewing.';
   }
   // A narrowed queue being empty says nothing about the rest of the vocabulary.
-  const weakOnly = meta?.focus === 'weak';
-  if (weakOnly) {
-    emptyTitle = 'No weak words are due';
-    emptyDetail = 'None of the words that need attention is due for review right now.';
+  const focus: Pick<FocusText, 'emptyTitle' | 'emptyDetail' | 'done'> | null =
+    meta?.collection != null
+      ? {
+          emptyTitle: 'Nothing in this collection is due',
+          emptyDetail: `None of the words in “${meta.collection.name}” is due for review right now.`,
+          done: `They were the due words in “${meta.collection.name}”.`,
+        }
+      : meta?.focus == null
+        ? null
+        : FOCUS_TEXT[meta.focus];
+  if (focus !== null) {
+    emptyTitle = focus.emptyTitle;
+    emptyDetail = focus.emptyDetail;
   }
+
+  // Today's figures against the daily goal, re-read whenever another answer has been saved.
+  const goalWanted = meta?.capabilities.goals === true && !preview && total > 0 ? `${sessionId}:${answered}` : null;
+  const [plan, setPlan] = useState<{ for: string; plan: DayPlanResponse } | null>(null);
+  useEffect(() => {
+    if (goalWanted === null) return;
+    let current = true;
+    api
+      .fetchPlan()
+      .then((next) => current && setPlan({ for: goalWanted, plan: next }))
+      // The goal is a nicety on this screen; without it the summary still stands.
+      .catch(() => undefined);
+    return () => {
+      current = false;
+    };
+  }, [api, goalWanted]);
+  const goal = plan !== null && plan.for === goalWanted ? plan.plan : null;
 
   const lastWord = state.lastSaved === null ? null : (state.cards[state.lastSaved.index]?.word ?? null);
 
@@ -91,7 +113,7 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo }: Complet
           {total === 0
             ? emptyDetail
             : `You went through ${total} ${total === 1 ? 'card' : 'cards'} in this session.`}
-          {total > 0 && weakOnly && ' They were your weakest words among those due.'}
+          {total > 0 && focus !== null && ` ${focus.done}`}
           {total > 0 && preview && ' This was a preview, so no answers were saved.'}
         </p>
       </div>
@@ -145,6 +167,12 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo }: Complet
       )}
 
       {summary !== null && <p className="-mt-3 text-xs text-muted">These are the answers that were saved.</p>}
+
+      {goal !== null && hasGoal(goal) && (
+        <div className="w-full rounded-2xl border border-line px-4 py-3 text-left">
+          <GoalProgress plan={goal} />
+        </div>
+      )}
       {summaryFailed && (
         <p className="-mt-3 text-xs text-muted">
           Counted on this device from confirmed saves; the saved summary could not be loaded.
@@ -176,7 +204,7 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo }: Complet
             {state.undoing ? 'Undoing…' : `Undo the last answer${lastWord === null ? '' : ` (${lastWord})`}`}
           </button>
         )}
-        {weakOnly && (
+        {focus !== null && (
           <Link
             to={ROUTES.review}
             className="flex h-11 items-center justify-center rounded-2xl border border-line px-6 text-sm font-semibold"

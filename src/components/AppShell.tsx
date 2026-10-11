@@ -20,6 +20,8 @@ const PRIMARY: NavItem[] = [
 ];
 
 const SECONDARY: NavItem[] = [
+  { route: 'practice', label: 'Practice', short: 'Practice', icon: 'practice' },
+  { route: 'collections', label: 'Collections', short: 'Collections', icon: 'collections' },
   { route: 'weak', label: 'Weak words', short: 'Weak', icon: 'weak' },
   { route: 'insights', label: 'Insights', short: 'Insights', icon: 'insights' },
   { route: 'settings', label: 'Settings', short: 'Settings', icon: 'settings' },
@@ -45,10 +47,13 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
     main.current?.scrollTo?.({ top: 0 });
   }, [active]);
 
-  const title = [...PRIMARY, ...SECONDARY].find((item) => item.route === active)?.label ?? 'Vocabulary';
+  // Importing is part of adding vocabulary, and is reached from there.
+  const section: RouteKey | null = active === 'import' ? 'add' : active;
+  const title =
+    active === 'import' ? 'Import' : ([...PRIMARY, ...SECONDARY].find((item) => item.route === active)?.label ?? 'Vocabulary');
 
   const sideLink = (item: NavItem) => {
-    const current = item.route === active;
+    const current = item.route === section;
     return (
       <Link
         key={item.route}
@@ -136,7 +141,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           className="grid grid-cols-5 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
         >
           {PRIMARY.map((item) => {
-            const current = item.route === active;
+            const current = item.route === section;
             return (
               <Link
                 key={item.route}

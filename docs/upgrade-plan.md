@@ -3,35 +3,86 @@
 Written 2026-10-10 against commit `fa2ae97`. Each phase ends with working
 code, passing tests and an update to this file.
 
-## Status (2026-10-10)
+## Status (2026-10-11)
 
 | Phase | State |
 | --- | --- |
 | 1 Review history, Undo, session summary | **Built.** Database version 2. |
-| 2 FSRS | **Stage 1 (calculated alongside) built.** Database version 3. Stage 2 (switching to it) **not built**. |
-| 3 Analytics and Weak Words | **Built.** Database version 4. |
-| 4 to 8 | Not started. |
-| Offline mode | Not built; no design note yet. |
+| 2 FSRS | **Built.** Calculated beside the mastery schedule (version 3), and selectable per account as the schedule in charge (version 8). The mastery schedule stays the default. |
+| 3 Analytics and Weak Words | **Built.** Database version 4. Week-by-week accuracy and time charts on Insights; reviews per day on the Calendar. |
+| 4 Daily goals, filters, shortcuts, confidence | **Built.** Database version 5. |
+| 5 Study modes | **Built as practice**: recognition, recall, typing, fill in the blank, and listening (experimental). Database version 6. |
+| 6 Collections, examples, relationships | **Built.** Database version 7. |
+| 7 Import, export, backup | **Built**: preview-based import of CSV, text, Excel (.xlsx) and the app's own exports; full JSON export; backup and recovery notes. No database change. |
+| 8 Retention estimate and simulation | **Built**: FSRS's own recall estimate per word, and a what-if comparison replayed from saved answers. No database change. |
+| 9 Final verification | **Done for everything that can be checked without the live project** (below). The live check is the owner's to run. |
+| Offline mode | **Not built.** Design note: [offline-mode-design.md](offline-mode-design.md). |
 
-Checked by the automated tests (real PostgreSQL in-process, and the pages in a
-simulated browser), by lint, type-check and build, and by hand in a browser
-with the sample data. **Not checked against the live Supabase project**: the
-three new SQL files have to be run there first, and only the owner can sign
-in. `npm run supabase:verify` covers versions 2 to 4 once they are in place
-and reports anything the database is not ready for as SKIP.
+### How it was checked
 
-What the phases left out, deliberately:
+| Check | Result on 2026-10-11 |
+| --- | --- |
+| `npm test` | 1512 tests in 58 files, all passing |
+| `npm run typecheck`, `npm run lint` | clean |
+| `npm run build` | succeeds (one warning: the main script is over 500 kB) |
+| `npm audit --omit=dev` | no known vulnerabilities |
+| By hand, sample data, one desktop browser | choosing FSRS and going back, the what-if comparison, the recall column, reviews on the Calendar, the weekly charts, listening practice |
 
-- **Phase 2.** No switch to make FSRS decide what is due, and so no single
-  `Scheduler` interface over both rule sets, no choice of two or four answer
-  buttons, and no replay of saved history into FSRS for words reviewed before
-  version 3. These wait for the owner's answers in section 4. Until then FSRS
-  changes nothing a reviewer can see outside Settings → Scheduling.
-- **Phase 3.** Insights has reviews per day and a table of figures by period,
-  not separate trend charts for accuracy and time, and no review heatmap (the
-  Calendar still shows additions only).
-- **Focused review** only narrows the due queue. Practising a weak word that is
-  *not* due needs the "practice" decision in section 4 and is not built.
+The tests run the real SQL files on an in-process PostgreSQL, the HTTP API on
+top of it with two accounts, and the pages in a simulated browser.
+
+**Not checked: anything against the live Supabase project.** Development has
+no way to sign in to it. Database versions 5 to 8 exist only as SQL files
+until they are applied there, and the app keeps every feature that needs them
+switched off, and says so, until they are. `npm run supabase:verify`, run by
+the owner, checks versions 2 to 8 against the live project with two throwaway
+accounts and reports anything the database is not ready for as SKIP. Listening
+was checked for what the app asks the browser to say; nobody has judged what
+it sounds like, or tried it on a phone.
+
+### What was built differently from the plan below, and what was left out
+
+The plan in sections 3 and 4 is kept as it was written. Where the result
+differs, this list is what is true.
+
+- **Which modes move the schedule: none but the flashcard.** The plan had
+  recall, typing and cloze moving it. They are practice instead: recorded and
+  reported per mode, never changing mastery, a review date or FSRS. Whether a
+  typed answer should count as a review is a rule nobody has stated, so it was
+  not guessed. Practising a word that is not due (weak or recently added
+  words) is covered by the same Practice page.
+- **FSRS in charge keeps as much as possible the same.** Two answer buttons
+  (Good and Again); no same-day steps; a word FSRS has not seen stays on its
+  mastery date until first answered, with no state made up for it; mastery
+  still counts and still retires a word at 10. The plan's suggestion that
+  "mastered" might become "interval of N days or more" was not taken: it needs
+  a number nobody has chosen. FSRS runs with the library's default parameters;
+  nothing is fitted to the reviewer's history.
+- **No single `Scheduler` interface over both rule sets.** Both schedules are
+  written by every answer and one small function decides which date is read
+  (`shared/scheduler/active.ts`). That is what makes the choice reversible
+  without converting anything.
+- **Saved history is not replayed into the stored FSRS state.** Words reviewed
+  before version 3 enter FSRS at their next answer. The what-if comparison
+  does replay saved answers, but only to show the result; it stores nothing.
+- **The simulation projects spacing, not outcomes.** It replays real answers
+  and shows next due dates. Its one forward-looking table is a stated scenario
+  ("if you remembered every word"). There is no forecast of how many reviews
+  will actually be needed and no claim about retention under either schedule.
+- **The recall estimate is shown in Settings → Scheduling only**, for words
+  answered at least twice. It is not on the dashboard or the bank.
+- **Cloze uses the word's own example.** There is no editing of the blank, and
+  further examples (Phase 6) are for reference only.
+- **Listening uses the browser's speech synthesis.** There is no pronunciation
+  audio and no external service. It is marked experimental.
+- **Excel import reads `.xlsx`, first sheet only.** Not `.xls`.
+- **The daily goal is a yardstick.** There is no planner that orders or limits
+  cards by it. The queue is always the full due queue, narrowed only on
+  request.
+- **Trends are two weekly charts**, not a set per day, week and month. Weak
+  words have no trend over time.
+- **No rating-button choice in settings, no "suspended" state, no tags or
+  pronunciation fields.**
 
 ## 1. Audit: where the app stands
 
@@ -39,10 +90,13 @@ What the phases left out, deliberately:
 
 | Check | Result |
 | --- | --- |
-| `npx vitest run` | 699 tests in 29 files, all passing |
+| `npx vitest run` | 1334 tests in 49 files, all passing |
 | `npx tsc --noEmit`, `npx eslint .` | clean |
 | `npm run build` | succeeds |
 | Notion at runtime | none; `tests/no-notion.test.ts` keeps it that way |
+
+The table above is the starting point, kept for comparison. Where things
+stand now is under "Status" at the top.
 
 ### Stack
 
@@ -122,8 +176,10 @@ analytic and simulation in this plan must work with a thin history and say so.
   extended in each phase.
 - **No fabricated data:** no invented reviews, FSRS state, relationships or
   example sentences.
-- **No new dependency without a reason.** The only one planned is the FSRS
-  library.
+- **No new dependency without a reason.** Two were added, each pinned to an
+  exact version: `ts-fsrs` (the FSRS calculation, server only) and
+  `read-excel-file` (reading `.xlsx` on the device, loaded only when a
+  spreadsheet is chosen).
 
 ## 3. Phases
 
@@ -211,20 +267,19 @@ card.
 
 | | |
 | --- | --- |
-| **Import** | CSV and pasted text: preview, column mapping, validation, duplicate review, confirmation, then one controlled batch with a report of imported, skipped, duplicate and invalid rows. Nothing is imported before confirmation. Near-duplicates are shown, never merged automatically. |
+| **Import** | CSV, .xlsx, and pasted text: preview, column mapping, validation, duplicate review, confirmation, then one controlled batch with a report of imported, skipped, duplicate and invalid rows. Nothing is imported before confirmation. Near-duplicates are shown, never merged automatically. |
 | **Export** | A documented, versioned JSON of the whole account (words, state, history, collections, relationships, settings) and CSVs. Round-trip tested. |
 | **Backup** | A separate written procedure for the database owner; the app says plainly that a user export is not a full database backup. |
-| **Excel** | Deferred: it needs an extra library. |
 
 ### Phase 8 — Retention estimate and simulation
 
-- The estimate uses the library's own `get_retrievability`, shown only for
-  cards with valid FSRS state, labelled as a model estimate.
-- The simulator replays **real** saved reviews under both schedulers and
-  projects workload. It never writes to live card state and labels every
-  assumption.
-- With history starting 2026-10-10 the data will be thin at first. The tool
-  will say how much more it needs rather than show confident numbers.
+- Show FSRS retrievability only for cards with valid FSRS state, labelled as a
+  model estimate, with a minimum number of reviews before any figure appears.
+- Simulation: replay real saved reviews under both schedulers and project the
+  workload. Read-only, on the server, clearly marked as a projection and with
+  its assumptions listed. Never writes to live card state.
+- With a history this thin the projections will be rough; the tool is built
+  and says so.
 
 ### Phase 9 — Final verification and report
 
@@ -233,13 +288,19 @@ script, deployment notes, and the final report.
 
 ### Deferred: offline mode
 
-Not built. A short design note will cover local storage, an outbox,
-idempotent sync, conflict rules and an "unsynced" indicator. The request ids
-and conflict checks already in place are the foundation it would need.
+Not built. The app has no offline behaviour to preserve. What it would take is
+written up in [offline-mode-design.md](offline-mode-design.md): local storage
+per account, an outbox, the server change that lets an answer carry the moment
+it was given, idempotent synchronisation on the request ids already in place,
+the conflict rule (unchanged: a stale answer is not applied), sign-in and
+session handling, and how unsaved answers are shown.
 
-## 4. Decisions needed from the owner
+## 4. Decisions
 
-None is needed to start Phase 1. The recommended choice is listed first.
+These were open when the plan was written. None was answered before the work
+was done, so each was settled the way that changes least and invents nothing.
+The right-hand column is what was written at the time; **what was actually
+done is in "Status" at the top**, and every one of these can be revisited.
 
 | Before | Question | Recommendation |
 | --- | --- | --- |

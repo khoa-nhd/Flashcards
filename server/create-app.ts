@@ -1,14 +1,27 @@
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
+import { z } from 'zod';
 import type { ZodType } from 'zod';
 import {
+  REVIEW_FOCUSES,
+  collectionNameRequestSchema,
   createEntryRequestSchema,
+  createExampleRequestSchema,
+  createRelationRequestSchema,
+  dailyGoalSchema,
+  importRequestSchema,
+  isoDateSchema,
+  membershipRequestSchema,
   normalizeId,
   pageIdSchema,
+  practiceRequestSchema,
   reviewActionRequestSchema,
+  reviewFocusSchema,
   reviewUndoRequestSchema,
+  schedulerChoiceRequestSchema,
   updateEntryRequestSchema,
+  updateExampleRequestSchema,
   updateSettingsRequestSchema,
   type AccountSettings,
   type ApiErrorBody,
@@ -18,6 +31,8 @@ import { bearerToken, type AccountGateway, type AccountSession } from './account
 import type { AnalyticsService } from './analytics-service.js';
 import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
+import type { ExportService } from './export-service.js';
+import type { LibraryService } from './library-service.js';
 import type { ReviewService } from './review-service.js';
 import { DatabaseError } from './supabase/supabase-database.js';
 import type { VocabularyService } from './vocabulary-service.js';
@@ -32,6 +47,10 @@ export interface AppDependencies {
   accounts?: AccountGateway | null;
   /** Review activity and weak words; `null` under the same conditions as `service`. */
   analytics?: AnalyticsService | null;
+  /** Collections, further examples and relationships; `null` under the same conditions as `service`. */
+  library?: LibraryService | null;
+  /** The account's own export; `null` under the same conditions as `service`. */
+  exporter?: ExportService | null;
 }
 
 /** What the current request may use. With accounts, all of it belongs to one signed-in user. */
@@ -39,6 +58,8 @@ interface Scope {
   review: ReviewService | null;
   vocabulary: VocabularyService | null;
   analytics: AnalyticsService | null;
+  library: LibraryService | null;
+  exporter: ExportService | null;
   session: AccountSession | null;
 }
 
@@ -92,6 +113,8 @@ export function createApp({
   vocabulary = null,
   accounts = null,
   analytics = null,
+  library = null,
+  exporter = null,
 }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
@@ -192,10 +215,17 @@ export function createApp({
       if (token === null) throw new HttpError(401, 'unauthorized', 'Sign in to continue.');
       const session = await accounts.open(token, { timeZone: c.req.header('x-time-zone')?.trim() || null });
       if (session === null) throw new HttpError(401, 'unauthorized', 'Your session has expired. Sign in again.');
-      c.set('scope', { review: session.review, vocabulary: session.vocabulary, analytics: session.analytics, session });
+      c.set('scope', {
+        review: session.review,
+        vocabulary: session.vocabulary,
+        analytics: session.analytics,
+        library: session.library,
+        exporter: session.exporter,
+        session,
+      });
       return next();
     }
-    c.set('scope', { review: service, vocabulary, analytics, session: null });
+    c.set('scope', { review: service, vocabulary, analytics, library, exporter, session: null });
     await next();
   });
 
@@ -205,22 +235,86 @@ export function createApp({
     return scoped;
   };
 
+  const requireLibrary = (c: Context<AppEnv>): LibraryService => {
+    const scoped = c.get('scope').library;
+    if (scoped === null) throw notConfigured();
+    return scoped;
+  };
+
+  const idParam = (c: Context, name: string, what: string): string => {
+    const parsed = pageIdSchema.safeParse(c.req.param(name));
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', `That is not a valid ${what} id.`);
+    return parsed.data;
+  };
+
   app.get('/api/review-queue', async (c) => {
-    const focus = c.req.query('focus');
-    if (focus === undefined) return c.json(await requireService(c).getQueue());
-    if (focus !== 'weak') throw new HttpError(400, 'invalid_request', 'Unknown focus. The only one is "weak".');
-    // Weakest first, and only those already due: a focused review never reviews a word early.
-    const { words } = await requireAnalytics(c).weakWords();
-    return c.json(await requireService(c).getQueue({ kind: 'weak', ids: words.map((word) => word.id) }));
+    const raw = c.req.query('focus');
+    const collectionId = c.req.query('collection');
+    if (collectionId !== undefined) {
+      if (raw !== undefined) throw new HttpError(400, 'invalid_request', 'Choose a focus or a collection, not both.');
+      if (!pageIdSchema.safeParse(collectionId).success) {
+        throw new HttpError(400, 'invalid_request', 'That is not a valid collection id.');
+      }
+      // The due words of the caller's own collection: narrowed like every other selection, never widened.
+      const collection = await requireLibrary(c).collection(collectionId);
+      return c.json(
+        await requireService(c).getQueue({
+          kind: 'collection',
+          ids: collection.wordIds,
+          collection: { id: collection.id, name: collection.name },
+        }),
+      );
+    }
+    if (raw === undefined) return c.json(await requireService(c).getQueue());
+    const parsed = reviewFocusSchema.safeParse(raw);
+    if (!parsed.success) {
+      throw new HttpError(400, 'invalid_request', `Unknown focus. Use one of: ${REVIEW_FOCUSES.join(', ')}.`);
+    }
+    // Every focus selects among the words already due: a focused review never reviews a word early.
+    const focus = parsed.data;
+    if (focus === 'weak') {
+      const { words } = await requireAnalytics(c).weakWords();
+      return c.json(await requireService(c).getQueue({ kind: 'weak', ids: words.map((word) => word.id) }));
+    }
+    if (focus === 'recent') {
+      return c.json(await requireService(c).getQueue({ kind: 'recent', ids: await requireAnalytics(c).recentlyAddedIds() }));
+    }
+    return c.json(await requireService(c).getQueue({ kind: focus }));
+  });
+
+  // Today's reviewing against the daily goal. The goal never changes what is due.
+  app.get('/api/plan', async (c) => c.json(await requireAnalytics(c).dayPlan()));
+
+  app.put('/api/goal', async (c) => {
+    const goal = await parseBody(c, dailyGoalSchema);
+    return c.json(await requireAnalytics(c).saveGoal(goal));
   });
 
   // Review activity and weak words, from saved answers. Reads only.
   app.get('/api/analytics', async (c) => c.json(await requireAnalytics(c).reviewAnalytics()));
   app.get('/api/weak-words', async (c) => c.json(await requireAnalytics(c).weakWords()));
 
+  // Saved reviews per day in a range of the reviewer's days, for the calendar. Reads only.
+  app.get('/api/review-days', async (c) => {
+    const range = z.object({ from: isoDateSchema, to: isoDateSchema }).safeParse({
+      from: c.req.query('from'),
+      to: c.req.query('to'),
+    });
+    if (!range.success) {
+      throw new HttpError(400, 'invalid_request', 'Give the range as from and to, each a YYYY-MM-DD date.');
+    }
+    return c.json(await requireAnalytics(c).reviewDays(range.data.from, range.data.to));
+  });
+
   app.post('/api/review-action', async (c) => {
     const request = await parseBody(c, reviewActionRequestSchema);
     return c.json(await requireService(c).submitAction(request));
+  });
+
+  // Practice in another study mode: judged and recorded, never moving a word's schedule.
+  app.post('/api/practice', async (c) => {
+    const request = await parseBody(c, practiceRequestSchema);
+    return c.json(await requireService(c).submitPractice(request));
   });
 
   app.post('/api/review-undo', async (c) => {
@@ -234,8 +328,70 @@ export function createApp({
     return c.json(await requireService(c).sessionSummary(normalizeId(parsed.data)));
   });
 
-  // The two schedules side by side. Reads only; never changes a due date.
+  // The two schedules side by side, and which is in charge. Reads only; never changes a due date.
   app.get('/api/scheduler', async (c) => c.json(await requireService(c).schedulerReport()));
+
+  // Puts one schedule in charge. Both are kept up to date by every answer, so nothing is converted.
+  app.put('/api/scheduler', async (c) => {
+    const { scheduler } = await parseBody(c, schedulerChoiceRequestSchema);
+    return c.json(await requireService(c).chooseScheduler(scheduler));
+  });
+
+  // A what-if comparison at a target retention, from saved answers. Reads only; stores nothing.
+  app.get('/api/simulation', async (c) => {
+    const raw = c.req.query('retention');
+    const retention = raw === undefined || raw === '' ? undefined : Number(raw);
+    if (retention !== undefined && !Number.isFinite(retention)) {
+      throw new HttpError(400, 'invalid_request', 'The target retention must be a number, such as 0.9.');
+    }
+    return c.json(await requireService(c).simulation(retention));
+  });
+
+  // ---- Collections, further examples, relationships. None of these touch a word's content or schedule. ----
+
+  app.get('/api/library', async (c) => c.json(await requireLibrary(c).load()));
+
+  app.post('/api/collections', async (c) => {
+    const { name } = await parseBody(c, collectionNameRequestSchema);
+    return c.json({ collection: await requireLibrary(c).createCollection(name) }, 201);
+  });
+
+  app.patch('/api/collections/:id', async (c) => {
+    const id = idParam(c, 'id', 'collection');
+    const { name } = await parseBody(c, collectionNameRequestSchema);
+    return c.json({ collection: await requireLibrary(c).renameCollection(id, name) });
+  });
+
+  // Removes the collection and its memberships only. No word is deleted.
+  app.delete('/api/collections/:id', async (c) => c.json(await requireLibrary(c).deleteCollection(idParam(c, 'id', 'collection'))));
+
+  app.put('/api/collections/:id/words/:wordId', async (c) => {
+    const id = idParam(c, 'id', 'collection');
+    const wordId = idParam(c, 'wordId', 'word');
+    const { member } = await parseBody(c, membershipRequestSchema);
+    return c.json({ collection: await requireLibrary(c).setMembership(id, wordId, member) });
+  });
+
+  app.post('/api/vocabulary/:id/examples', async (c) => {
+    const wordId = idParam(c, 'id', 'word');
+    const input = await parseBody(c, createExampleRequestSchema);
+    return c.json({ example: await requireLibrary(c).addExample(wordId, input) }, 201);
+  });
+
+  app.patch('/api/examples/:id', async (c) => {
+    const id = idParam(c, 'id', 'example');
+    const input = await parseBody(c, updateExampleRequestSchema);
+    return c.json({ example: await requireLibrary(c).updateExample(id, input) });
+  });
+
+  app.delete('/api/examples/:id', async (c) => c.json(await requireLibrary(c).deleteExample(idParam(c, 'id', 'example'))));
+
+  app.post('/api/relations', async (c) => {
+    const { fromId, toId, kind } = await parseBody(c, createRelationRequestSchema);
+    return c.json({ relation: await requireLibrary(c).addRelation(fromId, toId, kind) }, 201);
+  });
+
+  app.delete('/api/relations/:id', async (c) => c.json(await requireLibrary(c).deleteRelation(idParam(c, 'id', 'link'))));
 
   // ---- Account settings ----
 
@@ -290,6 +446,19 @@ export function createApp({
     const request = await parseBody(c, createEntryRequestSchema);
     const { entry, created } = await requireVocabulary(c).create(request);
     return c.json({ entry }, created ? 201 : 200);
+  });
+
+  // A batch of new words, each created exactly as the Add form would create it.
+  app.post('/api/vocabulary/import', async (c) => {
+    const { items } = await parseBody(c, importRequestSchema);
+    return c.json(await requireVocabulary(c).importBatch(items));
+  });
+
+  // Everything the caller can read about their own account, in one document. Reads only.
+  app.get('/api/export', async (c) => {
+    const scoped = c.get('scope').exporter;
+    if (scoped === null) throw notConfigured();
+    return c.json(await scoped.exportAccount());
   });
 
   app.patch('/api/vocabulary/:id', async (c) => {

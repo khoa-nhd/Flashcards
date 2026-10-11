@@ -9,7 +9,9 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { isIsoDate, type IsoDate } from '../../shared/dates.js';
+import { DEFAULT_SCHEDULER, isSchedulerId, type SchedulerId } from '../../shared/scheduler/active.js';
 import { fsrsStateSchema, type FsrsState } from '../../shared/scheduler/fsrs.js';
+import type { DailyGoal } from '../../shared/session-planner.js';
 import type { Database } from './database.types.js';
 
 const dateSchema = z.string().refine(isIsoDate).nullable();
@@ -124,12 +126,18 @@ export interface ReviewWriteArgs {
   durationMs: number | null;
   /** What FSRS made of the answer, saved with it. Needs schema version 3. */
   fsrs?: { rating: number; version: string; before: FsrsRow | null; after: FsrsRow } | null;
+  /** How sure the reviewer was beforehand: 1, 2 or 3. Stored from schema version 5. */
+  confidence?: number | null;
 }
 
 export interface StoredSettings {
   timeZone: string;
   /** `null` on a database that predates the setting. */
   fsrsRetention: number | null;
+  /** `null` on a database that cannot keep a goal yet. */
+  dailyGoal: DailyGoal | null;
+  /** Which schedule is in charge; `null` on a database that cannot keep the choice yet. */
+  scheduler: SchedulerId | null;
 }
 
 export const reviewWriteResultSchema = z.object({
@@ -144,7 +152,106 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 4;
+export const LATEST_SCHEMA_VERSION = 8;
+
+/** One row of the review history. Columns newer than the database's schema version are simply absent. */
+export const reviewLogRowSchema = z.object({
+  id: z.string(),
+  vocabulary_id: z.string(),
+  action: z.string(),
+  review_mode: z.string(),
+  reviewed_at: z.string(),
+  reviewed_on: z.string().refine(isIsoDate),
+  duration_ms: z.number().int().nullable(),
+  mastery_before: z.number().int(),
+  mastery_after: z.number().int(),
+  review_date_before: dateSchema,
+  review_date_after: dateSchema,
+  /** Which schedule was in charge. Present at every version; only ever the mastery schedule before version 8. */
+  scheduler: z.string().optional(),
+  kind: z.string().optional(),
+  session_id: z.string().nullable().optional(),
+  undoes_log_id: z.string().nullable().optional(),
+  rating: z.number().int().nullable().optional(),
+  confidence: z.number().int().nullable().optional(),
+  answer_correct: z.boolean().nullable().optional(),
+  submitted_answer: z.string().nullable().optional(),
+  grading: z.string().nullable().optional(),
+});
+export type ReviewLogRow = z.infer<typeof reviewLogRowSchema>;
+
+/** The history columns a database at this version has. */
+export const reviewLogColumns = (schemaVersion: number): string =>
+  [
+    'id, vocabulary_id, action, review_mode, reviewed_at, reviewed_on, duration_ms',
+    'mastery_before, mastery_after, review_date_before, review_date_after, scheduler',
+    ...(schemaVersion >= 2 ? ['kind, session_id, undoes_log_id'] : []),
+    ...(schemaVersion >= 3 ? ['rating'] : []),
+    ...(schemaVersion >= 5 ? ['confidence'] : []),
+    ...(schemaVersion >= 6 ? ['answer_correct, submitted_answer, grading'] : []),
+  ].join(', ');
+
+export const collectionRowSchema = z.object({ id: z.string(), name: z.string() });
+export type CollectionRow = z.infer<typeof collectionRowSchema>;
+
+export const collectionItemRowSchema = z.object({ collection_id: z.string(), vocabulary_id: z.string() });
+export type CollectionItemRow = z.infer<typeof collectionItemRowSchema>;
+
+export const exampleRowSchema = z.object({
+  id: z.string(),
+  vocabulary_id: z.string(),
+  sentence: z.string(),
+  source: z.string().nullable(),
+  preferred: z.boolean(),
+});
+export type ExampleRow = z.infer<typeof exampleRowSchema>;
+
+export const relationRowSchema = z.object({ id: z.string(), low_id: z.string(), high_id: z.string(), kind: z.string() });
+export type RelationRow = z.infer<typeof relationRowSchema>;
+
+export const EXAMPLE_COLUMNS = 'id, vocabulary_id, sentence, source, preferred';
+export const RELATION_COLUMNS = 'id, low_id, high_id, kind';
+
+/** PostgreSQL's codes for "that value already exists" and "that row is not there to point at". */
+export const UNIQUE_VIOLATION = '23505';
+export const FOREIGN_KEY_VIOLATION = '23503';
+
+/** One practice answer as the database records it. */
+export interface PracticeWriteArgs {
+  id: string;
+  requestId: string;
+  sessionId: string | null;
+  mode: string;
+  correct: boolean;
+  grading: 'self' | 'auto';
+  submitted: string | null;
+  reviewedOn: IsoDate;
+  durationMs: number | null;
+  confidence: number | null;
+}
+
+export const practiceOutcomeSchema = z.enum(['recorded', 'already_recorded', 'not_found']);
+export type PracticeOutcome = z.infer<typeof practiceOutcomeSchema>;
+
+export const practiceStatRowSchema = z.object({
+  day: z.string().refine(isIsoDate),
+  review_mode: z.string(),
+  answers: z.number().int(),
+  correct: z.number().int(),
+  duration_ms: z.number().int(),
+  timed_answers: z.number().int(),
+  cards: z.number().int(),
+});
+
+export type PracticeStatRow = z.infer<typeof practiceStatRowSchema>;
+
+export const confidenceStatRowSchema = z.object({
+  confidence: z.number().int().min(1).max(3),
+  reviews: z.number().int(),
+  remembered: z.number().int(),
+});
+
+export type ConfidenceStatRow = z.infer<typeof confidenceStatRowSchema>;
 
 export const dailyStatRowSchema = z.object({
   day: z.string().refine(isIsoDate),
@@ -243,14 +350,96 @@ export interface VocabularyDatabase {
   reviewDailyStats(from: IsoDate, to: IsoDate): Promise<DailyStatRow[]>;
   /** How each reviewed word has gone, overall and since `since`. Needs schema version 4. */
   cardReviewStats(since: IsoDate): Promise<CardStatRow[]>;
+  /** Every row of the caller's review history, oldest first. Reads only. */
+  listReviewLogs(): Promise<ReviewLogRow[]>;
+  // ---- Collections, further examples, relationships. All need schema version 7. ----
+  /** The caller's collections, by name. */
+  listCollections(): Promise<CollectionRow[]>;
+  listCollectionItems(): Promise<CollectionItemRow[]>;
+  insertCollection(name: string, nameKey: string): Promise<CollectionRow | 'duplicate'>;
+  /** `null` when there is no such collection of the caller's. */
+  renameCollection(id: string, name: string, nameKey: string): Promise<CollectionRow | 'duplicate' | null>;
+  deleteCollection(id: string): Promise<boolean>;
+  /** False when the collection or the word is not the caller's. Adding a word twice is not an error. */
+  addCollectionItem(collectionId: string, vocabularyId: string): Promise<boolean>;
+  /** False when there is no such collection of the caller's. */
+  removeCollectionItem(collectionId: string, vocabularyId: string): Promise<boolean>;
+  listExamples(): Promise<ExampleRow[]>;
+  getExample(id: string): Promise<ExampleRow | null>;
+  /** `null` when the word is not the caller's. */
+  insertExample(vocabularyId: string, sentence: string, source: string | null): Promise<ExampleRow | null>;
+  updateExample(id: string, changes: { sentence?: string; source?: string | null }): Promise<ExampleRow | null>;
+  setPreferredExample(id: string, preferred: boolean): Promise<boolean>;
+  deleteExample(id: string): Promise<boolean>;
+  listRelations(): Promise<RelationRow[]>;
+  /** The link, the existing one if the pair is already linked this way, or `null` when a word is not the caller's. */
+  insertRelation(lowId: string, highId: string, kind: string): Promise<RelationRow | null>;
+  deleteRelation(id: string): Promise<boolean>;
+  /** Records one practice answer. It never changes a word's schedule. Needs schema version 6. */
+  recordPractice(args: PracticeWriteArgs): Promise<PracticeOutcome>;
+  /** Practice answers per day and study mode. Needs schema version 6. */
+  practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeStatRow[]>;
+  /** Answers since `since` that carried a confidence rating, by rating. Needs schema version 5. */
+  confidenceStats(since: IsoDate): Promise<ConfidenceStatRow[]>;
   /** The account's settings in one read, or `null` if it has none yet. */
   getSettings(): Promise<StoredSettings | null>;
+  /** Needs schema version 5. */
+  saveDailyGoal(goal: DailyGoal): Promise<DailyGoal>;
   /** Needs schema version 3. */
   saveFsrsRetention(value: number): Promise<number>;
+  /** Needs schema version 8. */
+  saveScheduler(value: SchedulerId): Promise<SchedulerId>;
   getTimeZone(): Promise<string | null>;
   /** Stores the zone only if the user has none yet; returns the one in effect. */
   ensureTimeZone(timeZone: string): Promise<string>;
   saveTimeZone(timeZone: string): Promise<string>;
+}
+
+/** A settings row as read; which columns it has depends on the schema version. */
+export interface SettingsRow {
+  time_zone: string;
+  fsrs_request_retention?: number | string | null;
+  daily_goal_reviews?: number | null;
+  daily_goal_minutes?: number | null;
+  /** From schema version 8. */
+  scheduler?: string | null;
+}
+
+/** The settings columns a database at this version has. */
+export const settingsColumns = (schemaVersion: number): string =>
+  [
+    'time_zone',
+    ...(schemaVersion >= 3 ? ['fsrs_request_retention'] : []),
+    ...(schemaVersion >= 5 ? ['daily_goal_reviews', 'daily_goal_minutes'] : []),
+    ...(schemaVersion >= 8 ? ['scheduler'] : []),
+  ].join(', ');
+
+export function settingsFromRow(row: SettingsRow, schemaVersion: number): StoredSettings {
+  const retention = row.fsrs_request_retention == null ? null : Number(row.fsrs_request_retention);
+  return {
+    timeZone: row.time_zone,
+    fsrsRetention: retention !== null && Number.isFinite(retention) ? retention : null,
+    dailyGoal:
+      schemaVersion >= 5 ? { reviews: row.daily_goal_reviews ?? null, minutes: row.daily_goal_minutes ?? null } : null,
+    // Anything unrecognised is read as the default: the mastery schedule is never left by accident.
+    scheduler: schemaVersion >= 8 ? (isSchedulerId(row.scheduler) ? row.scheduler : DEFAULT_SCHEDULER) : null,
+  };
+}
+
+/** A practice answer in the form `record_practice` reads. Shared with the test database so both send the same thing. */
+export function practiceEvent(args: PracticeWriteArgs): Record<string, string | number | boolean | null> {
+  return {
+    vocabulary_id: args.id,
+    request_id: args.requestId,
+    session_id: args.sessionId,
+    review_mode: args.mode,
+    answer_correct: args.correct,
+    grading: args.grading,
+    submitted_answer: args.submitted,
+    reviewed_on: args.reviewedOn,
+    duration_ms: args.durationMs,
+    confidence: args.confidence,
+  };
 }
 
 export type DatabaseFailure = 'unauthorized' | 'forbidden' | 'schema_missing' | 'invalid' | 'unavailable';
@@ -342,6 +531,23 @@ export function createSupabaseDatabase(
   };
 
   const cards = () => client.from('vocabulary_cards').select(columns);
+
+  /** Reads a whole table of the caller's own rows, a page at a time, in a fixed order. */
+  const readTable = async <T>(
+    page: (from: number, to: number) => PromiseLike<{ data: unknown; error: PostgrestFailure | null; status: number }>,
+    schema: z.ZodType<T>,
+  ): Promise<T[]> => {
+    const rows: T[] = [];
+    for (let index = 0; index < MAX_PAGES; index += 1) {
+      const { data, error, status } = await page(index * PAGE_SIZE, (index + 1) * PAGE_SIZE - 1);
+      if (error) throw toDatabaseError(error, status);
+      const batch = z.array(schema).safeParse(data ?? []);
+      if (!batch.success) throw new DatabaseError('unavailable', 'The database returned rows in an unexpected shape.');
+      rows.push(...batch.data);
+      if (batch.data.length < PAGE_SIZE) return rows;
+    }
+    throw new DatabaseError('unavailable', `Stopped after ${MAX_PAGES} pages of results.`);
+  };
 
   return {
     listCards: () =>
@@ -504,6 +710,7 @@ export function createSupabaseDatabase(
           reviewed_on: args.reviewedOn,
           duration_ms: args.durationMs,
           ...(args.fsrs == null ? {} : { fsrs: args.fsrs }),
+          ...(args.confidence == null ? {} : { confidence: args.confidence }),
         },
       });
       if (error) throw toDatabaseError(error, status);
@@ -530,14 +737,227 @@ export function createSupabaseDatabase(
       return rows.data;
     },
 
+    listReviewLogs: () =>
+      readTable(
+        (from, to) =>
+          client
+            .from('review_logs')
+            .select(reviewLogColumns(schemaVersion))
+            .order('reviewed_at', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, to),
+        reviewLogRowSchema,
+      ),
+
+    listCollections: () =>
+      readTable(
+        (from, to) => client.from('collections').select('id, name').order('name_key').order('id').range(from, to),
+        collectionRowSchema,
+      ),
+
+    listCollectionItems: () =>
+      readTable(
+        (from, to) =>
+          client
+            .from('collection_items')
+            .select('collection_id, vocabulary_id')
+            .order('collection_id')
+            .order('vocabulary_id')
+            .range(from, to),
+        collectionItemRowSchema,
+      ),
+
+    async insertCollection(name, nameKey) {
+      const { data, error, status } = await client
+        .from('collections')
+        .insert({ name, name_key: nameKey })
+        .select('id, name')
+        .single();
+      if (error?.code === UNIQUE_VIOLATION) return 'duplicate';
+      if (error) throw toDatabaseError(error, status);
+      return collectionRowSchema.parse(data);
+    },
+
+    async renameCollection(id, name, nameKey) {
+      const { data, error, status } = await client
+        .from('collections')
+        .update({ name, name_key: nameKey })
+        .eq('id', id)
+        .select('id, name');
+      if (error?.code === UNIQUE_VIOLATION) return 'duplicate';
+      if (error) throw toDatabaseError(error, status);
+      const row = (data ?? [])[0];
+      return row === undefined ? null : collectionRowSchema.parse(row);
+    },
+
+    async deleteCollection(id) {
+      const { data, error, status } = await client.from('collections').delete().eq('id', id).select('id');
+      if (error) throw toDatabaseError(error, status);
+      return (data ?? []).length > 0;
+    },
+
+    async addCollectionItem(collectionId, vocabularyId) {
+      const { error, status } = await client
+        .from('collection_items')
+        .upsert(
+          { collection_id: collectionId, vocabulary_id: vocabularyId },
+          { onConflict: 'collection_id,vocabulary_id', ignoreDuplicates: true },
+        );
+      // The composite foreign keys refuse a collection or a word that is not the caller's own.
+      if (error?.code === FOREIGN_KEY_VIOLATION) return false;
+      if (error) throw toDatabaseError(error, status);
+      return true;
+    },
+
+    async removeCollectionItem(collectionId, vocabularyId) {
+      const owned = await client.from('collections').select('id').eq('id', collectionId).maybeSingle();
+      if (owned.error) throw toDatabaseError(owned.error, owned.status);
+      if (owned.data === null) return false;
+      const { error, status } = await client
+        .from('collection_items')
+        .delete()
+        .eq('collection_id', collectionId)
+        .eq('vocabulary_id', vocabularyId);
+      if (error) throw toDatabaseError(error, status);
+      return true;
+    },
+
+    listExamples: () =>
+      readTable(
+        (from, to) =>
+          client
+            .from('vocabulary_examples')
+            .select(EXAMPLE_COLUMNS)
+            .order('vocabulary_id')
+            .order('created_at')
+            .order('id')
+            .range(from, to),
+        exampleRowSchema,
+      ),
+
+    async getExample(id) {
+      const { data, error, status } = await client.from('vocabulary_examples').select(EXAMPLE_COLUMNS).eq('id', id).maybeSingle();
+      if (error) throw toDatabaseError(error, status);
+      return data === null ? null : exampleRowSchema.parse(data);
+    },
+
+    async insertExample(vocabularyId, sentence, source) {
+      const { data, error, status } = await client
+        .from('vocabulary_examples')
+        .insert({ vocabulary_id: vocabularyId, sentence, source })
+        .select(EXAMPLE_COLUMNS)
+        .single();
+      if (error?.code === FOREIGN_KEY_VIOLATION) return null;
+      if (error) throw toDatabaseError(error, status);
+      return exampleRowSchema.parse(data);
+    },
+
+    async updateExample(id, changes) {
+      const { data, error, status } = await client
+        .from('vocabulary_examples')
+        .update(changes)
+        .eq('id', id)
+        .select(EXAMPLE_COLUMNS);
+      if (error) throw toDatabaseError(error, status);
+      const row = (data ?? [])[0];
+      return row === undefined ? null : exampleRowSchema.parse(row);
+    },
+
+    async setPreferredExample(id, preferred) {
+      const { data, error, status } = await client.rpc('set_preferred_example', { p_example_id: id, p_preferred: preferred });
+      if (error) throw toDatabaseError(error, status);
+      return data === true;
+    },
+
+    async deleteExample(id) {
+      const { data, error, status } = await client.from('vocabulary_examples').delete().eq('id', id).select('id');
+      if (error) throw toDatabaseError(error, status);
+      return (data ?? []).length > 0;
+    },
+
+    listRelations: () =>
+      readTable(
+        (from, to) =>
+          client
+            .from('vocabulary_relations')
+            .select(RELATION_COLUMNS)
+            .order('low_id')
+            .order('high_id')
+            .order('kind')
+            .range(from, to),
+        relationRowSchema,
+      ),
+
+    async insertRelation(lowId, highId, kind) {
+      const created = await client
+        .from('vocabulary_relations')
+        .insert({ low_id: lowId, high_id: highId, kind })
+        .select(RELATION_COLUMNS)
+        .single();
+      if (created.error?.code === FOREIGN_KEY_VIOLATION) return null;
+      if (created.error?.code === UNIQUE_VIOLATION) {
+        // Already linked this way: the link that exists is the answer.
+        const existing = await client
+          .from('vocabulary_relations')
+          .select(RELATION_COLUMNS)
+          .eq('low_id', lowId)
+          .eq('high_id', highId)
+          .eq('kind', kind)
+          .maybeSingle();
+        if (existing.error) throw toDatabaseError(existing.error, existing.status);
+        return existing.data === null ? null : relationRowSchema.parse(existing.data);
+      }
+      if (created.error) throw toDatabaseError(created.error, created.status);
+      return relationRowSchema.parse(created.data);
+    },
+
+    async deleteRelation(id) {
+      const { data, error, status } = await client.from('vocabulary_relations').delete().eq('id', id).select('id');
+      if (error) throw toDatabaseError(error, status);
+      return (data ?? []).length > 0;
+    },
+
+    async recordPractice(args) {
+      const { data, error, status } = await client.rpc('record_practice', { p_event: practiceEvent(args) });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(z.object({ outcome: practiceOutcomeSchema })).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not confirm the practice answer.');
+      }
+      return rows.data[0].outcome;
+    },
+
+    async practiceDailyStats(from, to) {
+      const { data, error, status } = await client.rpc('practice_daily_stats', { p_from: from, p_to: to });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(practiceStatRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned statistics in an unexpected shape.');
+      return rows.data;
+    },
+
+    async confidenceStats(since) {
+      const { data, error, status } = await client.rpc('confidence_stats', { p_since: since });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(confidenceStatRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned statistics in an unexpected shape.');
+      return rows.data;
+    },
+
     async getSettings() {
-      const wanted = schemaVersion >= 3 ? 'time_zone, fsrs_request_retention' : 'time_zone';
+      const wanted = settingsColumns(schemaVersion);
       const { data, error, status } = await client.from('user_settings').select(wanted).maybeSingle();
       if (error) throw toDatabaseError(error, status);
-      if (data === null) return null;
-      const row = data as unknown as { time_zone: string; fsrs_request_retention?: number | string | null };
-      const retention = row.fsrs_request_retention == null ? null : Number(row.fsrs_request_retention);
-      return { timeZone: row.time_zone, fsrsRetention: retention !== null && Number.isFinite(retention) ? retention : null };
+      return data === null ? null : settingsFromRow(data as unknown as SettingsRow, schemaVersion);
+    },
+
+    async saveDailyGoal(goal) {
+      const { data, error, status } = await client
+        .from('user_settings')
+        .upsert({ daily_goal_reviews: goal.reviews, daily_goal_minutes: goal.minutes }, { onConflict: 'user_id' })
+        .select('daily_goal_reviews, daily_goal_minutes')
+        .single();
+      if (error) throw toDatabaseError(error, status);
+      return { reviews: data.daily_goal_reviews, minutes: data.daily_goal_minutes };
     },
 
     async saveFsrsRetention(value) {
@@ -548,6 +968,19 @@ export function createSupabaseDatabase(
         .single();
       if (error) throw toDatabaseError(error, status);
       return Number(data.fsrs_request_retention);
+    },
+
+    async saveScheduler(value) {
+      const { data, error, status } = await client
+        .from('user_settings')
+        .upsert({ scheduler: value }, { onConflict: 'user_id' })
+        .select('scheduler')
+        .single();
+      if (error) throw toDatabaseError(error, status);
+      if (!isSchedulerId(data.scheduler)) {
+        throw new DatabaseError('unavailable', 'The database returned a schedule this app does not know.');
+      }
+      return data.scheduler;
     },
 
     async undoReview(args) {

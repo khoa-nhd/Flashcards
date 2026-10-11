@@ -213,7 +213,7 @@ describe('review activity in Insights', () => {
     const section = await activity();
     const table = await within(section).findByRole('table', { name: 'By study mode, last 30 days' });
     expect(within(table).getByRole('row', { name: /^Flashcards/ })).toHaveTextContent('3678%');
-    expect(within(table).getByRole('row', { name: /^typing/ })).toHaveTextContent('4Not enough data');
+    expect(within(table).getByRole('row', { name: /^Typing/ })).toHaveTextContent('4Not enough data');
   });
 
   it('shows no chart of zeros when nothing was reviewed', async () => {

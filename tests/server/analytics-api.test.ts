@@ -4,6 +4,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
+  NO_CAPABILITIES,
   analyticsResponseSchema,
   entryResponseSchema,
   queueResponseSchema,
@@ -290,6 +291,6 @@ describe('a database one migration behind (version 3)', () => {
     expect(weak.words.map((word) => [word.word, word.reasons[0]?.code])).toEqual([['waiting', 'long_overdue']]);
 
     const queue = queueResponseSchema.parse(await (await call(app, owner, '/api/review-queue')).json());
-    expect(queue.capabilities).toEqual({ sessions: true, undo: true, fsrs: true, analytics: false });
+    expect(queue.capabilities).toEqual({ ...NO_CAPABILITIES, sessions: true, undo: true, fsrs: true });
   });
 });

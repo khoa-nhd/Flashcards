@@ -96,10 +96,14 @@ describe('schema', () => {
     );
     expect(tables).toEqual([
       { relname: 'card_states', relrowsecurity: true },
+      { relname: 'collection_items', relrowsecurity: true },
+      { relname: 'collections', relrowsecurity: true },
       { relname: 'review_logs', relrowsecurity: true },
       { relname: 'study_sessions', relrowsecurity: true },
       { relname: 'user_settings', relrowsecurity: true },
       { relname: 'vocabulary', relrowsecurity: true },
+      { relname: 'vocabulary_examples', relrowsecurity: true },
+      { relname: 'vocabulary_relations', relrowsecurity: true },
     ]);
   });
 
@@ -144,10 +148,19 @@ describe('schema', () => {
     const policies = await db.admin<{ tablename: string; cmd: string; roles: string }>(
       `select tablename, cmd, roles::text as roles from pg_policies where schemaname = 'public' order by tablename, cmd`,
     );
+    // Words, their schedules and their history can never be deleted. Only the
+    // organising tables (collections, further examples, links) allow it.
     expect(policies.map((policy) => `${policy.tablename} ${policy.cmd} ${policy.roles}`)).toEqual([
       'card_states INSERT {authenticated}',
       'card_states SELECT {authenticated}',
       'card_states UPDATE {authenticated}',
+      'collection_items DELETE {authenticated}',
+      'collection_items INSERT {authenticated}',
+      'collection_items SELECT {authenticated}',
+      'collections DELETE {authenticated}',
+      'collections INSERT {authenticated}',
+      'collections SELECT {authenticated}',
+      'collections UPDATE {authenticated}',
       'review_logs INSERT {authenticated}',
       'review_logs SELECT {authenticated}',
       'study_sessions INSERT {authenticated}',
@@ -159,6 +172,13 @@ describe('schema', () => {
       'vocabulary INSERT {authenticated}',
       'vocabulary SELECT {authenticated}',
       'vocabulary UPDATE {authenticated}',
+      'vocabulary_examples DELETE {authenticated}',
+      'vocabulary_examples INSERT {authenticated}',
+      'vocabulary_examples SELECT {authenticated}',
+      'vocabulary_examples UPDATE {authenticated}',
+      'vocabulary_relations DELETE {authenticated}',
+      'vocabulary_relations INSERT {authenticated}',
+      'vocabulary_relations SELECT {authenticated}',
     ]);
   });
 

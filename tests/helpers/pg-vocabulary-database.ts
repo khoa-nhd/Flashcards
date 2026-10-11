@@ -11,18 +11,36 @@
 import { z } from 'zod';
 import {
   DatabaseError,
+  EXAMPLE_COLUMNS,
+  FOREIGN_KEY_VIOLATION,
   LATEST_SCHEMA_VERSION,
+  RELATION_COLUMNS,
+  UNIQUE_VIOLATION,
+  collectionItemRowSchema,
+  collectionRowSchema,
+  exampleRowSchema,
+  relationRowSchema,
+  reviewLogColumns,
+  reviewLogRowSchema,
   cardColumns,
   cardStatRowSchema,
+  confidenceStatRowSchema,
   dailyStatRowSchema,
   cardRowSchema,
+  practiceEvent,
+  practiceOutcomeSchema,
+  practiceStatRowSchema,
   reviewWriteResultSchema,
   sessionSummaryRowSchema,
+  settingsColumns,
+  settingsFromRow,
   toDatabaseError,
   undoResultSchema,
   type CardRow,
+  type SettingsRow,
   type VocabularyDatabase,
 } from '../../server/supabase/supabase-database.js';
+import { isSchedulerId } from '../../shared/scheduler/active.js';
 import type { Row, Session, TestDatabase } from './test-database.js';
 
 /** Rows are read as JSON, which gives dates and timestamps the same text form the hosted API returns. */
@@ -42,6 +60,17 @@ export function createPgVocabularyDatabase(
     } catch (error) {
       if (error instanceof DatabaseError) throw error;
       throw toDatabaseError({ code: (error as { code?: string }).code });
+    }
+  };
+
+  /** Runs a statement that the database may refuse with `code`; answers `null` for that refusal and nothing else. */
+  const attempt = async (code: string, work: (session: Session) => Promise<Row[]>): Promise<Row[] | null> => {
+    try {
+      return await db.as(userId, work);
+    } catch (error) {
+      const failure = error as { code?: string };
+      if (failure.code === code) return null;
+      throw error instanceof DatabaseError ? error : toDatabaseError({ code: failure.code });
     }
   };
 
@@ -212,6 +241,7 @@ export function createPgVocabularyDatabase(
               reviewed_on: args.reviewedOn,
               duration_ms: args.durationMs,
               ...(args.fsrs == null ? {} : { fsrs: args.fsrs }),
+              ...(args.confidence == null ? {} : { confidence: args.confidence }),
             }),
           ],
         ),
@@ -257,13 +287,209 @@ export function createPgVocabularyDatabase(
       return z.array(cardStatRowSchema).parse(rows.map((row) => row.stat));
     },
 
-    async getSettings() {
-      const wanted = schemaVersion >= 3 ? 'time_zone, fsrs_request_retention::float8 as fsrs_request_retention' : 'time_zone';
+    async listReviewLogs() {
+      // Read as JSON, which gives dates and timestamps the same text form the hosted API returns.
       const rows = await run((session) =>
-        session.query<{ time_zone: string; fsrs_request_retention?: number }>(`select ${wanted} from public.user_settings`),
+        session.query<{ log: unknown }>(
+          `select to_jsonb(l) as log from (select ${reviewLogColumns(schemaVersion)} from public.review_logs
+             order by reviewed_at, id) l`,
+        ),
       );
-      const row = rows[0];
-      return row === undefined ? null : { timeZone: row.time_zone, fsrsRetention: row.fsrs_request_retention ?? null };
+      return z.array(reviewLogRowSchema).parse(rows.map((row) => row.log));
+    },
+
+    async listCollections() {
+      const rows = await run((session) => session.query('select id, name from public.collections order by name_key, id'));
+      return z.array(collectionRowSchema).parse(rows);
+    },
+
+    async listCollectionItems() {
+      const rows = await run((session) =>
+        session.query('select collection_id, vocabulary_id from public.collection_items order by collection_id, vocabulary_id'),
+      );
+      return z.array(collectionItemRowSchema).parse(rows);
+    },
+
+    async insertCollection(name, nameKey) {
+      const rows = await attempt(UNIQUE_VIOLATION, (session) =>
+        session.query('insert into public.collections (name, name_key) values ($1, $2) returning id, name', [name, nameKey]),
+      );
+      return rows === null ? 'duplicate' : collectionRowSchema.parse(rows[0]);
+    },
+
+    async renameCollection(id, name, nameKey) {
+      const rows = await attempt(UNIQUE_VIOLATION, (session) =>
+        session.query('update public.collections set name = $2, name_key = $3 where id = $1::uuid returning id, name', [
+          id,
+          name,
+          nameKey,
+        ]),
+      );
+      if (rows === null) return 'duplicate';
+      return rows[0] === undefined ? null : collectionRowSchema.parse(rows[0]);
+    },
+
+    async deleteCollection(id) {
+      const rows = await run((session) => session.query('delete from public.collections where id = $1::uuid returning id', [id]));
+      return rows.length > 0;
+    },
+
+    async addCollectionItem(collectionId, vocabularyId) {
+      const rows = await attempt(FOREIGN_KEY_VIOLATION, (session) =>
+        session.query(
+          `insert into public.collection_items (collection_id, vocabulary_id) values ($1::uuid, $2::uuid)
+           on conflict (collection_id, vocabulary_id) do nothing`,
+          [collectionId, vocabularyId],
+        ),
+      );
+      return rows !== null;
+    },
+
+    async removeCollectionItem(collectionId, vocabularyId) {
+      return run(async (session) => {
+        const owned = await session.query('select id from public.collections where id = $1::uuid', [collectionId]);
+        if (owned.length === 0) return false;
+        await session.query('delete from public.collection_items where collection_id = $1::uuid and vocabulary_id = $2::uuid', [
+          collectionId,
+          vocabularyId,
+        ]);
+        return true;
+      });
+    },
+
+    async listExamples() {
+      const rows = await run((session) =>
+        session.query(`select ${EXAMPLE_COLUMNS} from public.vocabulary_examples order by vocabulary_id, created_at, id`),
+      );
+      return z.array(exampleRowSchema).parse(rows);
+    },
+
+    async getExample(id) {
+      const rows = await run((session) =>
+        session.query(`select ${EXAMPLE_COLUMNS} from public.vocabulary_examples where id = $1::uuid`, [id]),
+      );
+      return rows[0] === undefined ? null : exampleRowSchema.parse(rows[0]);
+    },
+
+    async insertExample(vocabularyId, sentence, source) {
+      const rows = await attempt(FOREIGN_KEY_VIOLATION, (session) =>
+        session.query(
+          `insert into public.vocabulary_examples (vocabulary_id, sentence, source) values ($1::uuid, $2, $3)
+           returning ${EXAMPLE_COLUMNS}`,
+          [vocabularyId, sentence, source],
+        ),
+      );
+      return rows === null ? null : exampleRowSchema.parse(rows[0]);
+    },
+
+    async updateExample(id, changes) {
+      const rows = await run((session) =>
+        session.query(
+          `update public.vocabulary_examples
+              set sentence = case when $2::boolean then $3 else sentence end,
+                  source = case when $4::boolean then $5 else source end
+            where id = $1::uuid
+          returning ${EXAMPLE_COLUMNS}`,
+          [id, changes.sentence !== undefined, changes.sentence ?? null, changes.source !== undefined, changes.source ?? null],
+        ),
+      );
+      return rows[0] === undefined ? null : exampleRowSchema.parse(rows[0]);
+    },
+
+    async setPreferredExample(id, preferred) {
+      const rows = await run((session) =>
+        session.query<{ done: boolean }>('select public.set_preferred_example($1::uuid, $2::boolean) as done', [id, preferred]),
+      );
+      return rows[0]?.done === true;
+    },
+
+    async deleteExample(id) {
+      const rows = await run((session) =>
+        session.query('delete from public.vocabulary_examples where id = $1::uuid returning id', [id]),
+      );
+      return rows.length > 0;
+    },
+
+    async listRelations() {
+      const rows = await run((session) =>
+        session.query(`select ${RELATION_COLUMNS} from public.vocabulary_relations order by low_id, high_id, kind`),
+      );
+      return z.array(relationRowSchema).parse(rows);
+    },
+
+    async insertRelation(lowId, highId, kind) {
+      const found = (session: Session) =>
+        session.query(
+          `select ${RELATION_COLUMNS} from public.vocabulary_relations where low_id = $1::uuid and high_id = $2::uuid and kind = $3`,
+          [lowId, highId, kind],
+        );
+      const existing = await run(found);
+      if (existing[0] !== undefined) return relationRowSchema.parse(existing[0]);
+      const rows = await attempt(FOREIGN_KEY_VIOLATION, (session) =>
+        session.query(
+          `insert into public.vocabulary_relations (low_id, high_id, kind) values ($1::uuid, $2::uuid, $3)
+           returning ${RELATION_COLUMNS}`,
+          [lowId, highId, kind],
+        ),
+      );
+      return rows === null ? null : relationRowSchema.parse(rows[0]);
+    },
+
+    async deleteRelation(id) {
+      const rows = await run((session) =>
+        session.query('delete from public.vocabulary_relations where id = $1::uuid returning id', [id]),
+      );
+      return rows.length > 0;
+    },
+
+    async recordPractice(args) {
+      const rows = await run((session) =>
+        session.query<{ outcome: string }>('select outcome from public.record_practice($1::jsonb)', [
+          JSON.stringify(practiceEvent(args)),
+        ]),
+      );
+      return practiceOutcomeSchema.parse(rows[0]?.outcome);
+    },
+
+    async practiceDailyStats(from, to) {
+      const rows = await run((session) =>
+        session.query<{ stat: unknown }>(
+          'select to_jsonb(s) as stat from public.practice_daily_stats($1::date, $2::date) s',
+          [from, to],
+        ),
+      );
+      return z.array(practiceStatRowSchema).parse(rows.map((row) => row.stat));
+    },
+
+    async confidenceStats(since) {
+      const rows = await run((session) =>
+        session.query<{ stat: unknown }>('select to_jsonb(s) as stat from public.confidence_stats($1::date) s', [since]),
+      );
+      return z.array(confidenceStatRowSchema).parse(rows.map((row) => row.stat));
+    },
+
+    async getSettings() {
+      // The same columns the real gateway asks for at this version, read as JSON like the hosted API returns them.
+      const wanted = settingsColumns(schemaVersion);
+      const rows = await run((session) =>
+        session.query<{ settings: SettingsRow }>(
+          `select to_jsonb(s) as settings from (select ${wanted} from public.user_settings) s`,
+        ),
+      );
+      return rows[0] === undefined ? null : settingsFromRow(rows[0].settings, schemaVersion);
+    },
+
+    async saveDailyGoal(goal) {
+      const rows = await run((session) =>
+        session.query<{ reviews: number | null; minutes: number | null }>(
+          `insert into public.user_settings (daily_goal_reviews, daily_goal_minutes) values ($1, $2)
+           on conflict (user_id) do update
+             set daily_goal_reviews = excluded.daily_goal_reviews, daily_goal_minutes = excluded.daily_goal_minutes
+           returning daily_goal_reviews as reviews, daily_goal_minutes as minutes`,
+          [goal.reviews, goal.minutes],
+        ),
+      );
+      return rows[0] ?? goal;
     },
 
     async saveFsrsRetention(value) {
@@ -276,6 +502,18 @@ export function createPgVocabularyDatabase(
         ),
       );
       return rows[0]?.retention ?? value;
+    },
+
+    async saveScheduler(value) {
+      const rows = await run((session) =>
+        session.query<{ scheduler: string }>(
+          `insert into public.user_settings (scheduler) values ($1)
+           on conflict (user_id) do update set scheduler = excluded.scheduler
+           returning scheduler`,
+          [value],
+        ),
+      );
+      return isSchedulerId(rows[0]?.scheduler) ? rows[0].scheduler : value;
     },
 
     async getTimeZone() {

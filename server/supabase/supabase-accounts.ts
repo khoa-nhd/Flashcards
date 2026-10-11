@@ -11,8 +11,14 @@ import { DEFAULT_FSRS_SETTINGS, isValidRetention } from '../../shared/scheduler/
 import { DEFAULT_RATING_MAP, type RatingMap } from '../../shared/scheduler/rating-map.js';
 import type { CardFieldConfig, NewWordDefaults } from '../../shared/vocabulary.js';
 import type { Account, AccountGateway } from '../accounts.js';
+import { NO_GOAL } from '../../shared/session-planner.js';
 import { AnalyticsService } from '../analytics-service.js';
+import { ExportService } from '../export-service.js';
+import { NO_GOAL_STORE, createGoalStore } from '../goal-store.js';
+import { LibraryService } from '../library-service.js';
+import { NO_LIBRARY_STORE } from '../library-store.js';
 import { ReviewService } from '../review-service.js';
+import { MASTERY_ONLY, createSchedulerStore } from '../scheduler-store.js';
 import { VocabularyService } from '../vocabulary-service.js';
 import {
   DatabaseError,
@@ -21,6 +27,7 @@ import {
   createUserClient,
   type VocabularyDatabase,
 } from './supabase-database.js';
+import { createSupabaseLibraryStore } from './supabase-library.js';
 import { SupabaseVocabularyRepository } from './supabase-repository.js';
 
 export interface TokenVerifier {
@@ -140,14 +147,47 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
       const fsrs = fsrsRetention === null ? null : { settings: { requestRetention: fsrsRetention }, ratingMap };
 
       const repository = new SupabaseVocabularyRepository(database, rules, schemaVersion);
+      // A goal is kept only where the database has somewhere to put it.
+      const goals =
+        settings?.dailyGoal == null && schemaVersion < 5
+          ? NO_GOAL_STORE
+          : createGoalStore(settings?.dailyGoal ?? NO_GOAL, (goal) => database.saveDailyGoal(goal));
+      const library = new LibraryService({
+        // Kept only where the database has the tables for it.
+        store: schemaVersion >= 7 ? createSupabaseLibraryStore(database) : NO_LIBRARY_STORE,
+        catalog: repository,
+        writesRequested,
+      });
+      // Which schedule is in charge is the account's own choice, kept only where the database has
+      // somewhere to put it. Anywhere else, and for every account that has not chosen, it is the mastery schedule.
+      const scheduler =
+        schemaVersion >= 8
+          ? createSchedulerStore(settings?.scheduler ?? undefined, (next) => database.saveScheduler(next))
+          : MASTERY_ONLY;
       return {
         account,
         timeZone,
         database: { version: schemaVersion, latest: LATEST_SCHEMA_VERSION },
         fsrsRetention,
-        review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, now }),
-        vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, now }),
-        analytics: new AnalyticsService({ repository, catalog: repository, rules, timeZone, now }),
+        review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, now }),
+        vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, now }),
+        analytics: new AnalyticsService({
+          repository,
+          catalog: repository,
+          rules,
+          timeZone,
+          goals,
+          scheduler,
+          now,
+        }),
+        library,
+        exporter: new ExportService({
+          repository,
+          catalog: repository,
+          library,
+          settings: () => ({ timeZone, dailyGoal: goals.get(), fsrsRetention, scheduler: scheduler.get() }),
+          now,
+        }),
         async saveTimeZone(next) {
           if (!isValidTimeZone(next)) throw new DatabaseError('invalid', 'That is not a time zone this app recognises.');
           return database.saveTimeZone(next);

@@ -1,5 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { QueueResponse, ReviewActionResponse, ReviewUndoResponse } from '../../shared/api.js';
+import {
+  NO_CAPABILITIES,
+  type QueueResponse,
+  type ReviewActionResponse,
+  type ReviewUndoResponse,
+} from '../../shared/api.js';
 import { ApiError, type ReviewApi } from '../../src/lib/api-client.js';
 import { createSessionController } from '../../src/lib/session-controller.js';
 import { currentCard } from '../../src/lib/session-machine.js';
@@ -31,7 +36,7 @@ function setup(cardCount = 3, queue: Partial<QueueResponse> = {}) {
   return { api, session, saves, undos, onSaved };
 }
 
-const WITH_UNDO = { capabilities: { sessions: true, undo: true, fsrs: false, analytics: false } };
+const WITH_UNDO = { capabilities: { ...NO_CAPABILITIES, sessions: true, undo: true } };
 const undone: ReviewUndoResponse = { outcome: 'undone', pageId: card(1).id, state: { mastery: 3, nextReview: card(1).nextReview } };
 
 const settled = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -342,7 +347,7 @@ describe('undoing the last answer', () => {
   });
 
   it('is not offered where the store cannot undo, or for a preview that saved nothing', async () => {
-    const plain = await answered({ capabilities: { sessions: false, undo: false, fsrs: false, analytics: false } });
+    const plain = await answered({ capabilities: NO_CAPABILITIES });
     expect(plain.session.getState().lastSaved).toBeNull();
     expect(plain.session.undo()).toBe(false);
 

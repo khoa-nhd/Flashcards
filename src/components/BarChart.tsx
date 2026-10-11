@@ -7,6 +7,12 @@ export interface BarDatum {
   /** Full description of the category, used in the tooltip and the table. */
   label: string;
   value: number;
+  /**
+   * What to say for this bar instead of the value and its unit. For a category
+   * with nothing to plot, give a value of 0 and say why here, so an absent bar
+   * is never read as a measured zero.
+   */
+  text?: string;
 }
 
 export interface BarChartProps {
@@ -47,7 +53,7 @@ export function BarChart({ title, unit, data, categoryLabel, height = 180 }: Bar
   const max = niceCeiling(Math.max(0, ...data.map((datum) => datum.value)));
   const ticks = max % 2 === 0 ? [max, max / 2, 0] : [max, 0];
   const describe = (datum: BarDatum) =>
-    `${numberFormat.format(datum.value)} ${datum.value === 1 ? unit[0] : unit[1]}`;
+    datum.text ?? `${numberFormat.format(datum.value)} ${datum.value === 1 ? unit[0] : unit[1]}`;
 
   return (
     <figure className="m-0">
@@ -85,7 +91,9 @@ export function BarChart({ title, unit, data, categoryLabel, height = 180 }: Bar
                   <th scope="row" className="px-3 py-1.5 text-left font-normal">
                     {datum.label}
                   </th>
-                  <td className="px-3 py-1.5 text-right tabular-nums">{numberFormat.format(datum.value)}</td>
+                  <td className="px-3 py-1.5 text-right tabular-nums">
+                    {datum.text ?? numberFormat.format(datum.value)}
+                  </td>
                 </tr>
               ))}
             </tbody>

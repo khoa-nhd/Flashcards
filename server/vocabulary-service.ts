@@ -1,17 +1,21 @@
 import {
+  importItemSchema,
   normalizeId,
   type CreateEntryRequest,
+  type ImportResponse,
   type UpdateEntryRequest,
   type VocabularyEntry,
   type VocabularyListResponse,
 } from '../shared/api.js';
 import { calendarDateInTimeZone, type IsoDate } from '../shared/dates.js';
 import type { ReviewRules } from '../shared/review-logic.js';
+import { dueDateUnder, isScheduledByFsrs } from '../shared/scheduler/active.js';
 import { normalizeWord } from '../shared/text.js';
 import { TEXT_FIELD_KEYS, type NewWordDefaults } from '../shared/vocabulary.js';
 import { classifyReviewStatus, isReviewableNow } from '../shared/vocabulary-status.js';
 import { HttpError } from './errors.js';
 import { KeyedMutex } from './keyed-mutex.js';
+import { MASTERY_ONLY, type SchedulerStore } from './scheduler-store.js';
 import type { EntryChanges, EntryData, VocabularyCatalog } from './vocabulary-catalog.js';
 
 export interface VocabularyServiceOptions {
@@ -21,6 +25,8 @@ export interface VocabularyServiceOptions {
   timeZone: string;
   /** The owner allowed the app to change stored data. */
   writesRequested: boolean;
+  /** Which schedule decides when a word is due. Without one, the mastery schedule. */
+  scheduler?: SchedulerStore;
   now?: () => Date;
 }
 
@@ -40,18 +46,36 @@ export class VocabularyService {
   private readonly locks = new KeyedMutex();
   /** Submissions already answered, so a repeated request returns the same record. */
   private readonly recentCreates = new Map<string, { entry: EntryData; at: number }>();
+  private readonly scheduler: SchedulerStore;
 
   constructor(private readonly options: VocabularyServiceOptions) {
     this.now = options.now ?? (() => new Date());
+    this.scheduler = options.scheduler ?? MASTERY_ONLY;
   }
 
   private today(): IsoDate {
     return calendarDateInTimeZone(this.now(), this.options.timeZone);
   }
 
+  /**
+   * An entry as the reviewer sees it. Its review date, and with it the status,
+   * is the one under the schedule in charge; the stored mastery date is
+   * untouched underneath.
+   */
   private decorate(entry: EntryData, today: IsoDate): VocabularyEntry {
-    const reviewStatus = classifyReviewStatus(entry, today, this.options.rules);
-    return { ...entry, reviewStatus, reviewable: isReviewableNow(reviewStatus, this.options.rules) };
+    const { rules, timeZone } = this.options;
+    const scheduler = this.scheduler.get();
+    const stored = { ...entry };
+    delete stored.fsrsDue;
+    const reviewDate = dueDateUnder(scheduler, entry, timeZone);
+    const reviewStatus = classifyReviewStatus({ mastery: entry.mastery, reviewDate }, today, rules);
+    return {
+      ...stored,
+      reviewDate,
+      ...(isScheduledByFsrs(scheduler, entry) ? { scheduledBy: 'fsrs' as const } : {}),
+      reviewStatus,
+      reviewable: isReviewableNow(reviewStatus, rules),
+    };
   }
 
   private async writesEnabled(): Promise<boolean> {
@@ -139,6 +163,43 @@ export class VocabularyService {
     });
   }
 
+  /**
+   * Imports up to one request's worth of words, one at a time, each through
+   * the same path as the Add form: the same validation, the same defaults for
+   * a new word, the same duplicate check and the same request id that makes a
+   * repeat harmless. Each item is judged on its own, so one bad row costs
+   * only itself. If the store fails part-way, what was done so far is
+   * reported with where it stopped; sending the same batch again finishes it
+   * without creating anything twice.
+   */
+  async importBatch(items: readonly unknown[]): Promise<ImportResponse> {
+    await this.requireWrites();
+    const results: ImportResponse['results'] = [];
+    for (const [index, raw] of items.entries()) {
+      const parsed = importItemSchema.safeParse(raw);
+      if (!parsed.success) {
+        const message = parsed.error.issues.map((issue) => `${issue.path.join('.') || 'row'}: ${issue.message}`).join('; ');
+        results.push({ outcome: 'invalid', entry: null, message });
+        continue;
+      }
+      try {
+        const { entry, created } = await this.create(parsed.data);
+        results.push({ outcome: created ? 'imported' : 'already_imported', entry, message: null });
+      } catch (error) {
+        if (error instanceof HttpError && error.code === 'duplicate') {
+          results.push({ outcome: 'duplicate', entry: null, message: error.message });
+        } else if (error instanceof HttpError && error.status === 400) {
+          results.push({ outcome: 'invalid', entry: null, message: error.message });
+        } else {
+          // Not about this row: the store is in trouble. Stop here and say exactly how far it got.
+          const message = error instanceof HttpError ? error.message : 'The database could not be reached.';
+          return { results, stopped: { index, message } };
+        }
+      }
+    }
+    return { results, stopped: null };
+  }
+
   /** Writes only the fields whose value actually differs from what is stored. */
   async update(id: string, request: UpdateEntryRequest): Promise<VocabularyEntry> {
     await this.requireWrites();
@@ -161,7 +222,20 @@ export class VocabularyService {
       }
       if (request.schedule !== undefined) {
         if (request.schedule.mastery !== current.mastery) changes.mastery = request.schedule.mastery;
-        if (request.schedule.reviewDate !== current.reviewDate) changes.reviewDate = request.schedule.reviewDate;
+        // Compared with the date the form was shown, which is the one under the schedule in charge.
+        const scheduler = this.scheduler.get();
+        if (request.schedule.reviewDate !== dueDateUnder(scheduler, current, this.options.timeZone)) {
+          // A date typed in is a mastery date. FSRS works its own out from the answers; there is
+          // no honest FSRS state to go with a date somebody picked.
+          if (isScheduledByFsrs(scheduler, current)) {
+            throw new HttpError(
+              409,
+              'not_editable',
+              'FSRS sets this word’s review date from your answers, so it cannot be changed by hand. To set dates yourself, switch back to the mastery schedule in Settings.',
+            );
+          }
+          changes.reviewDate = request.schedule.reviewDate;
+        }
       }
       if (Object.keys(changes).length === 0) return this.decorate(current, today);
 

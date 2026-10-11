@@ -4,7 +4,7 @@
  * invalid transitions (grading an unflipped card, a second submit while one is
  * in flight) are ruled out rather than merely discouraged.
  */
-import type { QueueResponse, ReviewCard } from '../../shared/api.js';
+import type { Confidence, QueueResponse, ReviewCard } from '../../shared/api.js';
 import type { ReviewAction } from '../../shared/review-logic.js';
 
 export type SessionStatus = 'loading' | 'ready' | 'flipped' | 'saving' | 'error' | 'completed';
@@ -40,6 +40,16 @@ export interface SessionState {
   undoing: boolean;
   /** Why the last Undo did not happen. */
   undoError: string | null;
+  /**
+   * How sure the reviewer said they were about the current card, before
+   * seeing its answer. Sent with the answer; it never changes what the answer does.
+   */
+  confidence: Confidence | null;
+  /**
+   * The current card's answer has been shown at least once. From then on a
+   * confidence rating would be hindsight, so none is accepted.
+   */
+  revealed: boolean;
 }
 
 export interface SavedAnswer {
@@ -55,6 +65,8 @@ export type SessionEvent =
   | { type: 'LOAD_SUCCEEDED'; cards: ReviewCard[]; meta: SessionMeta }
   | { type: 'LOAD_FAILED'; message: string; unauthorized: boolean }
   | { type: 'FLIP' }
+  /** Says how sure the reviewer is and shows the answer. Only before the answer has been seen. */
+  | { type: 'RATE_CONFIDENCE'; level: Confidence }
   | { type: 'GRADE'; action: ReviewAction }
   /** `requestId` is given only when the answer was really saved and can be undone. */
   | { type: 'SAVE_SUCCEEDED'; requestId?: string }
@@ -79,6 +91,8 @@ export const initialSessionState: SessionState = {
   lastSaved: null,
   undoing: false,
   undoError: null,
+  confidence: null,
+  revealed: false,
 };
 
 /** Whether the latest saved answer can be taken back right now. */
@@ -101,6 +115,9 @@ function advance(state: SessionState, tally: SessionTally): SessionState {
     tally,
     pendingAction: null,
     error: null,
+    // A new card: nothing has been said about it, and nothing shown.
+    confidence: null,
+    revealed: false,
   };
 }
 
@@ -129,9 +146,13 @@ export function transition(state: SessionState, event: SessionEvent): SessionSta
       };
 
     case 'FLIP':
-      if (state.status === 'ready') return { ...state, status: 'flipped' };
+      if (state.status === 'ready') return { ...state, status: 'flipped', revealed: true };
       if (state.status === 'flipped') return { ...state, status: 'ready' };
       return state;
+
+    case 'RATE_CONFIDENCE':
+      if (state.status !== 'ready' || state.revealed) return state;
+      return { ...state, status: 'flipped', revealed: true, confidence: event.level };
 
     case 'GRADE':
       // Not while an Undo is in flight: it is about to move the session back a card.
@@ -189,6 +210,9 @@ export function transition(state: SessionState, event: SessionEvent): SessionSta
         lastSaved: null,
         undoing: false,
         undoError: null,
+        // Its answer was on screen a moment ago: a rating given now would not be a prediction.
+        confidence: null,
+        revealed: true,
       };
     }
 

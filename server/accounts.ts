@@ -1,4 +1,6 @@
 import type { AnalyticsService } from './analytics-service.js';
+import type { ExportService } from './export-service.js';
+import type { LibraryService } from './library-service.js';
 import type { ReviewService } from './review-service.js';
 import type { VocabularyService } from './vocabulary-service.js';
 
@@ -20,6 +22,8 @@ export interface AccountSession {
   review: ReviewService;
   vocabulary: VocabularyService;
   analytics: AnalyticsService;
+  library: LibraryService;
+  exporter: ExportService;
   saveTimeZone(timeZone: string): Promise<string>;
 }
 

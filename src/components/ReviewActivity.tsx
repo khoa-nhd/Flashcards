@@ -1,9 +1,11 @@
 import type { AnalyticsResponse } from '../../shared/api.js';
+import { STUDY_MODE_LABELS } from '../../shared/study-modes.js';
 import { useApp } from '../app-context.js';
 import { useRemote, type Remote } from '../hooks/useRemote.js';
 import { ROUTES } from '../lib/router.js';
 import { BarChart } from './BarChart.js';
-import { formatDuration } from './CompletionScreen.js';
+import { CONFIDENCE_LABELS } from './ConfidencePrompt.js';
+import { formatDuration } from '../lib/format.js';
 import { Link } from './Link.js';
 import { StatTile } from './StatTile.js';
 import { formatDate } from './badges.js';
@@ -17,7 +19,67 @@ const NOT_ENOUGH = 'Not enough data';
 const percent = (ratio: number) => `${Math.round(ratio * 100)}%`;
 const days = (count: number) => `${count} ${count === 1 ? 'day' : 'days'}`;
 
-const MODE_LABELS: Record<string, string> = { flashcard: 'Flashcards' };
+const MODE_LABELS: Record<string, string> = { flashcard: 'Flashcards', ...STUDY_MODE_LABELS };
+
+/**
+ * Practice in the other study modes, one row per mode and never a combined
+ * figure: recognising a meaning and producing a word are different skills.
+ */
+function Practice({ data }: { data: AnalyticsResponse }) {
+  const { modes, today } = data.practice;
+  if (modes.length === 0) {
+    return (
+      <p className="text-sm text-muted">
+        No practice in the last 30 days.{' '}
+        <Link to={ROUTES.practice} className="font-medium text-accent hover:underline">
+          Start a practice session
+        </Link>
+      </p>
+    );
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      <table className="w-full text-sm">
+        <caption className="pb-1 text-left text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+          Practice by mode, last 30 days
+        </caption>
+        <thead className="text-left text-xs text-muted">
+          <tr>
+            <th scope="col" className="py-1 font-medium">
+              Mode
+            </th>
+            <th scope="col" className="py-1 text-right font-medium">
+              Answers
+            </th>
+            <th scope="col" className="py-1 text-right font-medium">
+              Correct
+            </th>
+            <th scope="col" className="py-1 text-right font-medium">
+              Share
+            </th>
+          </tr>
+        </thead>
+        <tbody className="tabular-nums">
+          {modes.map((mode) => (
+            <tr key={mode.mode} className="border-t border-line">
+              <th scope="row" className="py-1.5 text-left font-normal">
+                {MODE_LABELS[mode.mode] ?? mode.mode}
+              </th>
+              <td className="py-1.5 text-right">{mode.answers}</td>
+              <td className="py-1.5 text-right">{mode.correct}</td>
+              <td className="py-1.5 text-right">{ratioCell(mode.accuracy)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className={HELP}>
+        Today: <span className="tabular-nums">{today.correct}</span> of {today.answers} practice{' '}
+        {today.answers === 1 ? 'answer' : 'answers'} correct. Practice is kept apart from the review figures above and
+        never changes mastery or review dates. Recall is marked by you; the other modes are checked for you.
+      </p>
+    </div>
+  );
+}
 
 /** Review activity is loaded by the page that shows it, so its Refresh can re-read it. */
 export function useReviewActivity(): Remote<AnalyticsResponse> & { reload(): void } {
@@ -131,6 +193,147 @@ function Figures({ data }: { data: AnalyticsResponse }) {
 
 const ratioCell = (value: number | null) => (value === null ? NOT_ENOUGH : percent(value));
 
+/**
+ * How answers went at each level of confidence given beforehand. The two
+ * mismatches are plain counts: sure and wrong, unsure and right.
+ */
+function Calibration({ data }: { data: AnalyticsResponse }) {
+  const { levels } = data.calibration;
+  const rated = levels.reduce((total, level) => total + level.reviews, 0);
+  if (rated === 0) {
+    return (
+      <p className="text-sm text-muted">
+        No confidence ratings in the last 30 days. To collect them, turn on “Ask how sure I am before showing the
+        answer” in{' '}
+        <Link to={ROUTES.settings} className="font-medium text-accent hover:underline">
+          Settings
+        </Link>
+        .
+      </p>
+    );
+  }
+  const at = (confidence: number) => levels.find((level) => level.confidence === confidence);
+  const sureAndWrong = (at(3)?.reviews ?? 0) - (at(3)?.remembered ?? 0);
+  const unsureAndRight = at(1)?.remembered ?? 0;
+  return (
+    <div className="flex flex-col gap-2">
+      <table className="w-full text-sm">
+        <caption className="pb-1 text-left text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+          How sure you were, last 30 days
+        </caption>
+        <thead className="text-left text-xs text-muted">
+          <tr>
+            <th scope="col" className="py-1 font-medium">
+              Confidence before the answer
+            </th>
+            <th scope="col" className="py-1 text-right font-medium">
+              Answers
+            </th>
+            <th scope="col" className="py-1 text-right font-medium">
+              Remembered
+            </th>
+            <th scope="col" className="py-1 text-right font-medium">
+              Share
+            </th>
+          </tr>
+        </thead>
+        <tbody className="tabular-nums">
+          {levels.map((level) => (
+            <tr key={level.confidence} className="border-t border-line">
+              <th scope="row" className="py-1.5 text-left font-normal">
+                {CONFIDENCE_LABELS[level.confidence]}
+              </th>
+              <td className="py-1.5 text-right">{level.reviews}</td>
+              <td className="py-1.5 text-right">{level.remembered}</td>
+              <td className="py-1.5 text-right">{level.reviews === 0 ? '—' : ratioCell(level.accuracy)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <p className={HELP}>
+        Sure but not remembered: <span className="tabular-nums">{sureAndWrong}</span> of {at(3)?.reviews ?? 0} high-confidence{' '}
+        {(at(3)?.reviews ?? 0) === 1 ? 'answer' : 'answers'}. Unsure but remembered:{' '}
+        <span className="tabular-nums">{unsureAndRight}</span> of {at(1)?.reviews ?? 0} low-confidence{' '}
+        {(at(1)?.reviews ?? 0) === 1 ? 'answer' : 'answers'}. Only answers given with a rating are counted; the rating
+        never changes what an answer does.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Accuracy and time per card, week by week. A week with too few answers gets
+ * no bar and says so: a blank is not a zero.
+ */
+function WeeklyTrends({ data }: { data: AnalyticsResponse }) {
+  const { weeks, minSample } = data;
+  if (weeks.length === 0) return null;
+  const range = (week: Period) => `${formatDate(week.from, 'short')} – ${formatDate(week.to)}`;
+  // Every other week is labelled, always including the newest.
+  const tick = (week: Period, index: number) =>
+    index % 2 === (weeks.length - 1) % 2 ? formatDate(week.to, 'short') : '';
+  const tooFew = (have: number, what: string) =>
+    have === 0 ? `No ${what}` : `${NOT_ENOUGH}: ${have} of ${minSample} ${what} needed`;
+
+  const accuracy = weeks.map((week, index) => ({
+    key: week.from,
+    tick: tick(week, index),
+    label: range(week),
+    value: week.accuracy === null ? 0 : Math.round(week.accuracy * 100),
+    text:
+      week.accuracy === null
+        ? tooFew(week.reviews, 'answers')
+        : `${percent(week.accuracy)} (${week.remembered} of ${week.reviews} answers remembered)`,
+  }));
+  const timed = weeks.map((week, index) => {
+    const enough = week.averageMs !== null && week.timedReviews >= minSample;
+    return {
+      key: week.from,
+      tick: tick(week, index),
+      label: range(week),
+      value: enough && week.averageMs !== null ? Math.round(week.averageMs / 100) / 10 : 0,
+      text:
+        enough && week.averageMs !== null
+          ? `${formatDuration(week.averageMs)} per card, over ${week.timedReviews} timed answers`
+          : tooFew(week.timedReviews, 'timed answers'),
+    };
+  });
+  const anyAccuracy = weeks.some((week) => week.accuracy !== null);
+  const anyTime = timed.some((week) => week.value > 0);
+
+  return (
+    <div className="flex flex-col gap-4">
+      {anyAccuracy ? (
+        <BarChart
+          title={`Accuracy by week, last ${weeks.length} weeks (%)`}
+          unit={['percent', 'percent']}
+          categoryLabel="Week"
+          height={180}
+          data={accuracy}
+        />
+      ) : (
+        <p className="text-sm text-muted">
+          No week has had {minSample} answers yet, so there is no week-by-week accuracy to show.
+        </p>
+      )}
+      {anyTime && (
+        <BarChart
+          title={`Time per card by week, last ${weeks.length} weeks (seconds)`}
+          unit={['second', 'seconds']}
+          categoryLabel="Week"
+          height={180}
+          data={timed}
+        />
+      )}
+      <p className={HELP}>
+        A week here is seven days ending on today’s weekday, so the last bar ends today. A week with fewer than{' '}
+        {minSample} answers has no bar: that is too few to call a percentage, not a score of zero. Accuracy is what
+        happened in your saved answers, not a prediction.
+      </p>
+    </div>
+  );
+}
+
 /** The longer account on the Insights page: a chart of the last month and the figures behind it. */
 export function ReviewActivityDetail() {
   const activity = useReviewActivity();
@@ -141,6 +344,7 @@ export function ReviewActivityDetail() {
         <Unavailable activity={activity} />
       </div>
       {hasFigures(activity) && <Detail data={activity.data} />}
+      {activity.status === 'ready' && activity.data.practice.available && <Practice data={activity.data} />}
     </section>
   );
 }
@@ -166,6 +370,8 @@ function Detail({ data }: { data: AnalyticsResponse }) {
           value: day.reviews,
         }))}
       />
+
+      <WeeklyTrends data={data} />
 
       <div className="overflow-x-auto">
         <table className="w-full min-w-[34rem] text-sm">
@@ -233,6 +439,8 @@ function Detail({ data }: { data: AnalyticsResponse }) {
           </tbody>
         </table>
       )}
+
+      {data.calibration.available && <Calibration data={data} />}
 
       <p className="text-sm">
         Streak: <strong className="font-semibold tabular-nums">{days(data.streak.current)}</strong>

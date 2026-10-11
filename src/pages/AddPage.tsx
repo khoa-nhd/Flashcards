@@ -62,7 +62,15 @@ export function AddPage() {
   const state = useVocabulary();
   return (
     <div className={PAGE}>
-      <PageHeader title="Add vocabulary" description="Create a new word in your vocabulary." />
+      <PageHeader
+        title="Add vocabulary"
+        description="Create a new word in your vocabulary."
+        actions={
+          <Link to={ROUTES.import} className={BUTTON_SECONDARY}>
+            Import a list
+          </Link>
+        }
+      />
       <VocabularyGate state={state}>{state.meta !== null && <AddForm meta={state.meta} entries={state.entries} />}</VocabularyGate>
     </div>
   );

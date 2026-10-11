@@ -5,7 +5,9 @@
  * where it was and never reloads data needlessly.
  */
 import { createContext, useContext, useEffect, useSyncExternalStore } from 'react';
+import type { ReviewFocus } from '../shared/api.js';
 import type { AppApi } from './lib/api-client.js';
+import { createLibraryStore, type LibraryState, type LibraryStore } from './lib/library-store.js';
 import { createSessionController, type SessionController } from './lib/session-controller.js';
 import { createSettingsStore, type Settings, type SettingsStore } from './lib/settings.js';
 import { createToastStore, type ToastStore } from './lib/toasts.js';
@@ -31,7 +33,9 @@ export interface AppServices {
    * afterwards only a finished or failed session is replaced, so one in
    * progress survives a trip to another tab.
    */
-  ensureReviewSession(focus?: 'weak' | null): void;
+  ensureReviewSession(focus?: ReviewFocus | null, collection?: string | null): void;
+  /** Collections, further examples and relationships between words. */
+  library: LibraryStore;
 }
 
 /**
@@ -48,19 +52,22 @@ export function createAppServices(
   // A saved answer changes mastery and dates, so the other pages must re-read.
   const session = createSessionController(api, () => vocabulary.markStale());
   let reviewStarted = false;
-  const ensureReviewSession = (focus: 'weak' | null = null) => {
+  const library = createLibraryStore(api);
+  const ensureReviewSession = (focus: ReviewFocus | null = null, collection: string | null = null) => {
     const current = session.getState();
     const failedToLoad = current.status === 'error' && current.error?.kind === 'load';
     // Asking for a different selection of cards is a new session. An answer that is still being saved, or that
     // failed and is waiting for a retry, is never dropped for it.
     const unsettled = current.status === 'saving' || (current.status === 'error' && !failedToLoad);
-    const refocused = reviewStarted && current.meta !== null && current.meta.focus !== focus && !unsettled;
+    const changed =
+      current.meta !== null && (current.meta.focus !== focus || (current.meta.collection?.id ?? null) !== collection);
+    const refocused = reviewStarted && changed && !unsettled;
     if (!reviewStarted || current.status === 'completed' || failedToLoad || refocused) {
       reviewStarted = true;
-      void session.load({ focus });
+      void session.load({ focus, collection });
     }
   };
-  return { api, session, vocabulary, settings, toasts: createToastStore(), account, ensureReviewSession };
+  return { api, session, vocabulary, settings, toasts: createToastStore(), account, ensureReviewSession, library };
 }
 
 const AppContext = createContext<AppServices | null>(null);
@@ -90,6 +97,16 @@ export function useVocabulary(): VocabularyState {
       window.removeEventListener('focus', refresh);
     };
   }, [vocabulary]);
+  return state;
+}
+
+/** The account's collections, examples and relationships, loading them on first use. */
+export function useLibrary(): LibraryState {
+  const { library } = useApp();
+  const state = useSyncExternalStore(library.subscribe, library.getState);
+  useEffect(() => {
+    library.ensureLoaded();
+  }, [library]);
   return state;
 }
 

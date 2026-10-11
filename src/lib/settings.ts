@@ -1,8 +1,9 @@
 /**
- * Display preferences, kept in this browser only. Nothing here is a secret,
+ * Display and review preferences, kept in this browser only. Nothing here is a secret,
  * none of it is vocabulary, and nothing here is sent to the server.
  */
 import { z } from 'zod';
+import { DEFAULT_SPEECH_LANGUAGE, SPEECH_LANGUAGES } from './speech.js';
 
 export const SORT_KEYS = ['word', 'dateAdded', 'reviewDate', 'mastery'] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
@@ -17,6 +18,12 @@ const settingsSchema = z.object({
   dashboardDays: z.union([z.literal(14), z.literal(30), z.literal(90)]),
   /** Turns animations off regardless of the system setting. */
   reduceMotion: z.boolean(),
+  /** Ask how sure the reviewer is before showing each answer. */
+  askConfidence: z.boolean(),
+  /** An extra pair of answer keys beside the arrow keys. */
+  answerKeys: z.enum(['none', 'jk', 'fj', 'numbers']),
+  /** The accent Listening practice asks the browser to read in. */
+  speechLang: z.enum(SPEECH_LANGUAGES.map(([code]) => code)),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;
@@ -28,6 +35,9 @@ export const DEFAULT_SETTINGS: Settings = {
   bankPageSize: 50,
   dashboardDays: 30,
   reduceMotion: false,
+  askConfidence: false,
+  answerKeys: 'none',
+  speechLang: DEFAULT_SPEECH_LANGUAGE,
 };
 
 const STORAGE_KEY = 'vocabulary-review:settings:v1';

@@ -7,13 +7,15 @@ in on.
 | Tab | What it does |
 | --- | --- |
 | **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
-| **Review** | Flashcards: flip, then answer Remember or Not remember. Undo the last answer; a summary of what was saved at the end. |
-| **Add vocabulary** | Creates a new word, with a duplicate check. |
-| **Vocabulary bank** | Every word: search, filter, sort, view details, edit, delete, export. |
-| **Calendar** | Words by the day they were added. |
-| **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of just those that are due. |
-| **Insights** | Reviews per day, accuracy and retention by period, additions by day, week and month, share mastered, busiest days, incomplete entries. |
-| **Settings** | Account, time zone, scheduling (and the FSRS comparison), display preferences, backup export, deleted words, connection and database status. |
+| **Review** | Flashcards: flip, then answer Remember or Not remember. Narrow the queue (weakest, overdue, due today, recently added, one collection). Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. |
+| **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, and listening (experimental). Recorded for your statistics; never changes mastery or a review date. |
+| **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
+| **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples and related words. |
+| **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
+| **Calendar** | A month at a glance: words by the day they were added, or saved reviews by the day you did them. |
+| **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of just those that are due, or practice with all of them. |
+| **Insights** | Reviews per day, accuracy and time per card week by week, accuracy and retention by period, confidence calibration, practice by mode, additions over time, share mastered, busiest days, incomplete entries. |
+| **Settings** | Account, time zone, daily goal, review preferences, scheduling (which schedule is in charge, the FSRS comparison and estimate, and a what-if on your saved answers), display preferences, exports, deleted words, connection and database status. |
 
 Reference documents:
 
@@ -21,7 +23,9 @@ Reference documents:
 - [docs/supabase-schema.md](docs/supabase-schema.md) — the database, accounts and security.
 - [docs/metrics.md](docs/metrics.md) — the exact definition of every number shown.
 - [docs/supabase-migration.md](docs/supabase-migration.md) — the record of the move from Notion to Supabase.
+- [docs/import-and-export.md](docs/import-and-export.md) — importing a list, the export format, and backup and recovery.
 - [docs/upgrade-plan.md](docs/upgrade-plan.md) — the plan for turning this into a fuller learning system, and how far it has got.
+- [docs/offline-mode-design.md](docs/offline-mode-design.md) — what offline review would take. Not built.
 
 ## Try it with sample data
 
@@ -50,10 +54,13 @@ In Windows PowerShell, if `npm` is blocked by the script execution policy, use
 | Not remember | `←` | Swipe left |
 | Remember | `→` | Swipe right |
 | Undo the last answer | `U` | The Undo button above the card |
+| List the shortcuts | `?` | The keyboard button above the card |
 
 An answer is accepted only after the card has been flipped. The two buttons
 under the card do the same as the keys and swipes. These shortcuts are active
-on the Review tab only.
+on the Review tab only, and never while you are typing in a field. Settings →
+Review preferences can add a second pair of answer keys (`J`/`K`, `F`/`J` or
+`1`/`2`) and can ask how sure you are before each answer is shown.
 
 | Answer | Mastery | Review date |
 | --- | --- | --- |
@@ -62,7 +69,8 @@ on the Review tab only.
 
 A word is due when its mastery is below 10 and its review date is empty, today
 or earlier. The definition and example are hidden above mastery 5. "Today" is
-the calendar day in your account's time zone.
+the calendar day in your account's time zone. (If you put FSRS in charge, the
+date that decides is FSRS's instead; see Scheduling and FSRS below.)
 
 A review session survives switching tabs: come back and it is where you left
 it. A finished session reloads the queue when you return.
@@ -82,15 +90,68 @@ listed words that are already due (`/review?focus=weak`). It only narrows the
 normal queue; it never brings a word forward, and answers are saved by the
 same rules.
 
+**A daily goal** (Settings) is a number of reviews, a number of minutes, or
+both. It is only ever compared with what you saved: it never hides, reorders
+or reschedules a card, and it changes no scheduling setting.
+
+### Practice
+
+The Practice tab asks about your words in other ways. Each mode needs
+different things from a word and leaves out the ones that lack them, saying
+why.
+
+| Mode | You see | You do | Judged by |
+| --- | --- | --- | --- |
+| Recognition | The word | Pick its meaning from four of your own | The server |
+| Recall | The meaning | Recall the word, then say whether you had it | You |
+| Typing | The meaning | Type the word | The server |
+| Fill in the blank | Your example with the word left out | Type the word | The server |
+| Listening (experimental) | Nothing: the word is read aloud | Type what you hear | The server |
+
+Practice is recorded and reported one mode at a time, and **never changes
+mastery, a review date or FSRS**. Listening uses the browser's own speech
+synthesis: no audio is stored or sent, and how it sounds, or whether a voice
+exists for the accent chosen, depends on the device. Where a browser cannot
+read text aloud the mode says so and stays off.
+
 ### Scheduling and FSRS
 
-What is due is decided by the mastery rule above, and only by it. Alongside,
-every saved answer is also run through [FSRS](https://github.com/open-spaced-repetition/ts-fsrs)
-(Remember counts as "Good", Not remember as "Again") and the result is stored
-next to the mastery schedule. Settings → Scheduling shows the two side by
-side. **FSRS does not decide what is due, and there is no switch to make it do
-so yet.** A word gets an FSRS state the first time it is reviewed from now on;
-none is invented for words from their mastery level.
+Every saved answer moves **two** schedules, each in its own place:
+
+- the **mastery schedule** in the table above, and
+- an [FSRS](https://github.com/open-spaced-repetition/ts-fsrs) state (Remember
+  counts as "Good", Not remember as "Again"; no same-day steps, no random
+  spread).
+
+Only one of them decides what is due, and each account chooses which, in
+Settings → Scheduling. **The mastery schedule is in charge unless you change
+it.** Because both are kept up to date by every answer whichever is in charge,
+changing the choice converts nothing, loses nothing, and can be undone at any
+time.
+
+With FSRS in charge:
+
+- A word comes back on the day FSRS works out. Everywhere that says when a
+  word is due (the queue, the bank, the dashboard, the day's plan, weak words)
+  follows it.
+- A word that has not been answered since FSRS started being calculated has no
+  FSRS state, and none is made up: it stays on its mastery date until its
+  first answer.
+- Mastery works exactly as before. It still rises with each Remember, still
+  hides the definition above 5, and still retires a word at 10.
+- A review date FSRS set cannot be typed over. Mastery can still be corrected.
+
+Settings → Scheduling also shows, before you choose:
+
+- **The two schedules side by side** for the words FSRS has seen.
+- **Estimated recall**: FSRS's own figure for the chance you would remember a
+  word right now. It is a model's estimate, not a measurement, and is not the
+  accuracy on the Insights page. Words answered only once show none.
+- **Try it on your saved answers**: replays the answers you actually saved
+  through FSRS at any target retention and sets the result next to your
+  schedule as it stands. It stores nothing and moves no date. Its one
+  forward-looking table is a stated scenario ("if you remembered every word"),
+  not a forecast.
 
 ### Database updates
 
@@ -104,12 +165,22 @@ in the Supabase dashboard (SQL Editor → paste the file → Run):
 | `20261011090000_sessions_and_undo.sql` | 2 | Undo and the end-of-session summary. |
 | `20261012090000_fsrs_shadow.sql` | 3 | The FSRS calculation and comparison. |
 | `20261013090000_review_analytics.sql` | 4 | Review activity and history-based weak words. |
+| `20261014090000_goals_and_confidence.sql` | 5 | The daily goal and confidence ratings. |
+| `20261015090000_practice_modes.sql` | 6 | Recording practice in the other study modes. |
+| `20261016090000_collections_and_relations.sql` | 7 | Collections, further examples, related words. |
+| `20261017090000_scheduler_switch.sql` | 8 | Choosing which schedule is in charge (FSRS or mastery). Changes nothing until an account chooses FSRS. |
 
 Each file only adds things; none changes or removes existing data. The app
 checks the database version and keeps working on an older one, with the newer
 features switched off and saying so. Settings → Connection → Database shows
 the version found and whether an update is waiting. Run the SQL first, then deploy; either
 order is safe.
+
+If the Vercel project is linked to Supabase through Vercel's Supabase
+integration, the files in `supabase/migrations` may be applied to the database
+automatically when `main` is deployed. Whether that happens depends on how the
+integration is set up, so check the version shown in Settings after a deploy
+rather than assuming either way.
 
 ## Set up your own copy
 
@@ -195,6 +266,20 @@ email if your project asks for it.
   appears right after, and **Settings → Deleted words** restores it at any
   later time, with its mastery and dates as they were.
 - **Export** downloads all words as CSV or JSON. Exporting only reads.
+  Settings → **Export everything** downloads the whole account: words, both
+  schedules, the full review history, collections, examples, links and
+  settings. See [docs/import-and-export.md](docs/import-and-export.md).
+
+## Importing a list
+
+Add vocabulary → **Import a list**. Paste text or choose a file: CSV or
+tab-separated text, a plain list with one word per line, an Excel `.xlsx` file
+(first sheet), or a file this app exported. The file is read on your device.
+You map the columns, see every row with its status (new, already in your
+vocabulary, repeated in the list, cannot be imported), and nothing is added
+until you confirm. Duplicates are left out unless you tick them; nothing is
+ever merged into an existing word. Imported words start as new words: a
+mastery or review date in the file is ignored.
 
 ## How it protects your data
 
@@ -235,7 +320,8 @@ Sign in with the same account on each device. The data is the same everywhere.
   second device is told the card changed on another device and offers to skip
   it. Nothing is counted twice.
 - There is no offline mode. An answer given without a connection stays on
-  screen with a Retry.
+  screen with a Retry. What building one would take is written up in
+  [docs/offline-mode-design.md](docs/offline-mode-design.md).
 
 ## Deploying
 
@@ -281,16 +367,22 @@ shared/                     Pure logic used by browser and server
   metrics.ts                  Dashboard, insights and calendar numbers
   analytics.ts                Review activity from saved answers
   weak-words.ts               Which words need attention, and why
-  scheduler/                  FSRS (calculated alongside), the rating map, the comparison
+  scheduler/                  FSRS, the rating map, which schedule is in charge, the comparison, the what-if
+  study-modes.ts              The practice modes: what each needs and how an answer is judged
+  session-planner.ts          The daily goal against what was saved
+  library.ts                  Collections, further examples, links between words
+  import.ts, export-format.ts Reading a list to import; the account export
   dates.ts, text.ts           Calendar-day arithmetic; word normalisation and search
   api.ts                      Request/response schemas (Zod)
   backup.ts                   The backup file format used by the import
 server/
   create-app.ts               Routes, validation, sign-in check, error mapping
   accounts.ts                 What a signed-in request may use
-  review-service.ts           Review queue, the safe answer path, undo, session summary
-  analytics-service.ts        Review activity and weak words (read-only)
-  vocabulary-service.ts       List, create, edit, trash, restore
+  review-service.ts           Review queue, the safe answer path, undo, practice, the schedule in charge
+  analytics-service.ts        Review activity, weak words, the day's plan (read-only but for the goal)
+  vocabulary-service.ts       List, create, edit, import, trash, restore
+  library-service.ts          Collections, examples and links
+  export-service.ts           The account export
   supabase/                   Database gateway, repository, account sessions, backup import
   mock/                       Sample words and illustrative rules
   index.ts                    Node entry (self-hosting)
@@ -315,20 +407,32 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | --- | --- |
 | `GET /api/health` | Configuration status. Public; contains no secrets. |
 | `GET /api/config` | Public. How to sign in: the project address and public key. |
-| `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. `?focus=weak` narrows it to the due words on the weak list. |
-| `POST /api/review-action` | `{ pageId, action, expected, requestId, sessionId?, durationMs? }` → `applied`, `already_applied` or `dry_run`. `409` if the word changed. |
+| `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. `?focus=weak`, `overdue`, `due_today` or `recent`, or `?collection=<id>`, narrows it; none can add a word that is not due. |
+| `POST /api/review-action` | `{ pageId, action, expected, requestId, sessionId?, durationMs?, confidence? }` → `applied`, `already_applied` or `dry_run`. `409` if the word changed. |
+| `POST /api/practice` | `{ pageId, mode, answer, requestId, sessionId? }` → the verdict. Judged on the server and recorded as practice; it cannot change mastery or a review date. |
 | `POST /api/review-undo` | `{ reviewRequestId, requestId }` → the word's restored state. `409` if the answer is no longer the latest for that word. |
 | `GET /api/sessions/:id/summary` | What was saved in one sitting. |
-| `GET /api/analytics` | Review activity: periods, streak, by mode, per day. Read-only. |
+| `GET /api/analytics` | Review activity: periods, streak, by mode, per day, and how answers went at each confidence level. Read-only. |
+| `GET /api/plan`, `PUT /api/goal` | Today's reviewing against the daily goal; storing the goal `{ reviews, minutes }`. |
 | `GET /api/weak-words` | Words that need attention, with reasons. Read-only. |
-| `GET /api/scheduler` | Which schedule is in charge, and the FSRS comparison. Read-only. |
+| `GET /api/scheduler` | Which schedule is in charge, the FSRS comparison, and FSRS's recall estimate per word. Read-only. |
+| `PUT /api/scheduler` | `{ scheduler: "mastery_v1" \| "fsrs" }`: puts one schedule in charge. Converts nothing. `409` where the database cannot keep the choice yet. |
+| `GET /api/simulation` | `?retention=0.7…0.97` (the account's own when omitted). Replays saved answers through FSRS beside the live mastery schedule. Read-only; stores nothing. |
+| `GET /api/review-days` | `?from=&to=` (at most 100 days): saved reviews per day, for the calendar. Read-only. |
 | `GET /api/vocabulary` | Every word, with its review state. |
 | `GET /api/vocabulary/:id` | One word, read fresh. |
 | `POST /api/vocabulary` | Create a word. `409` with the existing entries if it is a duplicate. |
+| `POST /api/vocabulary/import` | `{ items }`, up to 50 rows of content. Each is created as a new word, once per row id; duplicates and bad rows are reported per row. |
+| `GET /api/export` | Everything the account can read about itself, in one JSON document. Read-only. |
 | `PATCH /api/vocabulary/:id` | Edit named fields; `schedule` for mastery and review date. |
 | `DELETE /api/vocabulary/:id` | Move a word to the trash. |
 | `POST /api/vocabulary/:id/restore` | Take it back out. |
 | `GET /api/trash` | Deleted words that can be restored. |
+| `GET /api/library` | Collections with their words, further examples, and links between words, in one read. |
+| `POST`, `PATCH`, `DELETE /api/collections[/:id]` | Create, rename, delete a collection. Deleting removes the collection and its memberships, never a word. |
+| `PUT /api/collections/:id/words/:wordId` | `{ member }`: put a word in a collection or take it out. |
+| `POST /api/vocabulary/:id/examples`, `PATCH`, `DELETE /api/examples/:id` | Further example sentences for a word. |
+| `POST /api/relations`, `DELETE /api/relations/:id` | `{ fromId, toId, kind }`: link two of your words. Stored once per pair and kind. |
 | `GET /api/settings`, `PUT /api/settings` | The account's time zone and FSRS target retention; the database version found. |
 
 ## Development
@@ -358,15 +462,30 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 - A signed-in user can change their own data directly through the Supabase
   API, bypassing the review rules. They cannot touch anyone else's.
 - The review history starts on 2026-10-10. Earlier reviews were never
-  recorded individually, so they are not in it, and review activity, streaks
-  and weak words can only see from then on.
-- The scheduling is the mastery-based rule above. FSRS is calculated alongside
-  for comparison only; switching to it is not built yet.
+  recorded individually, so they are not in it, and review activity, streaks,
+  weak words, FSRS and the what-if comparison can only see from then on.
+- FSRS uses the library's default parameters. They are not fitted to your own
+  history, and with a history this short they could not be.
+- With FSRS in charge there are still two answer buttons, mastery still
+  retires a word at 10, and a word FSRS has not seen stays on its mastery
+  date. Those are choices made to change as little as possible; none is the
+  only reasonable one.
+- FSRS's recall estimate and the what-if comparison are a model's output. The
+  app does not measure whether FSRS would make you remember more, and does not
+  claim it.
 - Only the latest answer can be undone, and only while nothing else has
   happened to that word since.
-- There is one study mode (flashcards). Daily goals, collections, import of
-  word lists and a retention forecast are planned, not built: see
-  [docs/upgrade-plan.md](docs/upgrade-plan.md).
+- Practice never moves a schedule, in any mode.
+- Listening depends entirely on the browser's speech synthesis. It was checked
+  for what the app asks the browser to say, in tests and in one desktop
+  browser; nobody has judged what it sounds like across devices.
+- Excel import reads `.xlsx` only (not the older `.xls`), and only the first
+  sheet.
+- Further examples are for reference: the flashcard and fill in the blank use
+  the word's own example.
+
+[docs/upgrade-plan.md](docs/upgrade-plan.md) lists what each stage built and
+what it left out.
 
 ## If something goes wrong
 
@@ -381,4 +500,7 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 - **The public key may have been swapped for a secret one:** the server
   refuses to start and `/api/health` says why. Replace it with the publishable
   key and rotate the secret key in Supabase.
-- **You want a copy of everything:** Settings → Backup → Export JSON.
+- **You want a copy of everything:** Settings → Export everything (JSON).
+- **FSRS is in charge and you want the old behaviour back:** Settings →
+  Scheduling → Go back to the mastery schedule. Nothing has to be restored;
+  the mastery dates were kept up to date the whole time.

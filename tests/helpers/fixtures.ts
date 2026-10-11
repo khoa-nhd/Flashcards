@@ -1,4 +1,4 @@
-import type { QueueResponse, ReviewCard } from '../../shared/api.js';
+import { NO_CAPABILITIES, type QueueResponse, type ReviewCard } from '../../shared/api.js';
 import type { ReviewState } from '../../shared/review-logic.js';
 import type { CardHistory } from '../../shared/weak-words.js';
 import type { CardFieldConfig, VocabularyRecord } from '../../shared/vocabulary.js';
@@ -55,8 +55,10 @@ export function queueResponse(cards: ReviewCard[], overrides: Partial<QueueRespo
     mode: 'mock',
     writesEnabled: true,
     // Off unless a test asks: most tests are about the review itself.
-    capabilities: { sessions: false, undo: false, fsrs: false, analytics: false },
+    capabilities: NO_CAPABILITIES,
+    scheduler: 'mastery_v1',
     focus: null,
+    collection: null,
     skipped: [],
     vocabulary: 'in_progress',
     ...overrides,
@@ -93,7 +95,7 @@ export const TEST_FIELDS: CardFieldConfig[] = [
  */
 export class FakeRepository implements VocabularyRepository {
   readonly mode = 'mock' as const;
-  readonly capabilities = { sessions: false, undo: false, fsrs: false, analytics: false };
+  readonly capabilities = NO_CAPABILITIES;
   readonly updates: Array<{ pageId: string; changes: Partial<ReviewState> }> = [];
   setup: SetupReport = { readIssues: [], writeIssues: [], warnings: [] };
   /** Lets a test corrupt what the "database" reports back after a write. */
@@ -113,6 +115,10 @@ export class FakeRepository implements VocabularyRepository {
 
   async listDueCandidates() {
     return { records: this.listed.map((item) => ({ ...item })), invalid: [] };
+  }
+
+  async listLiveRecords() {
+    return { records: [...this.records.values()].map((item) => ({ ...item })), invalid: [] };
   }
 
   async vocabularyStatus() {
@@ -167,6 +173,22 @@ export class FakeRepository implements VocabularyRepository {
 
   async cardReviewStats() {
     return new Map<string, CardHistory>();
+  }
+
+  async confidenceStats() {
+    return [];
+  }
+
+  async recordPractice() {
+    return 'unsupported' as const;
+  }
+
+  async listHistory() {
+    return [];
+  }
+
+  async practiceDailyStats() {
+    return [];
   }
 
   /** Simulates a change made somewhere else, such as on another device. */

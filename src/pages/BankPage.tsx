@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import type { VocabularyEntry } from '../../shared/api.js';
 import type { IsoDate } from '../../shared/dates.js';
-import { useApp, useSettings, useVocabulary } from '../app-context.js';
+import { useApp, useLibrary, useSettings, useVocabulary } from '../app-context.js';
 import { MasteryPill, QualityFlag, StatusBadge, formatDate, relativeDay } from '../components/badges.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
@@ -45,19 +45,33 @@ export function BankPage() {
   const query = useMemo(() => parseBankQuery(location.query, defaults), [location.query, defaults]);
   const today = state.meta?.today ?? null;
 
-  const filtered = useMemo(() => filterEntries(state.entries, query), [state.entries, query]);
+  // A collection narrows the bank beside its own filters. It is kept in the address like they are.
+  const library = useLibrary();
+  const collectionId = location.query.get('collection');
+  const collection = collectionId === null ? null : (library.collections.find((item) => item.id === collectionId) ?? null);
+  const members = useMemo(() => (collection === null ? null : new Set(collection.wordIds)), [collection]);
+
+  const filtered = useMemo(() => {
+    const matching = filterEntries(state.entries, query);
+    // Until the collection is known (still loading, or no longer there) nothing can be said to be in it.
+    return collectionId === null ? matching : matching.filter((entry) => members?.has(entry.id) ?? false);
+  }, [state.entries, query, collectionId, members]);
+  const filtering = hasActiveFilters(query) || collectionId !== null;
   const sorted = useMemo(() => sortEntries(filtered, query.sort, query.direction), [filtered, query.sort, query.direction]);
   const page = useMemo(() => paginate(sorted, query.page, settings.bankPageSize), [sorted, query.page, settings.bankPageSize]);
 
   /** Applies a change to the filters or sorting. Anything but a page change starts again at page 1. */
-  const update = (patch: Partial<BankQuery>, options: { replace?: boolean } = {}) => {
+  const update = (patch: Partial<BankQuery>, options: { replace?: boolean; collection?: string | null } = {}) => {
     const next = { ...query, page: 1, ...patch };
     // Keep the open word, if any; everything else in the address is the bank's own state.
     const base = new URLSearchParams();
     const word = location.query.get('word');
     if (word !== null) base.set('word', word);
-    navigate(buildHref(ROUTES.bank, bankQueryParams(next, defaults), base), options);
+    const keptCollection = options.collection === undefined ? collectionId : options.collection;
+    if (keptCollection !== null) base.set('collection', keptCollection);
+    navigate(buildHref(ROUTES.bank, bankQueryParams(next, defaults), base), { replace: options.replace });
   };
+  const NO_FILTERS = { search: '', status: null, mastery: null, addedFrom: null, addedTo: null, missing: null } as const;
 
   const sortBy = (key: SortKey) => {
     if (query.sort === key) update({ direction: query.direction === 'asc' ? 'desc' : 'asc' });
@@ -171,6 +185,17 @@ export function BankPage() {
                     ['example', MISSING_LABELS.example],
                   ]}
                 />
+                {(library.collections.length > 0 || collectionId !== null) && (
+                  <FilterSelect
+                    label="Collection"
+                    value={collectionId ?? ''}
+                    onChange={(value) => update({}, { collection: value === '' ? null : value })}
+                    options={[
+                      ['', 'Any collection'],
+                      ...library.collections.map((item): [string, string] => [item.id, item.name]),
+                    ]}
+                  />
+                )}
                 <label className="flex flex-col gap-1 text-xs font-medium text-muted">
                   Added from
                   <input
@@ -198,15 +223,13 @@ export function BankPage() {
                   {page.total === 0
                     ? 'No words match.'
                     : `Showing ${page.from}–${page.to} of ${page.total} ${page.total === 1 ? 'word' : 'words'}`}
-                  {hasActiveFilters(query) && page.total > 0 && ` (filtered from ${state.entries.length})`}
+                  {filtering && page.total > 0 && ` (filtered from ${state.entries.length})`}
                 </p>
-                {hasActiveFilters(query) && (
+                {filtering && (
                   <button
                     type="button"
                     className="cursor-pointer text-sm font-semibold text-accent hover:underline"
-                    onClick={() =>
-                      update({ search: '', status: null, mastery: null, addedFrom: null, addedTo: null, missing: null })
-                    }
+                    onClick={() => update(NO_FILTERS, { collection: null })}
                   >
                     Clear filters
                   </button>
@@ -273,9 +296,7 @@ export function BankPage() {
                   <button
                     type="button"
                     className={BUTTON_SECONDARY}
-                    onClick={() =>
-                      update({ search: '', status: null, mastery: null, addedFrom: null, addedTo: null, missing: null })
-                    }
+                    onClick={() => update(NO_FILTERS, { collection: null })}
                   >
                     Clear filters
                   </button>

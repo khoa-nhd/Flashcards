@@ -1,8 +1,11 @@
-import type { Capabilities, SessionSummary, SkippedRecord, VocabularyStatus } from '../shared/api.js';
+import type { Capabilities, Confidence, SessionSummary, SkippedRecord, VocabularyStatus } from '../shared/api.js';
 import type { DailyStat } from '../shared/analytics.js';
 import type { IsoDate } from '../shared/dates.js';
+import type { HistoryEvent } from '../shared/export-format.js';
 import type { ReviewAction, ReviewState } from '../shared/review-logic.js';
+import type { StudyMode } from '../shared/study-modes.js';
 import type { CardHistory } from '../shared/weak-words.js';
+import type { SchedulerId } from '../shared/scheduler/active.js';
 import type { ScheduleCard } from '../shared/scheduler/comparison.js';
 import type { FsrsRating, FsrsState } from '../shared/scheduler/fsrs.js';
 import type { StoredFsrs, VocabularyRecord } from '../shared/vocabulary.js';
@@ -34,6 +37,50 @@ export interface ReviewWrite {
   sessionId: string | null;
   /** What FSRS made of the answer, to be saved with it where the store keeps FSRS state. */
   fsrs?: FsrsWrite | null;
+  /** How sure the reviewer said they were beforehand, where the store keeps it. Never affects the result. */
+  confidence?: Confidence | null;
+  /**
+   * Which schedule was in charge, for a store that has no settings of its own
+   * to look it up in. The real database reads it from the account instead.
+   */
+  scheduler?: SchedulerId;
+}
+
+/** One answer given in a practice mode. Recording it never changes the word's schedule. */
+export interface PracticeWrite {
+  id: string;
+  requestId: string;
+  sessionId: string | null;
+  mode: StudyMode;
+  correct: boolean;
+  /** Who decided it was right: the reviewer, or a comparison. */
+  grading: 'self' | 'auto';
+  /** What was typed, where something was. */
+  submitted: string | null;
+  reviewedOn: IsoDate;
+  durationMs: number | null;
+  confidence: Confidence | null;
+}
+
+/** `unsupported`: the store does not record practice (its schema is behind). */
+export type PracticeWriteResult = 'recorded' | 'already_recorded' | 'not_found' | 'unsupported';
+
+/** One day of practice in one study mode. */
+export interface PracticeDailyStat {
+  day: IsoDate;
+  mode: string;
+  answers: number;
+  correct: number;
+  durationMs: number;
+  timedAnswers: number;
+  cards: number;
+}
+
+/** How answers given at one level of confidence went. */
+export interface ConfidenceStat {
+  confidence: Confidence;
+  reviews: number;
+  remembered: number;
 }
 
 export interface FsrsWrite {
@@ -71,6 +118,11 @@ export interface VocabularyRepository {
    * queue (the rules engine does the authoritative filtering) but never less.
    */
   listDueCandidates(today: IsoDate): Promise<{ records: VocabularyRecord[]; invalid: SkippedRecord[] }>;
+  /**
+   * Every live word as a review record, whatever its review date. Used when
+   * the mastery date is not what decides whether a word is due.
+   */
+  listLiveRecords(): Promise<{ records: VocabularyRecord[]; invalid: SkippedRecord[] }>;
   /** Whether the collection is empty, fully mastered, or still has words to learn. */
   vocabularyStatus(): Promise<VocabularyStatus>;
   /** The record's latest state, or `null` if it is not a live row of this database. */
@@ -89,4 +141,12 @@ export interface VocabularyRepository {
   reviewDailyStats(from: IsoDate, to: IsoDate): Promise<DailyStat[]>;
   /** How each reviewed word has gone, by word id. Empty where no history is kept. */
   cardReviewStats(since: IsoDate): Promise<Map<string, CardHistory>>;
+  /** The whole review history, oldest first, exactly as recorded. For the account's own export. */
+  listHistory(): Promise<HistoryEvent[]>;
+  /** Records one practice answer, once per request id. It never changes mastery, the review date or FSRS state. */
+  recordPractice(write: PracticeWrite): Promise<PracticeWriteResult>;
+  /** Practice answers per day and study mode in a range of the reviewer's days. Empty where none are kept. */
+  practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeDailyStat[]>;
+  /** Standing answers since `since` that carried a confidence rating, by rating. Empty where none are kept. */
+  confidenceStats(since: IsoDate): Promise<ConfidenceStat[]>;
 }

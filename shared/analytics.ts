@@ -86,11 +86,16 @@ export interface ReviewAnalytics {
   byMode: ModeStats[];
   /** Every day of the window, oldest first, with zeros for days without reviews. */
   days: DayTotals[];
+  /** Whole weeks ending today, oldest first: as many as fit in the window, up to TREND_WEEKS. */
+  weeks: PeriodStats[];
   /** The earliest day with a review in the window. */
   firstReviewOn: IsoDate | null;
   /** How many days back the figures above can see. */
   windowDays: number;
 }
+
+/** How many weeks the week-by-week trend shows. */
+export const TREND_WEEKS = 12;
 
 const ratio = (part: number, whole: number): number | null => (whole >= MIN_SAMPLE ? part / whole : null);
 
@@ -162,10 +167,18 @@ export function analyseReviews(rows: readonly DailyStat[], today: IsoDate, windo
     modes.set(row.mode, mode);
   }
 
+  // Seven days at a time, counted back from today, so the newest week is always a full one.
+  const weekCount = Math.min(TREND_WEEKS, Math.floor(windowDays / 7));
+  const weeks = Array.from({ length: weekCount }, (_, index) => {
+    const end = addDays(today, -7 * (weekCount - 1 - index));
+    return period(visible, addDays(end, -6), end);
+  });
+
   return {
     today: period(visible, today, today),
     week: period(visible, addDays(today, -6), today),
     month: period(visible, monthStart, today),
+    weeks,
     streak: { current, longest },
     byMode: [...modes]
       .map(([mode, totals]) => ({ mode, ...totals, accuracy: ratio(totals.remembered, totals.reviews) }))

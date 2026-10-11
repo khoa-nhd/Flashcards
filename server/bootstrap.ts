@@ -3,10 +3,15 @@ import { calendarDateInTimeZone } from '../shared/dates.js';
 import { DEFAULT_FSRS_SETTINGS } from '../shared/scheduler/fsrs.js';
 import { AnalyticsService } from './analytics-service.js';
 import { createApp } from './create-app.js';
+import { createGoalStore } from './goal-store.js';
 import { loadConfig, type AppConfig } from './env.js';
+import { ExportService } from './export-service.js';
+import { LibraryService } from './library-service.js';
+import { createMemoryLibraryStore } from './library-store.js';
 import { MockVocabularyRepository, mockCardFields } from './mock/mock-repository.js';
 import { sampleRules } from './mock/sample-rules.js';
 import { ReviewService } from './review-service.js';
+import { createSchedulerStore } from './scheduler-store.js';
 import { createSupabaseAccounts } from './supabase/supabase-accounts.js';
 import { VocabularyService } from './vocabulary-service.js';
 
@@ -43,6 +48,8 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
   }
   const { timeZone } = config;
   const repository = new MockVocabularyRepository(calendarDateInTimeZone(new Date(), timeZone));
+  // The sample data has no account, so its choice of schedule is kept in memory with everything else.
+  const scheduler = createSchedulerStore();
   const service = new ReviewService({
     repository,
     rules: sampleRules,
@@ -50,6 +57,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     timeZone,
     writesRequested: true,
     fsrs: { settings: DEFAULT_FSRS_SETTINGS, ratingMap: fsrsRatingMap },
+    scheduler,
   });
   const vocabulary = new VocabularyService({
     catalog: repository,
@@ -57,9 +65,35 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     defaults: newWordDefaults,
     timeZone,
     writesRequested: true,
+    scheduler,
   });
-  const analytics = new AnalyticsService({ repository, catalog: repository, rules: sampleRules, timeZone });
-  return { app: createApp({ config, service, vocabulary, analytics }), config };
+  // The sample data has no account, so its goal is kept in memory with everything else.
+  const goals = createGoalStore();
+  const analytics = new AnalyticsService({
+    repository,
+    catalog: repository,
+    rules: sampleRules,
+    timeZone,
+    goals,
+    scheduler,
+  });
+  const library = new LibraryService({
+    store: createMemoryLibraryStore((id) => repository.ownsWord(id)),
+    catalog: repository,
+    writesRequested: true,
+  });
+  const exporter = new ExportService({
+    repository,
+    catalog: repository,
+    library,
+    settings: () => ({
+      timeZone,
+      dailyGoal: goals.get(),
+      fsrsRetention: DEFAULT_FSRS_SETTINGS.requestRetention,
+      scheduler: scheduler.get(),
+    }),
+  });
+  return { app: createApp({ config, service, vocabulary, analytics, library, exporter }), config };
 }
 
 let shared: ReturnType<typeof buildApp> | undefined;

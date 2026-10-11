@@ -87,7 +87,8 @@ export function Flashcard({
     transition: swipe.dragging ? 'none' : 'transform 220ms ease-out',
   };
 
-  const due = dueLabel(card.nextReview, today);
+  // The day the schedule in charge has it due; the mastery date unless something else decided.
+  const due = dueLabel(card.dueOn ?? card.nextReview, today);
 
   return (
     <div

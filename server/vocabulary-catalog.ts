@@ -2,8 +2,15 @@ import type { SkippedRecord, VocabularyEntry } from '../shared/api.js';
 import type { IsoDate } from '../shared/dates.js';
 import type { DataMode, SetupReport } from './vocabulary-repository.js';
 
-/** A stored entry before the service adds its review status. */
-export type EntryData = Omit<VocabularyEntry, 'reviewStatus' | 'reviewable'>;
+/**
+ * A stored entry before the service adds its review status. `reviewDate` is
+ * the mastery schedule's date as stored; `fsrsDue` is the instant FSRS has the
+ * word due, where it has been answered since FSRS started being calculated.
+ * Which of the two the reviewer sees is decided by the service, not here.
+ */
+export type EntryData = Omit<VocabularyEntry, 'reviewStatus' | 'reviewable' | 'scheduledBy'> & {
+  fsrsDue?: string | null;
+};
 
 /** Everything needed to create a row. Defaults have already been applied. */
 export interface NewEntry {

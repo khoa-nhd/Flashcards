@@ -4,6 +4,7 @@
  * synchronous: two key presses in the same tick see each other's effect, and
  * the second one finds the machine already `saving`.
  */
+import type { Confidence, ReviewFocus } from '../../shared/api.js';
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { ApiError, type ReviewApi } from './api-client.js';
 import { newRequestId } from './request-id.js';
@@ -23,8 +24,14 @@ export interface SessionController {
    * (or `null` for everything due) it switches to it; given nothing, it keeps
    * the one in use, which is what Refresh wants.
    */
-  load(options?: { focus: 'weak' | null }): Promise<void>;
+  load(options?: { focus: ReviewFocus | null; collection?: string | null }): Promise<void>;
   flip(): void;
+  /**
+   * Records how sure the reviewer is and shows the answer. Returns false when
+   * it was not accepted: the answer has already been seen, or the store does
+   * not keep ratings.
+   */
+  rateConfidence(level: Confidence): boolean;
   /** Returns false when the answer was not accepted (card not flipped, save in flight…). */
   grade(action: ReviewAction): boolean;
   retrySave(): void;
@@ -54,7 +61,9 @@ export function createSessionController(
   let loadSequence = 0;
   let sessionId = newRequestId();
   /** What the queue is narrowed to, if anything. */
-  let focus: 'weak' | null = null;
+  let focus: ReviewFocus | null = null;
+  /** The collection the queue is narrowed to instead, if any. */
+  let collection: string | null = null;
   /** When the card on screen appeared, to record how long it took to answer. */
   let shown: { id: string; at: number } | null = null;
   /** Identifies the answer being saved. A retry repeats it, so one answer is recorded once. */
@@ -87,6 +96,7 @@ export function createSessionController(
         requestId,
         durationMs: answer.durationMs,
         sessionId,
+        ...(state.confidence === null ? {} : { confidence: state.confidence }),
       });
       // Only an answer that was really stored, in a store that can take it back, is offered for Undo.
       const undoable = response.outcome !== 'dry_run' && state.meta?.capabilities.undo === true;
@@ -123,12 +133,16 @@ export function createSessionController(
 
     async load(options) {
       if (state.status === 'saving') return;
-      if (options !== undefined) focus = options.focus;
+      if (options !== undefined) {
+        collection = options.collection ?? null;
+        // One selection at a time: a collection takes the place of a focus.
+        focus = collection === null ? options.focus : null;
+      }
       // A newer load supersedes any still in flight.
       const sequence = ++loadSequence;
       dispatch({ type: 'LOAD' });
       try {
-        const { cards, ...meta } = await api.fetchQueue({ focus });
+        const { cards, ...meta } = await api.fetchQueue(collection === null ? { focus } : { focus: null, collection });
         if (sequence !== loadSequence) return;
         // A freshly loaded queue is a new sitting.
         sessionId = newRequestId();
@@ -145,6 +159,12 @@ export function createSessionController(
 
     flip() {
       dispatch({ type: 'FLIP' });
+    },
+
+    rateConfidence(level) {
+      // Where the rating would not be stored, it is not asked for at all.
+      if (state.meta?.capabilities.confidence !== true || !state.meta.writesEnabled) return false;
+      return dispatch({ type: 'RATE_CONFIDENCE', level });
     },
 
     grade(action) {

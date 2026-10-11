@@ -1,9 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { HINT_DURATION_MS } from '../config.js';
-import { useReviewShortcuts } from '../hooks/useReviewShortcuts.js';
+import type { Confidence } from '../../shared/api.js';
+import { useSettings } from '../app-context.js';
+import { ANSWER_KEY_SETS, useReviewShortcuts } from '../hooks/useReviewShortcuts.js';
 import type { SessionController } from '../lib/session-controller.js';
 import { canUndo, currentCard, type SessionState } from '../lib/session-machine.js';
+import { ConfidencePrompt } from './ConfidencePrompt.js';
 import { Flashcard } from './Flashcard.js';
 import { ReviewControls } from './ReviewControls.js';
 import { ReviewProgress } from './ReviewProgress.js';
@@ -13,6 +16,10 @@ export interface ReviewScreenProps {
   state: SessionState;
   session: SessionController;
   onReload: () => void;
+  /** Opens the list of keyboard shortcuts. */
+  onHelp?: () => void;
+  /** Something is open over the card (the shortcut list): keys must not reach the review. */
+  paused?: boolean;
 }
 
 const ACTION_TEXT: Record<ReviewAction, string> = {
@@ -23,7 +30,8 @@ const ACTION_TEXT: Record<ReviewAction, string> = {
 const PANEL_BUTTON =
   'h-11 cursor-pointer rounded-xl border px-4 text-sm font-semibold transition active:scale-[0.98]';
 
-export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
+export function ReviewScreen({ state, session, onReload, onHelp, paused = false }: ReviewScreenProps) {
+  const { askConfidence, answerKeys } = useSettings();
   const card = currentCard(state);
   const cardId = card?.id ?? null;
   const { status, error } = state;
@@ -61,7 +69,26 @@ export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
     session.undo();
   }, [session]);
 
-  useReviewShortcuts({ onFlip: flip, onGrade: grade, onUndo: undo });
+  const rate = useCallback(
+    (level: Confidence) => {
+      setHintVisible(false);
+      session.rateConfidence(level);
+    },
+    [session],
+  );
+
+  // Asked only where the rating will be stored, and only before this card's answer has been seen.
+  const askingConfidence =
+    askConfidence &&
+    status === 'ready' &&
+    !state.revealed &&
+    state.meta?.capabilities.confidence === true &&
+    state.meta.writesEnabled;
+
+  useReviewShortcuts(
+    { onFlip: flip, onGrade: grade, onUndo: undo, onConfidence: rate, onHelp },
+    { answerKeys, ratingConfidence: askingConfidence, enabled: !paused },
+  );
 
   // Keep keyboard focus somewhere useful: a control that was just clicked may
   // have gone inert or been replaced, which would otherwise strand key presses.
@@ -83,6 +110,7 @@ export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
   const total = state.cards.length;
   const undoable = state.lastSaved;
   const undoWord = undoable === null ? null : (state.cards[undoable.index]?.word ?? null);
+  const extraKeys = ANSWER_KEY_SETS[answerKeys];
 
   return (
     <div className="mx-auto flex h-full w-full max-w-xl flex-col gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
@@ -132,6 +160,8 @@ export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
       <p role="status" className="h-5 text-center text-sm font-medium text-muted">
         {hintVisible ? 'Flip the card before answering.' : ''}
       </p>
+
+      {askingConfidence && <ConfidencePrompt onRate={rate} />}
 
       {status === 'error' && error !== null ? (
         <div role="alert" className="rounded-2xl border border-bad/40 bg-bad-soft p-4 text-bad-ink">
@@ -197,14 +227,33 @@ export function ReviewScreen({ state, session, onReload }: ReviewScreenProps) {
           <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">Space</kbd> flip
         </span>
         <span>
-          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">←</kbd> not remember
+          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">←</kbd>
+          {extraKeys !== null && (
+            <>
+              {' '}
+              <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">{extraKeys[0].toUpperCase()}</kbd>
+            </>
+          )}{' '}
+          not remember
         </span>
         <span>
-          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">→</kbd> remember
+          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">→</kbd>
+          {extraKeys !== null && (
+            <>
+              {' '}
+              <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">{extraKeys[1].toUpperCase()}</kbd>
+            </>
+          )}{' '}
+          remember
         </span>
         {state.meta?.capabilities.undo === true && (
           <span>
             <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">U</kbd> undo
+          </span>
+        )}
+        {onHelp !== undefined && (
+          <span>
+            <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">?</kbd> all shortcuts
           </span>
         )}
       </div>

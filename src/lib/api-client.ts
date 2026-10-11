@@ -1,34 +1,58 @@
-import type { ZodType } from 'zod';
+import { z, type ZodType } from 'zod';
 import {
   accountSettingsSchema,
   analyticsResponseSchema,
   apiErrorSchema,
+  collectionSchema,
+  dayPlanSchema,
+  deletedResponseSchema,
+  extraExampleSchema,
+  importResponseSchema,
+  libraryResponseSchema,
+  practiceResponseSchema,
+  relationSchema,
   appConfigResponseSchema,
   entryResponseSchema,
   queueResponseSchema,
   reviewActionResponseSchema,
+  reviewDaysResponseSchema,
   reviewUndoResponseSchema,
   schedulerReportSchema,
   sessionSummarySchema,
+  simulationResponseSchema,
   trashResponseSchema,
   vocabularyListResponseSchema,
   weakWordsResponseSchema,
   type AccountSettings,
   type AnalyticsResponse,
+  type DayPlanResponse,
+  type ImportResponse,
+  type LibraryResponse,
+  type PracticeRequest,
+  type PracticeResponse,
+  type ReviewFocus,
   type AppConfigResponse,
   type CreateEntryInput,
   type QueueResponse,
   type ReviewActionRequest,
   type ReviewActionResponse,
+  type ReviewDaysResponse,
   type ReviewUndoRequest,
   type ReviewUndoResponse,
   type SchedulerReport,
   type SessionSummary,
+  type SimulationResponse,
   type UpdateEntryInput,
   type VocabularyEntry,
   type VocabularyListResponse,
   type WeakWordsResponse,
 } from '../../shared/api.js';
+import type { IsoDate } from '../../shared/dates.js';
+import { EXPORT_FORMAT, type AccountExport } from '../../shared/export-format.js';
+import type { ImportItem } from '../../shared/import.js';
+import type { Collection, ExtraExample, Relation, RelationKind } from '../../shared/library.js';
+import type { SchedulerId } from '../../shared/scheduler/active.js';
+import type { DailyGoal } from '../../shared/session-planner.js';
 import { TIMEOUTS } from '../config.js';
 
 /** Any failed request, reduced to a stable `code` and a message fit for the reviewer. */
@@ -47,7 +71,7 @@ export class ApiError extends Error {
 
 export interface ReviewApi {
   /** The due cards. With a focus, only the due cards that match it. */
-  fetchQueue(options?: { focus?: 'weak' | null }): Promise<QueueResponse>;
+  fetchQueue(options?: { focus?: ReviewFocus | null; collection?: string | null }): Promise<QueueResponse>;
   submitAction(request: ReviewActionRequest): Promise<ReviewActionResponse>;
   /** Takes back one saved answer. */
   undoAction(request: ReviewUndoRequest): Promise<ReviewUndoResponse>;
@@ -70,8 +94,12 @@ export interface VocabularyApi {
 export interface AccountApi {
   fetchSettings(): Promise<AccountSettings>;
   saveSettings(input: { timeZone?: string; fsrsRetention?: number }): Promise<AccountSettings>;
-  /** The schedule in force beside FSRS, which is only calculated for comparison. */
+  /** The two schedules side by side, and which of them is in charge. */
   fetchScheduler(): Promise<SchedulerReport>;
+  /** Puts one schedule in charge of what is due, and returns the report as it now stands. */
+  chooseScheduler(scheduler: SchedulerId): Promise<SchedulerReport>;
+  /** A what-if comparison at a target retention (the account's own when none is given). Stores nothing. */
+  fetchSimulation(retention?: number): Promise<SimulationResponse>;
 }
 
 export interface AnalyticsApi {
@@ -79,9 +107,48 @@ export interface AnalyticsApi {
   fetchAnalytics(): Promise<AnalyticsResponse>;
   /** Words that need attention, weakest first, each with its reasons. */
   fetchWeakWords(): Promise<WeakWordsResponse>;
+  /** Today's reviewing set against the daily goal. */
+  fetchPlan(): Promise<DayPlanResponse>;
+  /** Stores the goal and returns the plan as it now stands. An empty part means no goal of that kind. */
+  saveGoal(goal: DailyGoal): Promise<DayPlanResponse>;
+  /** Saved reviews on each day of a range of the reviewer's days. Days without any are absent. */
+  fetchReviewDays(from: IsoDate, to: IsoDate): Promise<ReviewDaysResponse>;
 }
 
-export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi;
+/** Collections, further examples and relationships. None of these calls can change a word or its schedule. */
+export interface LibraryApi {
+  fetchLibrary(): Promise<LibraryResponse>;
+  createCollection(name: string): Promise<Collection>;
+  renameCollection(id: string, name: string): Promise<Collection>;
+  /** Removes the collection and its memberships. The words stay. */
+  deleteCollection(id: string): Promise<void>;
+  setMembership(collectionId: string, wordId: string, member: boolean): Promise<Collection>;
+  addExample(wordId: string, input: { sentence: string; source?: string | null; preferred?: boolean }): Promise<ExtraExample>;
+  updateExample(id: string, input: { sentence?: string; source?: string | null; preferred?: boolean }): Promise<ExtraExample>;
+  deleteExample(id: string): Promise<void>;
+  addRelation(fromId: string, toId: string, kind: RelationKind): Promise<Relation>;
+  deleteRelation(id: string): Promise<void>;
+}
+
+export interface TransferApi {
+  /**
+   * Imports one request's worth of rows as new words. Each row carries its own
+   * request id, so sending the same rows again never imports one twice.
+   */
+  importWords(items: readonly ImportItem[]): Promise<ImportResponse>;
+  /** Everything the account can read about itself, in the documented export format. Reads only. */
+  fetchExport(): Promise<AccountExport>;
+}
+
+export interface PracticeApi {
+  /**
+   * Sends one practice answer to be judged and recorded. The reply is the
+   * verdict; nothing about a word's schedule can change through this call.
+   */
+  submitPractice(request: PracticeRequest): Promise<PracticeResponse>;
+}
+
+export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi;
 
 /** How requests prove who is asking, where the app has accounts. */
 export interface ApiAuth {
@@ -191,6 +258,19 @@ export function fetchAppConfig(): Promise<AppConfigResponse> {
   );
 }
 
+/** The queue's address: everything due, one of the narrower selections, or one collection. */
+function queuePath(options?: { focus?: ReviewFocus | null; collection?: string | null }): string {
+  if (options?.collection != null) return '/api/review-queue?collection=' + encodeURIComponent(options.collection);
+  return options?.focus == null ? '/api/review-queue' : '/api/review-queue?focus=' + options.focus;
+}
+
+/** Enough to know the reply is an export of the kind this app writes; the rest is passed through untouched. */
+const exportEnvelope = z.looseObject({ format: z.literal(EXPORT_FORMAT), version: z.number().int() });
+
+const collectionReply = z.object({ collection: collectionSchema });
+const exampleReply = z.object({ example: extraExampleSchema });
+const relationReply = z.object({ relation: relationSchema });
+
 /** `auth` is given where the app has accounts; every request is then made as the signed-in user. */
 export function createAppApi(auth: ApiAuth | null = null): AppApi {
   const call = <T>(path: string, schema: ZodType<T> | null, init: CallOptions) => request(path, schema, init, auth);
@@ -200,9 +280,13 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
       (response) => response.entry,
     );
 
+  /** One change to the library, confirmed by the record the server sends back. */
+  const change = <T>(path: string, method: 'POST' | 'PATCH' | 'PUT' | 'DELETE', body: unknown, schema: ZodType<T>) =>
+    call(path, schema, { method, body, timeoutMs: TIMEOUTS.actionMs, timeoutMessage: SAVE_TIMEOUT_MESSAGE });
+
   return {
     fetchQueue: (options) =>
-      call(options?.focus == null ? '/api/review-queue' : '/api/review-queue?focus=' + options.focus, queueResponseSchema, {
+      call(queuePath(options), queueResponseSchema, {
         method: 'GET',
         timeoutMs: TIMEOUTS.queueMs,
         timeoutMessage: 'Loading the review queue took too long.',
@@ -285,12 +369,101 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         timeoutMessage: 'Loading your weak words took too long.',
       }),
 
+    fetchReviewDays: (from, to) =>
+      call(`/api/review-days?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, reviewDaysResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading the reviews for this month took too long.',
+      }),
+
+    importWords: (items) =>
+      call('/api/vocabulary/import', importResponseSchema, {
+        method: 'POST',
+        body: { items },
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Importing took too long. Nothing is imported twice if you try again.',
+      }),
+
+    fetchExport: () =>
+      call('/api/export', exportEnvelope, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Preparing the export took too long.',
+      }).then((data) => data as unknown as AccountExport),
+
+    fetchLibrary: () =>
+      call('/api/library', libraryResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your collections took too long.',
+      }),
+
+    createCollection: (name) => change('/api/collections', 'POST', { name }, collectionReply).then((reply) => reply.collection),
+    renameCollection: (id, name) =>
+      change(`/api/collections/${id}`, 'PATCH', { name }, collectionReply).then((reply) => reply.collection),
+    deleteCollection: (id) => change(`/api/collections/${id}`, 'DELETE', undefined, deletedResponseSchema).then(() => undefined),
+    setMembership: (collectionId, wordId, member) =>
+      change(`/api/collections/${collectionId}/words/${wordId}`, 'PUT', { member }, collectionReply).then(
+        (reply) => reply.collection,
+      ),
+
+    addExample: (wordId, input) =>
+      change(`/api/vocabulary/${wordId}/examples`, 'POST', input, exampleReply).then((reply) => reply.example),
+    updateExample: (id, input) => change(`/api/examples/${id}`, 'PATCH', input, exampleReply).then((reply) => reply.example),
+    deleteExample: (id) => change(`/api/examples/${id}`, 'DELETE', undefined, deletedResponseSchema).then(() => undefined),
+
+    addRelation: (fromId, toId, kind) =>
+      change('/api/relations', 'POST', { fromId, toId, kind }, relationReply).then((reply) => reply.relation),
+    deleteRelation: (id) => change(`/api/relations/${id}`, 'DELETE', undefined, deletedResponseSchema).then(() => undefined),
+
+    submitPractice: (body) =>
+      call('/api/practice', practiceResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Checking that answer took too long.',
+      }),
+
+    fetchPlan: () =>
+      call('/api/plan', dayPlanSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your daily goal took too long.',
+      }),
+
+    saveGoal: (goal) =>
+      call('/api/goal', dayPlanSchema, {
+        method: 'PUT',
+        body: goal,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Saving the goal took too long.',
+      }),
+
     fetchScheduler: () =>
       call('/api/scheduler', schedulerReportSchema, {
         method: 'GET',
         timeoutMs: TIMEOUTS.queueMs,
         timeoutMessage: 'Loading the schedule comparison took too long.',
       }),
+
+    chooseScheduler: (scheduler) =>
+      call('/api/scheduler', schedulerReportSchema, {
+        method: 'PUT',
+        body: { scheduler },
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    fetchSimulation: (retention) =>
+      call(
+        retention === undefined ? '/api/simulation' : `/api/simulation?retention=${encodeURIComponent(String(retention))}`,
+        simulationResponseSchema,
+        {
+          method: 'GET',
+          timeoutMs: TIMEOUTS.queueMs,
+          timeoutMessage: 'Working out the comparison took too long.',
+        },
+      ),
 
     saveSettings: (body) =>
       call('/api/settings', accountSettingsSchema, {

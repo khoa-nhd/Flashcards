@@ -9,6 +9,7 @@ import { ConfirmDialog } from './ConfirmDialog.js';
 import { Field, describedBy } from './Field.js';
 import { Icon } from './Icon.js';
 import { Spinner } from './Spinner.js';
+import { WordExtras } from './WordExtras.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT, TEXTAREA } from './ui.js';
 
 export interface WordDetailPanelProps {
@@ -294,7 +295,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                 <div className="grid grid-cols-2 gap-4">
                   <DetailRow label="Date added" value={entry.dateAdded === null ? null : formatDate(entry.dateAdded)} />
                   <DetailRow
-                    label="Review date"
+                    label={entry.scheduledBy === 'fsrs' ? 'Review date (set by FSRS)' : 'Review date'}
                     value={
                       entry.reviewDate === null
                         ? null
@@ -313,6 +314,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                   </span>
                 </p>
               )}
+
+              <WordExtras entry={entry} canWrite={canWrite} />
             </div>
           )}
 
@@ -410,11 +413,23 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                           type="date"
                           className={INPUT}
                           value={draft.reviewDate}
+                          // FSRS works this date out from the answers; there is nothing honest to store for a typed one.
+                          disabled={entry.scheduledBy === 'fsrs'}
                           onChange={(event) => change('reviewDate', event.target.value)}
-                          aria-describedby={describedBy('edit-review-date', null, errors.reviewDate)}
+                          aria-describedby={describedBy(
+                            'edit-review-date',
+                            entry.scheduledBy === 'fsrs' ? true : null,
+                            errors.reviewDate,
+                          )}
                         />
                       </Field>
                     </div>
+                    {entry.scheduledBy === 'fsrs' && (
+                      <p id="edit-review-date-hint" className="text-xs text-muted">
+                        FSRS sets this word’s review date from your answers, so it cannot be changed by hand. To set
+                        dates yourself, go back to the mastery schedule in Settings.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>

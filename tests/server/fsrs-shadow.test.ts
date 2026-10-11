@@ -9,6 +9,7 @@ import { sampleRules } from '../../server/mock/sample-rules.js';
 import { ReviewService } from '../../server/review-service.js';
 import { LATEST_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
 import {
+  NO_CAPABILITIES,
   accountSettingsSchema,
   entryResponseSchema,
   queueResponseSchema,
@@ -333,6 +334,8 @@ describe('comparing the two schedules', () => {
         fsrsDue: addDays(TODAY, fsrs.scheduledDays),
         fsrsIntervalDays: fsrs.scheduledDays,
         differenceDays: fsrs.scheduledDays - 3,
+        // One answer is too little for FSRS's estimate to be worth showing.
+        recall: null,
       },
     ]);
     expect(report.workload.reduce((total, day) => total + day.legacy, 0)).toBe(1);
@@ -409,7 +412,7 @@ describe('a database one migration behind (version 2)', () => {
 
   it('keeps saving reviews, with sessions and Undo, and simply has no FSRS', async () => {
     const queue = queueResponseSchema.parse(await (await call(legacy, owner, '/api/review-queue')).json());
-    expect(queue.capabilities).toEqual({ sessions: true, undo: true, fsrs: false, analytics: false });
+    expect(queue.capabilities).toEqual({ ...NO_CAPABILITIES, sessions: true, undo: true });
 
     const word = await addWord(owner, { word: 'candid', mastery: 3, reviewDate: TODAY }, legacy);
     const { response, requestId } = await answer(owner, word.id, 'remember', seen, { on: legacy });
@@ -432,7 +435,7 @@ describe('a failure inside FSRS', () => {
   it('never costs the user their review', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const repository = new FakeRepository([record(1, { mastery: 3, nextReview: '2026-10-01' })]);
-    Object.assign(repository, { capabilities: { sessions: false, undo: false, fsrs: true, analytics: false } });
+    Object.assign(repository, { capabilities: { ...NO_CAPABILITIES, fsrs: true } });
     const writes: unknown[] = [];
     const save = repository.applyReview.bind(repository);
     repository.applyReview = async (write) => {

@@ -1,13 +1,24 @@
-import { normalizeId, type SessionSummary } from '../../shared/api.js';
+import { normalizeId, type Confidence, type SessionSummary } from '../../shared/api.js';
 import type { DailyStat } from '../../shared/analytics.js';
 import { addDays, type IsoDate } from '../../shared/dates.js';
+import type { HistoryEvent } from '../../shared/export-format.js';
 import type { CardHistory } from '../../shared/weak-words.js';
 import type { ReviewAction, ReviewState } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
+import { DEFAULT_SCHEDULER, type SchedulerId } from '../../shared/scheduler/active.js';
 import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
 import type { CardFieldConfig, StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
-import type { ReviewWrite, ReviewWriteResult, UndoResult, VocabularyRepository } from '../vocabulary-repository.js';
+import type {
+  ConfidenceStat,
+  PracticeDailyStat,
+  PracticeWrite,
+  PracticeWriteResult,
+  ReviewWrite,
+  ReviewWriteResult,
+  UndoResult,
+  VocabularyRepository,
+} from '../vocabulary-repository.js';
 
 export const mockCardFields: CardFieldConfig[] = [
   { key: 'partOfSpeech', label: 'Part of speech', side: 'front', visibility: 'always' },
@@ -59,7 +70,7 @@ interface StoredWord {
   trashed: boolean;
   createdTime: string;
   lastEditedTime: string;
-  /** Kept beside the mastery schedule, as in the real store; never decides what is due. */
+  /** Kept beside the mastery schedule, as in the real store. */
   fsrs?: StoredFsrs | null;
 }
 
@@ -79,13 +90,36 @@ interface MockLog {
   durationMs: number | null;
   /** Present when the answer was saved with an FSRS state: what to put back on Undo. */
   fsrs: { before: StoredFsrs | null; after: StoredFsrs } | null;
+  confidence: Confidence | null;
+  /** Which schedule was in charge when it was given. */
+  scheduler: SchedulerId;
+  /** When it was recorded. */
+  at: string;
 }
 
 /** In-memory sample vocabulary. Nothing here is ever stored anywhere. */
 export class MockVocabularyRepository implements VocabularyRepository, VocabularyCatalog {
   readonly mode = 'mock' as const;
-  readonly capabilities = { sessions: true, undo: true, fsrs: true, analytics: true };
+  readonly capabilities = {
+    sessions: true,
+    undo: true,
+    fsrs: true,
+    analytics: true,
+    goals: true,
+    confidence: true,
+    practice: true,
+    library: true,
+  };
+
+  /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
+  ownsWord(id: string): boolean {
+    const word = this.words.get(normalizeId(id));
+    return word !== undefined && !word.trashed;
+  }
+  /** Practice answers, kept apart from the reviews: they never touch a word's schedule. */
+  private readonly practice: Array<PracticeWrite & { at: string; state: ReviewState }> = [];
   private readonly words = new Map<string, StoredWord>();
+  private readonly logs: MockLog[] = [];
   private created = 0;
 
   constructor(
@@ -133,6 +167,10 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     return { records: this.live().map(toRecord), invalid: [] };
   }
 
+  async listLiveRecords() {
+    return { records: this.live().map(toRecord), invalid: [] };
+  }
+
   async vocabularyStatus() {
     const words = this.live();
     if (words.length === 0) return 'empty' as const;
@@ -145,8 +183,6 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
   }
 
   /** The review history, kept the way the real store keeps it: appended to, never edited. */
-  private readonly logs: MockLog[] = [];
-
   private stands(log: MockLog): boolean {
     return log.kind === 'review' && !this.logs.some((other) => other.undoes === log.sequence);
   }
@@ -187,6 +223,9 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       after: write.next,
       durationMs: write.durationMs,
       fsrs,
+      confidence: write.confidence ?? null,
+      scheduler: write.scheduler ?? DEFAULT_SCHEDULER,
+      at: this.now().toISOString(),
     });
     return { outcome: 'applied', state: write.next };
   }
@@ -229,6 +268,9 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       after: target.before,
       durationMs: null,
       fsrs: null,
+      confidence: null,
+      scheduler: target.scheduler,
+      at: this.now().toISOString(),
     });
     return { outcome: 'undone', id: word.id, state: target.before };
   }
@@ -308,6 +350,106 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         return [id, history];
       }),
     );
+  }
+
+  async recordPractice(write: PracticeWrite): Promise<PracticeWriteResult> {
+    if (this.practice.some((earlier) => earlier.requestId === write.requestId)) return 'already_recorded';
+    const word = this.words.get(normalizeId(write.id));
+    if (!word || word.trashed) return 'not_found';
+    this.practice.push({ ...write, id: word.id, at: this.now().toISOString(), state: this.stateOf(word) });
+    return 'recorded';
+  }
+
+  async listHistory(): Promise<HistoryEvent[]> {
+    const reviews: HistoryEvent[] = this.logs.map((log) => ({
+      id: `00000000-0000-4000-b000-${String(log.sequence).padStart(12, '0')}`,
+      vocabularyId: log.wordId,
+      kind: log.kind,
+      action: log.action,
+      mode: 'flashcard',
+      reviewedAt: log.at,
+      reviewedOn: log.reviewedOn,
+      durationMs: log.durationMs,
+      masteryBefore: log.before.mastery,
+      masteryAfter: log.after.mastery,
+      reviewDateBefore: log.before.nextReview,
+      reviewDateAfter: log.after.nextReview,
+      sessionId: log.sessionId,
+      undoesId: log.undoes === null ? null : `00000000-0000-4000-b000-${String(log.undoes).padStart(12, '0')}`,
+      scheduler: log.scheduler,
+      rating: null,
+      confidence: log.confidence,
+      answerCorrect: null,
+      submittedAnswer: null,
+      grading: null,
+    }));
+    const practised: HistoryEvent[] = this.practice.map((answer, index) => ({
+      id: `00000000-0000-4000-c000-${String(index + 1).padStart(12, '0')}`,
+      vocabularyId: answer.id,
+      kind: 'practice',
+      action: answer.correct ? 'remember' : 'not_remember',
+      mode: answer.mode,
+      reviewedAt: answer.at,
+      reviewedOn: answer.reviewedOn,
+      durationMs: answer.durationMs,
+      masteryBefore: answer.state.mastery,
+      masteryAfter: answer.state.mastery,
+      reviewDateBefore: answer.state.nextReview,
+      reviewDateAfter: answer.state.nextReview,
+      sessionId: answer.sessionId,
+      undoesId: null,
+      // Practice moves no schedule, whichever is in charge.
+      scheduler: DEFAULT_SCHEDULER,
+      rating: null,
+      confidence: answer.confidence,
+      answerCorrect: answer.correct,
+      submittedAnswer: answer.submitted,
+      grading: answer.grading,
+    }));
+    return [...reviews, ...practised].sort((a, b) => a.reviewedAt.localeCompare(b.reviewedAt));
+  }
+
+  async practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeDailyStat[]> {
+    const groups = new Map<string, PracticeDailyStat & { words: Set<string> }>();
+    for (const answer of this.practice) {
+      if (answer.reviewedOn < from || answer.reviewedOn > to) continue;
+      const key = `${answer.reviewedOn} ${answer.mode}`;
+      const group = groups.get(key) ?? {
+        day: answer.reviewedOn,
+        mode: answer.mode,
+        answers: 0,
+        correct: 0,
+        durationMs: 0,
+        timedAnswers: 0,
+        cards: 0,
+        words: new Set<string>(),
+      };
+      group.answers += 1;
+      group.correct += answer.correct ? 1 : 0;
+      group.durationMs += answer.durationMs ?? 0;
+      group.timedAnswers += answer.durationMs === null ? 0 : 1;
+      group.words.add(answer.id);
+      group.cards = group.words.size;
+      groups.set(key, group);
+    }
+    return [...groups.values()]
+      .sort((a, b) => a.day.localeCompare(b.day) || a.mode.localeCompare(b.mode))
+      .map(({ words: _words, ...stat }) => {
+        void _words;
+        return stat;
+      });
+  }
+
+  async confidenceStats(since: IsoDate): Promise<ConfidenceStat[]> {
+    const levels = new Map<Confidence, ConfidenceStat>();
+    for (const log of this.logs) {
+      if (!this.stands(log) || log.confidence === null || log.reviewedOn < since) continue;
+      const level = levels.get(log.confidence) ?? { confidence: log.confidence, reviews: 0, remembered: 0 };
+      level.reviews += 1;
+      level.remembered += log.action === 'remember' ? 1 : 0;
+      levels.set(log.confidence, level);
+    }
+    return [...levels.values()].sort((a, b) => a.confidence - b.confidence);
   }
 
   async listSchedules(): Promise<ScheduleCard[]> {
@@ -436,6 +578,7 @@ function toEntry(word: StoredWord): EntryData {
     example: word.example,
     mastery: word.mastery,
     reviewDate: word.reviewDate,
+    fsrsDue: word.fsrs?.state.due ?? null,
     dateAdded: word.dateAdded,
     createdTime: word.createdTime,
     lastEditedTime: word.lastEditedTime,

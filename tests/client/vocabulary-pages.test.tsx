@@ -388,8 +388,10 @@ describe('Word details', () => {
     expect(within(panel).getByText('example for word-1')).toBeInTheDocument();
     expect(within(panel).getByText('Overdue')).toBeInTheDocument();
     expect(within(panel).getByText('Sep 20, 2026')).toBeInTheDocument();
-    // Nothing links out of the app: the word lives here.
-    expect(within(panel).queryByRole('link')).not.toBeInTheDocument();
+    // Nothing links out of the app: the word lives here. Any link in the panel stays inside it.
+    for (const link of within(panel).queryAllByRole('link')) {
+      expect(link.getAttribute('href')).toMatch(/^\/(?!\/)/);
+    }
     // The latest values are fetched when the panel opens.
     expect(api.fetchEntry).toHaveBeenCalledWith(pageId(1));
     expect(window.location.search).toContain(`word=${pageId(1)}`);

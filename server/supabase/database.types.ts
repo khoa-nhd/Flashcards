@@ -104,9 +104,61 @@ export interface Database {
           updated_at: string;
           /** From schema version 3. */
           fsrs_request_retention: number;
+          /** From schema version 5. Empty means no goal of that kind. */
+          daily_goal_reviews: number | null;
+          daily_goal_minutes: number | null;
+          /** From schema version 8. Which scheduler decides what is due. */
+          scheduler: 'mastery_v1' | 'fsrs';
         };
-        Insert: { user_id?: string; time_zone?: string; fsrs_request_retention?: number };
-        Update: { time_zone?: string; fsrs_request_retention?: number };
+        Insert: {
+          user_id?: string;
+          time_zone?: string;
+          fsrs_request_retention?: number;
+          daily_goal_reviews?: number | null;
+          daily_goal_minutes?: number | null;
+          scheduler?: 'mastery_v1' | 'fsrs';
+        };
+        Update: {
+          time_zone?: string;
+          fsrs_request_retention?: number;
+          daily_goal_reviews?: number | null;
+          daily_goal_minutes?: number | null;
+          scheduler?: 'mastery_v1' | 'fsrs';
+        };
+        Relationships: [];
+      };
+      /** From schema version 7. */
+      collections: {
+        Row: { id: string; user_id: string; name: string; name_key: string; created_at: string; updated_at: string };
+        Insert: { id?: string; user_id?: string; name: string; name_key: string };
+        Update: { name?: string; name_key?: string };
+        Relationships: [];
+      };
+      collection_items: {
+        Row: { collection_id: string; vocabulary_id: string; user_id: string; added_at: string };
+        Insert: { collection_id: string; vocabulary_id: string; user_id?: string };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      vocabulary_examples: {
+        Row: {
+          id: string;
+          user_id: string;
+          vocabulary_id: string;
+          sentence: string;
+          source: string | null;
+          preferred: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: { id?: string; user_id?: string; vocabulary_id: string; sentence: string; source?: string | null };
+        Update: { sentence?: string; source?: string | null };
+        Relationships: [];
+      };
+      vocabulary_relations: {
+        Row: { id: string; user_id: string; low_id: string; high_id: string; kind: string; created_at: string };
+        Insert: { id?: string; user_id?: string; low_id: string; high_id: string; kind: string };
+        Update: Record<string, never>;
         Relationships: [];
       };
     };
@@ -200,6 +252,22 @@ export interface Database {
       };
       card_review_stats: {
         Args: { p_since: string };
+        Returns: Array<Record<string, string | number | null>>;
+      };
+      confidence_stats: {
+        Args: { p_since: string };
+        Returns: Array<{ confidence: number; reviews: number; remembered: number }>;
+      };
+      set_preferred_example: {
+        Args: { p_example_id: string; p_preferred: boolean };
+        Returns: boolean;
+      };
+      record_practice: {
+        Args: { p_event: Record<string, unknown> };
+        Returns: Array<{ outcome: string }>;
+      };
+      practice_daily_stats: {
+        Args: { p_from: string; p_to: string };
         Returns: Array<Record<string, string | number | null>>;
       };
       session_summary: {

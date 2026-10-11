@@ -349,8 +349,8 @@ describe('the scheduling panel', () => {
         totalCards: 3,
         comparable: 2,
         cards: [
-          { id: 'a', word: 'candid', mastery: 4, legacyDue: '2026-10-12', fsrsDue: '2026-10-11', fsrsIntervalDays: 2, differenceDays: -1 },
-          { id: 'b', word: 'eloquent', mastery: 10, legacyDue: null, fsrsDue: '2026-10-20', fsrsIntervalDays: 11, differenceDays: null },
+          { id: 'a', word: 'candid', mastery: 4, legacyDue: '2026-10-12', fsrsDue: '2026-10-11', fsrsIntervalDays: 2, differenceDays: -1, recall: 0.92 },
+          { id: 'b', word: 'eloquent', mastery: 10, legacyDue: null, fsrsDue: '2026-10-20', fsrsIntervalDays: 11, differenceDays: null, recall: null },
         ],
         workload: [
           { date: '2026-10-09', legacy: 1, fsrs: 0 },

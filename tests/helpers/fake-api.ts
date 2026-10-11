@@ -3,15 +3,26 @@ import { vi } from 'vitest';
 import type {
   AccountSettings,
   AnalyticsResponse,
+  DayPlanResponse,
+  ImportResponse,
+  LibraryResponse,
+  PracticeResponse,
   QueueResponse,
   SchedulerReport,
+  SimulationResponse,
   ReviewActionResponse,
   ReviewCard,
+  ReviewDaysResponse,
   VocabularyEntry,
   VocabularyListResponse,
   WeakWordView,
   WeakWordsResponse,
 } from '../../shared/api.js';
+import { EXPORT_FORMAT, EXPORT_VERSION } from '../../shared/export-format.js';
+import { collectionKey, orderPair, tidyName } from '../../shared/library.js';
+import { NO_GOAL, planDay, type PlanInput } from '../../shared/session-planner.js';
+import { judge } from '../../shared/study-modes.js';
+import { normalizeWord } from '../../shared/text.js';
 import { ApiError, type AppApi } from '../../src/lib/api-client.js';
 import { TIME_ZONE, TODAY, deferred, pageId, queueResponse, type Deferred } from './fixtures.js';
 
@@ -58,14 +69,64 @@ export interface FakeApiOptions {
   trashed?: VocabularyEntry[];
   account?: Partial<AccountSettings>;
   scheduler?: Partial<SchedulerReport>;
+  /** The what-if comparison Settings shows on request. */
+  simulation?: Partial<SimulationResponse>;
+  /** Saved reviews per day, for the calendar. */
+  reviewDays?: ReviewDaysResponse['days'];
   analytics?: Partial<AnalyticsResponse>;
   weakWords?: Partial<WeakWordsResponse>;
+  /** The figures the day's plan is worked out from; the plan itself comes from the real planner. */
+  plan?: Partial<PlanFigures>;
+  /** What the server says it did with a practice answer. */
+  practiceOutcome?: PracticeResponse['outcome'];
+  /** Collections, further examples and links the account starts with. */
+  library?: Partial<LibraryResponse>;
+}
+
+export interface PlanFigures extends PlanInput {
+  /** False for a store that cannot keep a goal. */
+  available: boolean;
+}
+
+/** A day with nothing reviewed, nothing due and no goal. */
+export function dayPlan(figures: Partial<PlanFigures> = {}): DayPlanResponse {
+  const { available = true, ...input } = figures;
+  return {
+    available,
+    today: TODAY,
+    timeZone: TIME_ZONE,
+    ...planDay({
+      goal: NO_GOAL,
+      done: { reviews: 0, durationMs: 0 },
+      due: { total: 0, overdue: 0 },
+      averageMs: null,
+      ...input,
+    }),
+  };
+}
+
+/** A comparison for a store with no saved answers: everything stays on its mastery date. */
+export function simulationResponse(overrides: Partial<SimulationResponse> = {}): SimulationResponse {
+  return {
+    available: true,
+    today: TODAY,
+    timeZone: TIME_ZONE,
+    retention: 0.9,
+    days: 30,
+    history: { reviews: 0, firstDay: null, lastDay: null, leftOut: { undone: 0, practice: 0, otherWords: 0 } },
+    words: { active: 0, replayed: 0, unseen: 0, retired: 0 },
+    nextDue: { days: [], later: { mastery: 0, fsrs: 0 } },
+    ifAllRemembered: { days: [], totals: { mastery: 0, fsrs: 0 } },
+    cards: [],
+    ...overrides,
+  };
 }
 
 /** A scheduler report for a store where FSRS is not available: the quietest starting point. */
 export function schedulerReport(overrides: Partial<SchedulerReport> = {}): SchedulerReport {
   return {
     active: 'mastery_v1',
+    switchable: false,
     today: TODAY,
     timeZone: TIME_ZONE,
     fsrs: {
@@ -114,8 +175,11 @@ export function analyticsResponse(overrides: Partial<AnalyticsResponse> = {}): A
     streak: { current: 0, longest: 0 },
     byMode: [],
     days: [],
+    weeks: [],
     firstReviewOn: null,
     windowDays: 90,
+    calibration: { available: false, levels: [] },
+    practice: { available: false, modes: [], today: { answers: 0, correct: 0 } },
     ...overrides,
   };
 }
@@ -149,12 +213,26 @@ export function createFakeApi({
   trashed = [],
   account = {},
   scheduler: schedulerOverrides = {},
+  simulation: simulationOverrides = {},
+  reviewDays = [],
   analytics: analyticsOverrides = {},
   weakWords: weakWordsOverrides = {},
+  plan: planFigures = {},
+  practiceOutcome = 'recorded',
+  library: libraryStart = {},
 }: FakeApiOptions = {}) {
+  // Copied, so one test's changes never reach the data another test passed in.
+  const library = {
+    available: libraryStart.available ?? true,
+    collections: (libraryStart.collections ?? []).map((item) => ({ ...item, wordIds: [...item.wordIds] })),
+    examples: (libraryStart.examples ?? []).map((item) => ({ ...item })),
+    relations: (libraryStart.relations ?? []).map((item) => ({ ...item })),
+  };
+  let goal = planFigures.goal ?? NO_GOAL;
   const analytics = analyticsResponse(analyticsOverrides);
   const weak = weakWordsResponse(weakWordsOverrides);
   const scheduler = schedulerReport(schedulerOverrides);
+  const simulated = simulationResponse(simulationOverrides);
   /** Review saves stay pending until a test settles them. */
   const saves: Array<Deferred<ReviewActionResponse>> = [];
   const store = entries.map((item) => ({ ...item }));
@@ -176,10 +254,15 @@ export function createFakeApi({
   };
 
   const api = {
-    // Echoes the focus it was asked for, as the server does.
-    fetchQueue: vi.fn<AppApi['fetchQueue']>(async (options) =>
-      queueResponse(cards, { focus: options?.focus ?? null, ...queue }),
-    ),
+    // Echoes the selection it was asked for, as the server does.
+    fetchQueue: vi.fn<AppApi['fetchQueue']>(async (options) => {
+      const wanted = options?.collection ?? null;
+      const collection =
+        wanted === null
+          ? null
+          : { id: wanted, name: library.collections.find((item) => item.id === wanted)?.name ?? 'Collection' };
+      return queueResponse(cards, { focus: options?.focus ?? null, collection, ...queue });
+    }),
     submitAction: vi.fn<AppApi['submitAction']>(() => {
       const pending = deferred<ReviewActionResponse>();
       saves.push(pending);
@@ -242,8 +325,167 @@ export function createFakeApi({
 
     fetchSettings: vi.fn<AppApi['fetchSettings']>(async () => ({ ...settings })),
     fetchScheduler: vi.fn<AppApi['fetchScheduler']>(async () => ({ ...scheduler })),
+    // Like the server: refuses where the choice cannot be kept, otherwise remembers it.
+    chooseScheduler: vi.fn<AppApi['chooseScheduler']>(async (next) => {
+      if (!scheduler.switchable) {
+        throw new ApiError('not_supported', 'The schedule cannot be changed yet: the database needs its latest update.', 409);
+      }
+      scheduler.active = next;
+      return { ...scheduler };
+    }),
+    fetchSimulation: vi.fn<AppApi['fetchSimulation']>(async (retention) => ({
+      ...simulated,
+      retention: retention ?? simulated.retention,
+    })),
     fetchAnalytics: vi.fn<AppApi['fetchAnalytics']>(async () => ({ ...analytics })),
     fetchWeakWords: vi.fn<AppApi['fetchWeakWords']>(async () => ({ ...weak })),
+    fetchReviewDays: vi.fn<AppApi['fetchReviewDays']>(async (from, to) => ({
+      available: true,
+      from,
+      to,
+      days: reviewDays.filter((day) => day.date >= from && day.date <= to),
+    })),
+    // Creates each row through the same stand-in the Add form uses, and reports like the server.
+    importWords: vi.fn<AppApi['importWords']>(async (items) => {
+      const results: ImportResponse['results'] = [];
+      for (const item of items) {
+        const taken = store.some((existing) => normalizeWord(existing.word) === normalizeWord(item.word));
+        if (taken && item.allowDuplicate !== true) {
+          results.push({ outcome: 'duplicate', entry: null, message: `"${item.word}" is already in your vocabulary.` });
+          continue;
+        }
+        const created = entry(nextId++, {
+          word: item.word,
+          meaning: item.meaning ?? null,
+          definition: item.definition ?? null,
+          example: item.example ?? null,
+          dateAdded: item.dateAdded ?? TODAY,
+          mastery: 1,
+          reviewDate: null,
+          reviewStatus: 'unscheduled',
+          reviewable: true,
+        });
+        store.unshift(created);
+        results.push({ outcome: 'imported', entry: { ...created }, message: null });
+      }
+      return { results, stopped: null };
+    }),
+    fetchExport: vi.fn<AppApi['fetchExport']>(async () => ({
+      format: EXPORT_FORMAT,
+      version: EXPORT_VERSION,
+      exportedAt: `${TODAY}T05:00:00.000Z`,
+      settings: { timeZone: TIME_ZONE, dailyGoal: goal, fsrsRequestRetention: null, scheduler: scheduler.active },
+      counts: {
+        words: store.length,
+        wordsInTrash: trash.size,
+        collections: library.collections.length,
+        examples: library.examples.length,
+        relations: library.relations.length,
+        historyEvents: 0,
+      },
+      vocabulary: store.map((item) => ({
+        id: item.id,
+        word: item.word,
+        meaning: item.meaning,
+        definition: item.definition,
+        example: item.example,
+        dateAdded: item.dateAdded,
+        createdAt: item.createdTime,
+        updatedAt: item.lastEditedTime,
+        mastery: item.mastery,
+        reviewDate: item.reviewDate,
+        fsrs: null,
+        inTrash: false,
+      })),
+      collections: library.collections.map((item) => ({ ...item, wordIds: [...item.wordIds] })),
+      examples: library.examples.map((item) => ({ ...item })),
+      relations: library.relations.map((item) => ({ ...item })),
+      reviewHistory: [],
+    })),
+
+    fetchLibrary: vi.fn<AppApi['fetchLibrary']>(async () => ({
+      available: library.available,
+      collections: library.collections.map((item) => ({ ...item, wordIds: [...item.wordIds] })),
+      examples: library.examples.map((item) => ({ ...item })),
+      relations: library.relations.map((item) => ({ ...item })),
+    })),
+    createCollection: vi.fn<AppApi['createCollection']>(async (name) => {
+      const tidy = tidyName(name);
+      if (library.collections.some((item) => collectionKey(item.name) === collectionKey(tidy))) {
+        throw new ApiError('duplicate', `You already have a collection called “${tidy}”.`, 409);
+      }
+      const made = { id: pageId(nextId++), name: tidy, wordIds: [] as string[] };
+      library.collections.push(made);
+      return { ...made };
+    }),
+    renameCollection: vi.fn<AppApi['renameCollection']>(async (id, name) => {
+      const found = library.collections.find((item) => item.id === id);
+      if (!found) throw new ApiError('not_found', 'There is no such collection.', 404);
+      found.name = tidyName(name);
+      return { ...found, wordIds: [...found.wordIds] };
+    }),
+    deleteCollection: vi.fn<AppApi['deleteCollection']>(async (id) => {
+      library.collections = library.collections.filter((item) => item.id !== id);
+    }),
+    setMembership: vi.fn<AppApi['setMembership']>(async (collectionId, wordId, member) => {
+      const found = library.collections.find((item) => item.id === collectionId);
+      if (!found) throw new ApiError('not_found', 'There is no such collection.', 404);
+      found.wordIds = found.wordIds.filter((existing) => existing !== wordId);
+      if (member) found.wordIds.push(wordId);
+      return { ...found, wordIds: [...found.wordIds] };
+    }),
+    addExample: vi.fn<AppApi['addExample']>(async (wordId, input) => {
+      const made = {
+        id: pageId(nextId++),
+        vocabularyId: wordId,
+        sentence: input.sentence.trim(),
+        source: input.source?.trim() || null,
+        preferred: input.preferred === true,
+      };
+      library.examples.push(made);
+      return { ...made };
+    }),
+    updateExample: vi.fn<AppApi['updateExample']>(async (id, input) => {
+      const found = library.examples.find((item) => item.id === id);
+      if (!found) throw new ApiError('not_found', 'There is no such example.', 404);
+      if (input.preferred === true) {
+        for (const other of library.examples) if (other.vocabularyId === found.vocabularyId) other.preferred = false;
+      }
+      Object.assign(found, {
+        sentence: input.sentence?.trim() ?? found.sentence,
+        source: input.source === undefined ? found.source : input.source?.trim() || null,
+        preferred: input.preferred ?? found.preferred,
+      });
+      return { ...found };
+    }),
+    deleteExample: vi.fn<AppApi['deleteExample']>(async (id) => {
+      library.examples = library.examples.filter((item) => item.id !== id);
+    }),
+    addRelation: vi.fn<AppApi['addRelation']>(async (fromId, toId, kind) => {
+      const pair = orderPair(fromId, toId);
+      if (pair === null) throw new ApiError('invalid_request', 'A word cannot be related to itself.', 400);
+      const existing = library.relations.find((item) => item.a === pair[0] && item.b === pair[1] && item.kind === kind);
+      if (existing) return { ...existing };
+      const made = { id: pageId(nextId++), kind, a: pair[0], b: pair[1] };
+      library.relations.push(made);
+      return { ...made };
+    }),
+    deleteRelation: vi.fn<AppApi['deleteRelation']>(async (id) => {
+      library.relations = library.relations.filter((item) => item.id !== id);
+    }),
+
+    // Judges with the real rules, from the words the test supplied.
+    submitPractice: vi.fn<AppApi['submitPractice']>(async (request) => {
+      const found = store.find((item) => item.id === request.pageId);
+      const judged = found === undefined ? null : judge(request.mode, found, request.answer);
+      if (judged === null) throw new ApiError('invalid_request', 'That answer does not fit this study mode.', 400);
+      return { outcome: practiceOutcome, correct: judged.correct, typed: judged.typed, expected: judged.expected };
+    }),
+    fetchPlan: vi.fn<AppApi['fetchPlan']>(async () => dayPlan({ ...planFigures, goal })),
+    saveGoal: vi.fn<AppApi['saveGoal']>(async (next) => {
+      goal = next;
+      return dayPlan({ ...planFigures, goal });
+    }),
     saveSettings: vi.fn<AppApi['saveSettings']>(async ({ timeZone, fsrsRetention }) => {
       if (timeZone !== undefined) settings.timeZone = timeZone;
       if (fsrsRetention !== undefined) settings.fsrsRetention = fsrsRetention;
