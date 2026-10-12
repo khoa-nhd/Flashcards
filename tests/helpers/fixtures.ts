@@ -191,6 +191,10 @@ export class FakeRepository implements VocabularyRepository {
     return [];
   }
 
+  async practiceCorrectCounts() {
+    return new Map<string, number>();
+  }
+
   /** Simulates a change made somewhere else, such as on another device. */
   editElsewhere(id: string, changes: Partial<VocabularyRecord>) {
     const existing = this.records.get(id);

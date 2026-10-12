@@ -440,6 +440,14 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       });
   }
 
+  async practiceCorrectCounts(id: string): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    for (const answer of this.practice) {
+      if (answer.id === normalizeId(id) && answer.correct) counts.set(answer.mode, (counts.get(answer.mode) ?? 0) + 1);
+    }
+    return counts;
+  }
+
   async confidenceStats(since: IsoDate): Promise<ConfidenceStat[]> {
     const levels = new Map<Confidence, ConfidenceStat>();
     for (const log of this.logs) {

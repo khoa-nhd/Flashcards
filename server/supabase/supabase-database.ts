@@ -381,6 +381,8 @@ export interface VocabularyDatabase {
   practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeStatRow[]>;
   /** Answers since `since` that carried a confidence rating, by rating. Needs schema version 5. */
   confidenceStats(since: IsoDate): Promise<ConfidenceStatRow[]>;
+  /** The study mode of each correct practice answer recorded for one word. Needs schema version 6. */
+  listCorrectPracticeModes(vocabularyId: string): Promise<string[]>;
   /** The account's settings in one read, or `null` if it has none yet. */
   getSettings(): Promise<StoredSettings | null>;
   /** Needs schema version 5. */
@@ -393,6 +395,18 @@ export interface VocabularyDatabase {
   /** Stores the zone only if the user has none yet; returns the one in effect. */
   ensureTimeZone(timeZone: string): Promise<string>;
   saveTimeZone(timeZone: string): Promise<string>;
+}
+
+/**
+ * What `record_practice` answered. The function returns one column, and how
+ * the API hands back a one-column result is not something to depend on: a row
+ * object, a bare value, or either of those in a list are all read here.
+ */
+export function practiceOutcomeOf(data: unknown): z.infer<typeof practiceOutcomeSchema> | null {
+  const first: unknown = Array.isArray(data) ? data[0] : data;
+  const value: unknown = typeof first === 'object' && first !== null ? (first as { outcome?: unknown }).outcome : first;
+  const outcome = practiceOutcomeSchema.safeParse(value);
+  return outcome.success ? outcome.data : null;
 }
 
 /** A settings row as read; which columns it has depends on the schema version. */
@@ -920,11 +934,25 @@ export function createSupabaseDatabase(
     async recordPractice(args) {
       const { data, error, status } = await client.rpc('record_practice', { p_event: practiceEvent(args) });
       if (error) throw toDatabaseError(error, status);
-      const rows = z.array(z.object({ outcome: practiceOutcomeSchema })).safeParse(data);
-      if (!rows.success || rows.data[0] === undefined) {
-        throw new DatabaseError('unavailable', 'The database did not confirm the practice answer.');
-      }
-      return rows.data[0].outcome;
+      const outcome = practiceOutcomeOf(data);
+      if (outcome === null) throw new DatabaseError('unavailable', 'The database did not confirm the practice answer.');
+      return outcome;
+    },
+
+    async listCorrectPracticeModes(vocabularyId) {
+      const rows = await readTable(
+        (from, to) =>
+          client
+            .from('review_logs')
+            .select('review_mode')
+            .eq('vocabulary_id', vocabularyId)
+            .eq('kind', 'practice')
+            .eq('answer_correct', true)
+            .order('id', { ascending: true })
+            .range(from, to),
+        z.object({ review_mode: z.string() }),
+      );
+      return rows.map((row) => row.review_mode);
     },
 
     async practiceDailyStats(from, to) {

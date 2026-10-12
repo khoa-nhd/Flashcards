@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   normalizeId,
   type CardField,
+  type PracticeMasteryResponse,
   type PracticeRequest,
   type PracticeResponse,
   type QueueResponse,
@@ -43,7 +44,7 @@ import {
 } from '../shared/scheduler/fsrs.js';
 import { DEFAULT_RATING_MAP, ratingFor, type RatingMap } from '../shared/scheduler/rating-map.js';
 import { simulate } from '../shared/scheduler/simulation.js';
-import { judge, type PracticeWord } from '../shared/study-modes.js';
+import { PRACTICE_MASTERY_MAX, STUDY_MODES, judge, practiceMasteryOf, type PracticeWord } from '../shared/study-modes.js';
 import type { CardFieldConfig, VocabularyRecord } from '../shared/vocabulary.js';
 import { HttpError } from './errors.js';
 import { KeyedMutex } from './keyed-mutex.js';
@@ -330,7 +331,9 @@ export class ReviewService {
     const result = { correct: judged.correct, typed: judged.typed, expected: judged.expected };
 
     // Judged either way; recorded only where saving is on and the store can hold it.
-    if (!repository.capabilities.practice || !(await this.writesEnabled())) return { outcome: 'dry_run', ...result };
+    if (!repository.capabilities.practice || !(await this.writesEnabled())) {
+      return { outcome: 'dry_run', ...result, modeMastery: null };
+    }
     const outcome = await repository.recordPractice({
       id: pageId,
       requestId: request.requestId,
@@ -344,7 +347,36 @@ export class ReviewService {
       confidence: request.confidence ?? null,
     });
     if (outcome === 'not_found') throw new HttpError(404, 'not_found', 'That word is not in your vocabulary.');
-    return { outcome: outcome === 'unsupported' ? 'dry_run' : outcome, ...result };
+    if (outcome === 'unsupported') return { outcome: 'dry_run', ...result, modeMastery: null };
+    // Counted from what is recorded, after recording: a repeated request finds its one answer and no more.
+    const correct = (await repository.practiceCorrectCounts(pageId)).get(request.mode) ?? 0;
+    return { outcome, ...result, modeMastery: practiceMasteryOf(correct) };
+  }
+
+  /**
+   * One word's practice mastery in every mode: its correct practice answers
+   * in that mode, counted up to the ceiling. Reads only, and has nothing to do
+   * with when the word is due.
+   */
+  async practiceMastery(id: string): Promise<PracticeMasteryResponse> {
+    const { repository } = this.options;
+    const pageId = normalizeId(id);
+    if ((await repository.getRecord(pageId)) === null) {
+      throw new HttpError(404, 'not_found', 'That word is not in your vocabulary.');
+    }
+    const available = repository.capabilities.practice;
+    const counts = available ? await repository.practiceCorrectCounts(pageId) : new Map<string, number>();
+    return {
+      available,
+      max: PRACTICE_MASTERY_MAX,
+      // Every mode, so one that has not been tried reads as zero rather than as missing.
+      modes: available
+        ? STUDY_MODES.map((mode) => {
+            const correct = counts.get(mode) ?? 0;
+            return { mode, correct, mastery: practiceMasteryOf(correct) };
+          })
+        : [],
+    };
   }
 
   /**

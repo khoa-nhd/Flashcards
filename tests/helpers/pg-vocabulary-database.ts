@@ -461,6 +461,18 @@ export function createPgVocabularyDatabase(
       return z.array(practiceStatRowSchema).parse(rows.map((row) => row.stat));
     },
 
+    async listCorrectPracticeModes(vocabularyId) {
+      const rows = await run((session) =>
+        session.query<{ review_mode: string }>(
+          `select review_mode from public.review_logs
+            where vocabulary_id = $1::uuid and kind = 'practice' and answer_correct
+            order by id`,
+          [vocabularyId],
+        ),
+      );
+      return rows.map((row) => row.review_mode);
+    },
+
     async confidenceStats(since) {
       const rows = await run((session) =>
         session.query<{ stat: unknown }>('select to_jsonb(s) as stat from public.confidence_stats($1::date) s', [since]),

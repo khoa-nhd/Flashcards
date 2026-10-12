@@ -455,6 +455,62 @@ describe('Word details', () => {
     expect(api.updateEntry).toHaveBeenCalledExactlyOnceWith(pageId(1), { schedule: { mastery: 4, reviewDate: null } });
   });
 
+  it('says whether the schedule will change, and sends none while its section is open but untouched', async () => {
+    const { api, user, panel } = await openWord();
+    await user.click(within(panel).getByRole('button', { name: /Edit/ }));
+    const section = () => within(panel).getByRole('button', { name: /Review schedule/ });
+    expect(section()).toHaveTextContent('Not changed unless opened');
+
+    await user.click(section());
+    expect(section()).toHaveTextContent('Nothing changed yet');
+    await user.type(within(panel).getByLabelText('Example sentences'), ' More.');
+    await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
+    expect(api.updateEntry).toHaveBeenCalledExactlyOnceWith(pageId(1), { example: 'example for word-1 More.' });
+  });
+
+  it('keeps a schedule edit when its section is closed again, and says so before saving', async () => {
+    const { api, user, panel } = await openWord();
+    await user.click(within(panel).getByRole('button', { name: /Edit/ }));
+    const section = () => within(panel).getByRole('button', { name: /Review schedule/ });
+    await user.click(section());
+    fireEvent.change(within(panel).getByLabelText('Mastery'), { target: { value: '6' } });
+    expect(section()).toHaveTextContent('Changed: will be saved');
+
+    // Closing the section hides the fields. It must not quietly drop what was typed in them.
+    await user.click(section());
+    expect(within(panel).queryByLabelText('Mastery')).not.toBeInTheDocument();
+    expect(section()).toHaveTextContent('Changed: will be saved');
+
+    await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
+    expect(api.updateEntry).toHaveBeenCalledExactlyOnceWith(pageId(1), { schedule: { mastery: 6, reviewDate: '2026-10-01' } });
+  });
+
+  it('opens the section again to show a mistake made in it, instead of doing nothing', async () => {
+    const { api, user, panel } = await openWord();
+    await user.click(within(panel).getByRole('button', { name: /Edit/ }));
+    const section = () => within(panel).getByRole('button', { name: /Review schedule/ });
+    await user.click(section());
+    fireEvent.change(within(panel).getByLabelText('Mastery'), { target: { value: '12' } });
+    await user.click(section());
+    expect(section()).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
+    expect(api.updateEntry).not.toHaveBeenCalled();
+    expect(section()).toHaveAttribute('aria-expanded', 'true');
+    expect(within(panel).getByText('Mastery must be a whole number from 0 to 10.')).toBeInTheDocument();
+    expect(within(panel).getByLabelText('Mastery')).toHaveValue(12);
+  });
+
+  it('lets the text of a word be edited even when its stored mastery is unusable', async () => {
+    // Nothing in the schedule section was touched, so nothing in it is checked or sent.
+    const broken = entry(1, { word: 'serendipity', meaning: 'sự tình cờ', mastery: null, reviewStatus: 'invalid', reviewable: false });
+    const { api, user, panel } = await openWord({ entries: [broken] });
+    await user.click(within(panel).getByRole('button', { name: /Edit/ }));
+    await user.type(within(panel).getByLabelText('Example sentences'), ' More.');
+    await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
+    expect(api.updateEntry).toHaveBeenCalledExactlyOnceWith(pageId(1), { example: 'example for word-1 More.' });
+  });
+
   it('keeps what was typed when saving fails', async () => {
     const { api, user, panel } = await openWord();
     api.updateEntry.mockRejectedValueOnce(new ApiError('database_unavailable', 'The database is temporarily unavailable.', 503));

@@ -438,6 +438,9 @@ export function createApp({
 
   app.get('/api/vocabulary', async (c) => c.json(await requireVocabulary(c).list()));
 
+  // A word's practice mastery per study mode: a count of recorded practice answers. Reads only.
+  app.get('/api/vocabulary/:id/practice-mastery', async (c) => c.json(await requireService(c).practiceMastery(entryId(c))));
+
   app.get('/api/trash', async (c) => c.json({ entries: await requireVocabulary(c).listTrashed() }));
 
   app.get('/api/vocabulary/:id', async (c) => c.json({ entry: await requireVocabulary(c).get(entryId(c)) }));

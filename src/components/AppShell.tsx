@@ -115,14 +115,14 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
               </span>
             )}
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          <div className="flex shrink-0 items-center gap-0.5">
             {SECONDARY.map((item) => (
               <Link
                 key={item.route}
                 to={ROUTES[item.route]}
                 aria-label={item.label}
                 aria-current={item.route === active ? 'page' : undefined}
-                className={`flex size-10 items-center justify-center rounded-xl ${
+                className={`flex size-9 items-center justify-center rounded-xl ${
                   item.route === active ? 'bg-accent-soft text-accent' : 'text-muted'
                 }`}
               >

@@ -38,6 +38,25 @@ export const STUDY_MODE_SUMMARY: Record<StudyMode, string> = {
  */
 export const EXPERIMENTAL_MODES: readonly StudyMode[] = ['listening'];
 
+/** The most a word's practice mastery in one mode can reach. The same ceiling as review mastery. */
+export const PRACTICE_MASTERY_MAX = 10;
+
+/**
+ * A word's practice mastery in one mode: one point for every correct practice
+ * answer recorded for it in that mode, up to the ceiling. A wrong answer adds
+ * nothing and takes nothing away.
+ *
+ * It is a count of what is already in the practice history, not a second
+ * number kept beside it, so it cannot drift from the answers it stands for
+ * and an answer sent twice still counts once. It is separate from review
+ * mastery and from every schedule: nothing reads it to decide when a word is
+ * due.
+ */
+export function practiceMasteryOf(correctAnswers: number): number {
+  if (!Number.isFinite(correctAnswers) || correctAnswers <= 0) return 0;
+  return Math.min(PRACTICE_MASTERY_MAX, Math.floor(correctAnswers));
+}
+
 /** How many choices a recognition question offers. */
 export const RECOGNITION_OPTIONS = 4;
 

@@ -21,7 +21,7 @@ import type {
 import { EXPORT_FORMAT, EXPORT_VERSION } from '../../shared/export-format.js';
 import { collectionKey, orderPair, tidyName } from '../../shared/library.js';
 import { NO_GOAL, planDay, type PlanInput } from '../../shared/session-planner.js';
-import { judge } from '../../shared/study-modes.js';
+import { PRACTICE_MASTERY_MAX, STUDY_MODES, judge, practiceMasteryOf, type StudyMode } from '../../shared/study-modes.js';
 import { normalizeWord } from '../../shared/text.js';
 import { ApiError, type AppApi } from '../../src/lib/api-client.js';
 import { TIME_ZONE, TODAY, deferred, pageId, queueResponse, type Deferred } from './fixtures.js';
@@ -73,6 +73,10 @@ export interface FakeApiOptions {
   simulation?: Partial<SimulationResponse>;
   /** Saved reviews per day, for the calendar. */
   reviewDays?: ReviewDaysResponse['days'];
+  /** Correct practice answers already recorded, by word id and study mode. */
+  practiceCorrect?: Record<string, Partial<Record<StudyMode, number>>>;
+  /** False to stand in for a database that does not record practice. */
+  practiceMasteryAvailable?: boolean;
   analytics?: Partial<AnalyticsResponse>;
   weakWords?: Partial<WeakWordsResponse>;
   /** The figures the day's plan is worked out from; the plan itself comes from the real planner. */
@@ -214,6 +218,8 @@ export function createFakeApi({
   account = {},
   scheduler: schedulerOverrides = {},
   simulation: simulationOverrides = {},
+  practiceCorrect: practiceCorrectStart = {},
+  practiceMasteryAvailable = true,
   reviewDays = [],
   analytics: analyticsOverrides = {},
   weakWords: weakWordsOverrides = {},
@@ -233,6 +239,13 @@ export function createFakeApi({
   const weak = weakWordsResponse(weakWordsOverrides);
   const scheduler = schedulerReport(schedulerOverrides);
   const simulated = simulationResponse(simulationOverrides);
+  /** Correct practice answers so far, by word and mode, and the requests already counted. */
+  const practiceCorrect = new Map<string, number>(
+    Object.entries(practiceCorrectStart).flatMap(([id, byMode]) =>
+      Object.entries(byMode).map(([mode, correct]): [string, number] => [`${id} ${mode}`, correct ?? 0]),
+    ),
+  );
+  const practised = new Set<string>();
   /** Review saves stay pending until a test settles them. */
   const saves: Array<Deferred<ReviewActionResponse>> = [];
   const store = entries.map((item) => ({ ...item }));
@@ -479,8 +492,31 @@ export function createFakeApi({
       const found = store.find((item) => item.id === request.pageId);
       const judged = found === undefined ? null : judge(request.mode, found, request.answer);
       if (judged === null) throw new ApiError('invalid_request', 'That answer does not fit this study mode.', 400);
-      return { outcome: practiceOutcome, correct: judged.correct, typed: judged.typed, expected: judged.expected };
+      const recorded = practiceOutcome !== 'dry_run';
+      // Counted the way the server counts: once per request id, correct answers only.
+      const key = `${request.pageId} ${request.mode}`;
+      if (recorded && judged.correct && !practised.has(request.requestId)) {
+        practised.add(request.requestId);
+        practiceCorrect.set(key, (practiceCorrect.get(key) ?? 0) + 1);
+      }
+      return {
+        outcome: practiceOutcome,
+        correct: judged.correct,
+        typed: judged.typed,
+        expected: judged.expected,
+        modeMastery: recorded ? practiceMasteryOf(practiceCorrect.get(key) ?? 0) : null,
+      };
     }),
+    fetchPracticeMastery: vi.fn<AppApi['fetchPracticeMastery']>(async (id) => ({
+      available: practiceMasteryAvailable,
+      max: PRACTICE_MASTERY_MAX,
+      modes: practiceMasteryAvailable
+        ? STUDY_MODES.map((mode) => {
+            const correct = practiceCorrect.get(`${id} ${mode}`) ?? 0;
+            return { mode, correct, mastery: practiceMasteryOf(correct) };
+          })
+        : [],
+    })),
     fetchPlan: vi.fn<AppApi['fetchPlan']>(async () => dayPlan({ ...planFigures, goal })),
     saveGoal: vi.fn<AppApi['saveGoal']>(async (next) => {
       goal = next;

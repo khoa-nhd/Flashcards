@@ -149,6 +149,10 @@ answer. `review_mode` is held to `flashcard`, `recognition`, `recall`,
   reads `card_states`; it has no statement that writes it.
 - `effective_reviews` does not include practice, so activity, streaks, the
   daily goal, weak words and calibration go on counting scheduled reviews only.
+- **Practice mastery is read from these rows, not stored.** A word's score in
+  a mode is the number of its practice rows in that mode with
+  `answer_correct`, stopped at 10. There is no table or column for it, so no
+  migration, and nothing that could fall out of step with the history.
 
 - Unique on `(user_id, request_id)`: one answer is recorded once.
 - Signed-in users can `SELECT` and `INSERT` their own rows. There is no
@@ -340,6 +344,7 @@ accepted. It cannot affect any other account.
 | Import (content only, once per row, per account) and export (read-only, own data only), with round trips | `tests/server/import-export-api.test.ts`, `tests/shared/import.test.ts` | Same; unit |
 | Collections, further examples, related words: isolation, constraints, no word ever deleted | `tests/server/library-api.test.ts` | Same |
 | Practice modes: judged on the server, recorded once, never moving the schedule | `tests/server/practice-api.test.ts`, `tests/shared/study-modes.test.ts` | Same; unit |
+| Practice mastery: one point per correct answer per mode, capped, counted once, per account, apart from the schedule | `tests/server/practice-mastery-api.test.ts` | Same |
 | Daily goal, review filters, confidence ratings, a database one version behind | `tests/server/goals-api.test.ts`, `tests/shared/session-planner.test.ts` | Same; unit |
 | Review activity and weak words, per account | `tests/server/analytics-api.test.ts`, `tests/shared/analytics.test.ts`, `tests/shared/weak-words.test.ts` | Same; unit |
 | No privileged key in browser code or server settings | `tests/frontend-secrets.test.ts` | The source files |
@@ -353,6 +358,6 @@ layer that calls the Supabase SDK: `server/supabase/supabase-database.ts` and
 that speaks SQL to the in-process database, so a mistake in the real one would
 not show up there. Two things cover that gap: `tests/server/gateway-versions.test.ts`
 runs the real gateway against a stand-in that records what it asks for, and
-fails if a database at any version would be asked for a table, view or
-function it does not have; and `npm run supabase:verify` exercises the real
+fails if a database at any version would be asked for a table, view, column
+(read, written, filtered or sorted on) or function it does not have; and `npm run supabase:verify` exercises the real
 gateway against the live project.

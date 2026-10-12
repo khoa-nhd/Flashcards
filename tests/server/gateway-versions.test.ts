@@ -28,6 +28,8 @@ interface Asked {
 }
 
 const WRITES = new Set(['insert', 'update', 'upsert']);
+/** Calls whose first argument names a column to filter or sort by. */
+const FILTERS = new Set(['eq', 'neq', 'is', 'lt', 'lte', 'gt', 'gte', 'in', 'order']);
 
 /** Column names out of a select list. Anything that is not a plain name (a count, an embed) is skipped. */
 const namesIn = (list: string) =>
@@ -52,6 +54,9 @@ function recorder(version: number) {
           }
           return (...args: unknown[]) => {
             if (property === 'select' && typeof args[0] === 'string') for (const name of namesIn(args[0])) entry.columns.add(name);
+            if (typeof property === 'string' && FILTERS.has(property) && typeof args[0] === 'string') {
+              for (const name of namesIn(args[0])) entry.columns.add(name);
+            }
             if (typeof property === 'string' && WRITES.has(property) && typeof args[0] === 'object' && args[0] !== null) {
               for (const name of Object.keys(args[0])) entry.columns.add(name);
             }
@@ -124,6 +129,7 @@ const REQUESTS: Array<[label: string, path: string, method?: 'POST' | 'PUT', bod
   ['the review queue, recently added', '/api/review-queue?focus=recent'],
   ['the word list', '/api/vocabulary'],
   ['one word', `/api/vocabulary/${WORD}`],
+  ['a word’s practice mastery', `/api/vocabulary/${WORD}/practice-mastery`],
   ['the trash', '/api/trash'],
   ['settings', '/api/settings'],
   ['the day’s plan', '/api/plan'],
@@ -217,6 +223,8 @@ async function askedAt(version: number): Promise<Asked[]> {
       confidence: null,
     })
     .catch(() => undefined);
+  fake.during('counting practice mastery');
+  await repository.practiceCorrectCounts(WORD).catch(() => undefined);
   quiet.mockRestore();
   return fake.asked;
 }
@@ -261,6 +269,17 @@ describe.each(Array.from({ length: LATEST_SCHEMA_VERSION }, (_, index) => index 
     forQueue.delete('relation user_settings');
     forQueue.delete('function app_schema_version');
     expect([...forQueue]).toEqual([]);
+  });
+
+  it('counts practice mastery only where practice is recorded, from the history alone', () => {
+    const used = asked.filter((item) => item.during === 'counting practice mastery');
+    if (version < 6) {
+      expect(used).toEqual([]);
+      return;
+    }
+    expect(used.map((item) => `${item.kind} ${item.name}`)).toEqual(['relation review_logs']);
+    // The columns it filters on arrived with practice itself, so they are checked like any others above.
+    expect([...used[0]!.columns].sort()).toEqual(['answer_correct', 'id', 'kind', 'review_mode', 'vocabulary_id']);
   });
 
   it('saves an answer through the function that version has', () => {

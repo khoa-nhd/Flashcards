@@ -197,45 +197,48 @@ export function SchedulerSection() {
                 </tbody>
               </table>
 
-              <table className="w-full text-left text-sm">
-                <caption className={CAPTION}>Next review, word by word</caption>
-                <thead className="text-xs text-muted">
-                  <tr>
-                    <th scope="col" className="py-1 font-medium">
-                      Word
-                    </th>
-                    <th scope="col" className="py-1 font-medium">
-                      Mastery schedule
-                    </th>
-                    <th scope="col" className="py-1 font-medium">
-                      FSRS
-                    </th>
-                    <th scope="col" className="py-1 text-right font-medium">
-                      Difference
-                    </th>
-                    <th scope="col" className="py-1 text-right font-medium">
-                      Estimated recall now
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {report.cards.slice(0, 8).map((item) => (
-                    <tr key={item.id} className="border-t border-line">
-                      <th scope="row" className="max-w-40 truncate py-1 font-medium">
-                        {item.word}
+              {/* Five columns do not fit a phone: the table keeps its width and scrolls sideways instead. */}
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[32rem] whitespace-nowrap text-left text-sm">
+                  <caption className={`${CAPTION} sticky left-0`}>Next review, word by word</caption>
+                  <thead className="text-xs text-muted">
+                    <tr>
+                      <th scope="col" className="py-1 font-medium">
+                        Word
                       </th>
-                      <td className="py-1 tabular-nums">{item.legacyDue ?? 'never (mastered)'}</td>
-                      <td className="py-1 tabular-nums">{item.fsrsDue}</td>
-                      <td className="py-1 text-right tabular-nums">
-                        {item.differenceDays === null ? '—' : signed(item.differenceDays)}
-                      </td>
-                      <td className="py-1 text-right tabular-nums">
-                        {item.recall === null ? 'Too early to say' : `about ${percent(item.recall)}`}
-                      </td>
+                      <th scope="col" className="py-1 font-medium">
+                        Mastery schedule
+                      </th>
+                      <th scope="col" className="py-1 font-medium">
+                        FSRS
+                      </th>
+                      <th scope="col" className="py-1 text-right font-medium">
+                        Difference
+                      </th>
+                      <th scope="col" className="py-1 text-right font-medium">
+                        Estimated recall now
+                      </th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {report.cards.slice(0, 8).map((item) => (
+                      <tr key={item.id} className="border-t border-line">
+                        <th scope="row" className="max-w-40 truncate py-1 font-medium">
+                          {item.word}
+                        </th>
+                        <td className="py-1 tabular-nums">{item.legacyDue ?? 'never (mastered)'}</td>
+                        <td className="py-1 tabular-nums">{item.fsrsDue}</td>
+                        <td className="py-1 text-right tabular-nums">
+                          {item.differenceDays === null ? '—' : signed(item.differenceDays)}
+                        </td>
+                        <td className="py-1 text-right tabular-nums">
+                          {item.recall === null ? 'Too early to say' : `about ${percent(item.recall)}`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
               {report.cards.length > 8 && <p className={HELP}>Showing the 8 words FSRS would bring back soonest.</p>}
               <p className={HELP}>
                 Estimated recall is FSRS’s own figure for the chance you would remember the word if asked right now. It

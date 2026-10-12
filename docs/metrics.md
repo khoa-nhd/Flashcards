@@ -331,6 +331,21 @@ exactly the typed-answer rules above. It needs nothing from an entry but the
 word. It is counted under its own name. The app has no audio of its own and
 sends nothing anywhere for it; the voice is the device's.
 
+## Practice mastery
+
+Shown in a word's panel ("Practice mastery") and after each practice answer.
+The rule is in [`shared/study-modes.ts`](../shared/study-modes.ts)
+(`practiceMasteryOf`).
+
+| | |
+| --- | --- |
+| What it is | For one word and one practice mode, a score from 0 to 10: **one point for every correct practice answer recorded for that word in that mode, stopping at 10.** A wrong answer adds nothing and takes nothing away. |
+| Per mode | Recognition, recall, typing, fill in the blank and listening each have their own score for each word. They are never added together. In recall, "correct" is what you said about yourself. |
+| Where it comes from | It is counted from the practice history each time it is shown. It is not a second number stored beside the history, so it cannot disagree with it, an answer sent twice counts once, and practice recorded before the score existed counts too. |
+| What it is not | Review mastery. It never decides when a word is due, never hides a definition, never retires a word, and is not read by either schedule. Reviewing a word, or editing its review mastery, does not change it. |
+| What changes it | Only a recorded practice answer. It cannot be edited by hand. An answer judged while saving is switched off is not recorded, so it is not counted. |
+| When it is shown | Where practice is recorded (database version 6 or later). Elsewhere the section is left out rather than filled with zeros. |
+
 ## Estimated recall (FSRS)
 
 Settings → Scheduling, "Estimated recall now", for words FSRS has seen.

@@ -83,6 +83,14 @@ export interface Database {
           kind: string;
           session_id: string | null;
           undoes_log_id: string | null;
+          /** From schema version 3. */
+          rating: number | null;
+          /** From schema version 5. */
+          confidence: number | null;
+          /** From schema version 6: set on practice rows only. */
+          answer_correct: boolean | null;
+          submitted_answer: string | null;
+          grading: string | null;
         };
         Insert: never;
         Update: never;

@@ -147,6 +147,8 @@ export interface VocabularyRepository {
   recordPractice(write: PracticeWrite): Promise<PracticeWriteResult>;
   /** Practice answers per day and study mode in a range of the reviewer's days. Empty where none are kept. */
   practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeDailyStat[]>;
+  /** How many correct practice answers one word has in each study mode. Empty where none are kept. */
+  practiceCorrectCounts(id: string): Promise<Map<string, number>>;
   /** Standing answers since `since` that carried a confidence rating, by rating. Empty where none are kept. */
   confidenceStats(since: IsoDate): Promise<ConfidenceStat[]>;
 }

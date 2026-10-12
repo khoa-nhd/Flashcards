@@ -109,7 +109,13 @@ why.
 | Listening (experimental) | Nothing: the word is read aloud | Type what you hear | The server |
 
 Practice is recorded and reported one mode at a time, and **never changes
-mastery, a review date or FSRS**. Listening uses the browser's own speech
+mastery, a review date or FSRS**.
+
+Each word also has a **practice mastery** from 0 to 10 in each mode: one point
+for every correct practice answer in that mode, never above 10, and unchanged
+by a wrong answer. It is shown in the word's panel and after each practice
+answer. It is counted from the practice history, kept apart from the review
+mastery in the table above, and plays no part in deciding when a word is due. Listening uses the browser's own speech
 synthesis: no audio is stored or sent, and how it sounds, or whether a voice
 exists for the accent chosen, depends on the device. Where a browser cannot
 read text aloud the mode says so and stays off.
@@ -261,7 +267,8 @@ email if your project asks for it.
 - **Details**: click a word to see everything stored about it.
 - **Edit**: only the fields you change are written. Mastery and the review date
   are in a separate "Review schedule" section and are left alone unless you
-  open it.
+  open it and change them. The section says whether a change is waiting to be
+  saved, and a change stays in the save even if you close the section again.
 - **Delete** asks for confirmation and moves the word to the trash. An Undo
   appears right after, and **Settings → Deleted words** restores it at any
   later time, with its mastery and dates as they were.
@@ -409,7 +416,8 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | `GET /api/config` | Public. How to sign in: the project address and public key. |
 | `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. `?focus=weak`, `overdue`, `due_today` or `recent`, or `?collection=<id>`, narrows it; none can add a word that is not due. |
 | `POST /api/review-action` | `{ pageId, action, expected, requestId, sessionId?, durationMs?, confidence? }` → `applied`, `already_applied` or `dry_run`. `409` if the word changed. |
-| `POST /api/practice` | `{ pageId, mode, answer, requestId, sessionId? }` → the verdict. Judged on the server and recorded as practice; it cannot change mastery or a review date. |
+| `POST /api/practice` | `{ pageId, mode, answer, requestId, sessionId? }` → the verdict, and the word's practice mastery in that mode once the answer is counted. Judged on the server and recorded as practice; it cannot change mastery or a review date. |
+| `GET /api/vocabulary/:id/practice-mastery` | One word's practice mastery in every mode, counted from its recorded practice answers. Read-only. |
 | `POST /api/review-undo` | `{ reviewRequestId, requestId }` → the word's restored state. `409` if the answer is no longer the latest for that word. |
 | `GET /api/sessions/:id/summary` | What was saved in one sitting. |
 | `GET /api/analytics` | Review activity: periods, streak, by mode, per day, and how answers went at each confidence level. Read-only. |
@@ -475,7 +483,10 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
   claim it.
 - Only the latest answer can be undone, and only while nothing else has
   happened to that word since.
-- Practice never moves a schedule, in any mode.
+- Practice never moves a schedule, in any mode. Practice mastery is a count
+  of correct answers, not a judgement of how well a word is known: it cannot
+  go down, and ten lucky recognitions score the same as ten typed answers
+  would in their own mode.
 - Listening depends entirely on the browser's speech synthesis. It was checked
   for what the app asks the browser to say, in tests and in one desktop
   browser; nobody has judged what it sounds like across devices.

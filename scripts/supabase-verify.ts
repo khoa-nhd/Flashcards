@@ -373,6 +373,16 @@ async function main(): Promise<number> {
       );
       const mineToday = (await a.database.practiceDailyStats(today, today)).reduce((total, row) => total + row.answers, 0);
       check('A’s practice figures include it', mineToday >= 1);
+
+      // Practice mastery is counted from correct practice answers, so a wrong one must not appear in the count.
+      const correctBefore = (await a.database.listCorrectPracticeModes(id)).filter((mode) => mode === 'typing').length;
+      check('a wrong practice answer adds nothing to the word’s practice mastery', correctBefore === 0, `${correctBefore} counted`);
+      const right = { ...practice, requestId: randomUUID(), correct: true };
+      await a.database.recordPractice(right);
+      await a.database.recordPractice(right);
+      const correctAfter = (await a.database.listCorrectPracticeModes(id)).filter((mode) => mode === 'typing').length;
+      check('a correct one adds exactly one, however often it is sent', correctAfter === 1, `${correctAfter} counted`);
+      check('account B sees none of A’s practice when counting', (await b.database.listCorrectPracticeModes(id)).length === 0);
       const reviewsAfterPractice = (await a.database.cardReviewStats(today)).find((row) => row.vocabulary_id === id);
       check('practice is not counted as a review', reviewsAfterPractice?.reviews === 1, `${reviewsAfterPractice?.reviews ?? 0} reviews`);
       const forgedPractice = await attempt(

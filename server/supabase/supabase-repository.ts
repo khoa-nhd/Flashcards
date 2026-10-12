@@ -240,6 +240,13 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     }));
   }
 
+  async practiceCorrectCounts(id: string): Promise<Map<string, number>> {
+    const counts = new Map<string, number>();
+    if (!this.capabilities.practice) return counts;
+    for (const mode of await this.database.listCorrectPracticeModes(id)) counts.set(mode, (counts.get(mode) ?? 0) + 1);
+    return counts;
+  }
+
   async confidenceStats(since: IsoDate): Promise<ConfidenceStat[]> {
     if (!this.capabilities.confidence) return [];
     return (await this.database.confidenceStats(since)).map((row) => ({

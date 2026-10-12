@@ -8,6 +8,7 @@ import { MasteryPill, StatusBadge, formatDate, relativeDay } from './badges.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { Field, describedBy } from './Field.js';
 import { Icon } from './Icon.js';
+import { PracticeMastery } from './PracticeMastery.js';
 import { Spinner } from './Spinner.js';
 import { WordExtras } from './WordExtras.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT, TEXTAREA } from './ui.js';
@@ -39,7 +40,15 @@ const toDraft = (entry: VocabularyEntry): Draft => ({
 
 type DraftErrors = Partial<Record<keyof Draft, string>>;
 
-function validate(draft: Draft, scheduleOpen: boolean): DraftErrors {
+/**
+ * Whether mastery or the review date in the draft differs from what is
+ * stored. Their fields exist only while the schedule section is open, so
+ * this can only be true after the reader has opened it and typed.
+ */
+const scheduleEdited = (draft: Draft, stored: Draft): boolean =>
+  draft.mastery !== stored.mastery || draft.reviewDate !== stored.reviewDate;
+
+function validate(draft: Draft, checkSchedule: boolean): DraftErrors {
   const errors: DraftErrors = {};
   if (draft.word.trim() === '') errors.word = 'Enter a word.';
   else if (draft.word.trim().length > FIELD_LIMITS.word) errors.word = `Keep the word under ${FIELD_LIMITS.word} characters.`;
@@ -47,7 +56,7 @@ function validate(draft: Draft, scheduleOpen: boolean): DraftErrors {
     if (draft[key].trim().length > FIELD_LIMITS.text) errors[key] = `Keep this under ${FIELD_LIMITS.text} characters.`;
   }
   if (draft.dateAdded !== '' && !isIsoDate(draft.dateAdded)) errors.dateAdded = 'Enter a valid date.';
-  if (scheduleOpen) {
+  if (checkSchedule) {
     const mastery = Number(draft.mastery);
     if (draft.mastery.trim() === '' || !Number.isInteger(mastery) || mastery < 0 || mastery > 10) {
       errors.mastery = 'Mastery must be a whole number from 0 to 10.';
@@ -141,19 +150,26 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
 
   const save = async (allowDuplicate: boolean) => {
     if (entry === null || draft === null || saving) return;
-    const found = validate(draft, scheduleOpen);
+    const before = toDraft(entry);
+    // An edit to the schedule counts whether or not its section is still open: closing the
+    // section must neither throw the edit away unseen nor let it through unchecked.
+    const editedSchedule = scheduleEdited(draft, before);
+    const found = validate(draft, scheduleOpen || editedSchedule);
     setErrors(found);
-    if (Object.keys(found).length > 0) return;
+    if (Object.keys(found).length > 0) {
+      // A problem in the schedule fields has to be on screen to be put right.
+      if (found.mastery !== undefined || found.reviewDate !== undefined) setScheduleOpen(true);
+      return;
+    }
 
     // Send only what differs; the server compares again against what is stored.
-    const before = toDraft(entry);
     const input: UpdateEntryInput = {};
     if (draft.word !== before.word) input.word = draft.word;
     if (draft.meaning !== before.meaning) input.meaning = draft.meaning;
     if (draft.definition !== before.definition) input.definition = draft.definition;
     if (draft.example !== before.example) input.example = draft.example;
     if (draft.dateAdded !== before.dateAdded) input.dateAdded = draft.dateAdded === '' ? null : draft.dateAdded;
-    if (scheduleOpen && (draft.mastery !== before.mastery || draft.reviewDate !== before.reviewDate)) {
+    if (editedSchedule) {
       input.schedule = { mastery: Number(draft.mastery), reviewDate: draft.reviewDate === '' ? null : draft.reviewDate };
     }
     if (Object.keys(input).length === 0) {
@@ -315,6 +331,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                 </p>
               )}
 
+              <PracticeMastery wordId={entry.id} />
+
               <WordExtras entry={entry} canWrite={canWrite} />
             </div>
           )}
@@ -383,7 +401,11 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                 >
                   <span>Review schedule</span>
                   <span className="text-xs font-normal text-muted">
-                    {scheduleOpen ? 'Will be saved' : 'Not changed unless opened'}
+                    {entry !== null && scheduleEdited(draft, toDraft(entry))
+                      ? 'Changed: will be saved'
+                      : scheduleOpen
+                        ? 'Nothing changed yet'
+                        : 'Not changed unless opened'}
                   </span>
                 </button>
                 {scheduleOpen && (

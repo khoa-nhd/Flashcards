@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 
 export interface BarDatum {
   key: string;
@@ -31,6 +31,36 @@ const numberFormat = new Intl.NumberFormat();
 /** Room under the plot for the category labels, in pixels. Matches the `h-6` label row. */
 const AXIS_HEIGHT = 24;
 
+/** About how wide one character of an axis label is drawn, and the least space left between two labels. */
+const TICK_CHARACTER_WIDTH = 6.5;
+const TICK_GAP = 10;
+
+/**
+ * Which axis labels to draw. A column can be far narrower than its label (a
+ * month of days on a phone), so labels are drawn across their neighbours and
+ * thinned until none touches the next. The newest (last) label is always
+ * kept, since that is the end of the chart people read first. Until the width
+ * is known every label is kept.
+ */
+export function ticksThatFit(ticks: readonly string[], plotWidth: number | null): boolean[] {
+  if (plotWidth === null) return ticks.map((tick) => tick !== '');
+  const column = plotWidth / ticks.length;
+  const shown = ticks.map(() => false);
+  let nextLabelStarts = Number.POSITIVE_INFINITY;
+  for (let index = ticks.length - 1; index >= 0; index -= 1) {
+    const tick = ticks[index] ?? '';
+    if (tick === '') continue;
+    const width = tick.length * TICK_CHARACTER_WIDTH;
+    // The first and last labels are kept inside the plot; the others sit centred under their bar.
+    const centre = (index + 0.5) * column;
+    const left = index === 0 ? 0 : index === ticks.length - 1 ? plotWidth - width : centre - width / 2;
+    if (left + width + TICK_GAP > nextLabelStarts) continue;
+    shown[index] = true;
+    nextLabelStarts = left;
+  }
+  return shown;
+}
+
 /** The smallest "clean" number at or above `value` (1, 2, 5, 10, 20, 50…), never below 1. */
 export function niceCeiling(value: number): number {
   if (value <= 1) return 1;
@@ -49,6 +79,25 @@ export function BarChart({ title, unit, data, categoryLabel, height = 180 }: Bar
   const [active, setActive] = useState<number | null>(null);
   const [asTable, setAsTable] = useState(false);
   const titleId = useId();
+  const plot = useRef<HTMLUListElement>(null);
+  const [plotWidth, setPlotWidth] = useState<number | null>(null);
+
+  // The plot's width decides how many axis labels there is room for, and it changes with the window.
+  useEffect(() => {
+    const element = plot.current;
+    if (element === null || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width;
+      if (width !== undefined && width > 0) setPlotWidth(width);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [asTable]);
+
+  const shownTicks = ticksThatFit(
+    data.map((datum) => datum.tick),
+    plotWidth,
+  );
 
   const max = niceCeiling(Math.max(0, ...data.map((datum) => datum.value)));
   const ticks = max % 2 === 0 ? [max, max / 2, 0] : [max, 0];
@@ -129,7 +178,7 @@ export function BarChart({ title, unit, data, categoryLabel, height = 180 }: Bar
               ))}
             </div>
 
-            <ul className="absolute inset-0 m-0 flex list-none items-stretch p-0">
+            <ul ref={plot} className="absolute inset-0 m-0 flex list-none items-stretch p-0">
               {data.map((datum, index) => (
                 <li key={datum.key} className="relative flex min-w-0 flex-1 flex-col">
                   {/* The whole column is the target, so a short bar is as easy to hit as a tall one. */}
@@ -149,8 +198,16 @@ export function BarChart({ title, unit, data, categoryLabel, height = 180 }: Bar
                       style={{ height: `${(datum.value / max) * 100}%`, minHeight: datum.value > 0 ? 2 : 0 }}
                     />
                   </button>
-                  <span aria-hidden="true" className="h-6 truncate pt-1.5 text-center text-xs leading-none text-muted">
-                    {datum.tick}
+                  <span aria-hidden="true" className="relative h-6 text-xs leading-none text-muted">
+                    {shownTicks[index] && (
+                      <span
+                        className={`absolute top-1.5 whitespace-nowrap ${
+                          index === 0 ? 'left-0' : index === data.length - 1 ? 'right-0' : 'left-1/2 -translate-x-1/2'
+                        }`}
+                      >
+                        {datum.tick}
+                      </span>
+                    )}
                   </span>
                   {active === index && (
                     <span

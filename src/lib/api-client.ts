@@ -9,6 +9,7 @@ import {
   extraExampleSchema,
   importResponseSchema,
   libraryResponseSchema,
+  practiceMasteryResponseSchema,
   practiceResponseSchema,
   relationSchema,
   appConfigResponseSchema,
@@ -28,6 +29,7 @@ import {
   type DayPlanResponse,
   type ImportResponse,
   type LibraryResponse,
+  type PracticeMasteryResponse,
   type PracticeRequest,
   type PracticeResponse,
   type ReviewFocus,
@@ -146,6 +148,8 @@ export interface PracticeApi {
    * verdict; nothing about a word's schedule can change through this call.
    */
   submitPractice(request: PracticeRequest): Promise<PracticeResponse>;
+  /** One word's practice mastery in every study mode. Read-only. */
+  fetchPracticeMastery(id: string): Promise<PracticeMasteryResponse>;
 }
 
 export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi;
@@ -422,6 +426,13 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         body,
         timeoutMs: TIMEOUTS.actionMs,
         timeoutMessage: 'Checking that answer took too long.',
+      }),
+
+    fetchPracticeMastery: (id) =>
+      call(`/api/vocabulary/${encodeURIComponent(id)}/practice-mastery`, practiceMasteryResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading this word’s practice mastery took too long.',
       }),
 
     fetchPlan: () =>

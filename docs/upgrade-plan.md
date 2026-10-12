@@ -11,7 +11,7 @@ code, passing tests and an update to this file.
 | 2 FSRS | **Built.** Calculated beside the mastery schedule (version 3), and selectable per account as the schedule in charge (version 8). The mastery schedule stays the default. |
 | 3 Analytics and Weak Words | **Built.** Database version 4. Week-by-week accuracy and time charts on Insights; reviews per day on the Calendar. |
 | 4 Daily goals, filters, shortcuts, confidence | **Built.** Database version 5. |
-| 5 Study modes | **Built as practice**: recognition, recall, typing, fill in the blank, and listening (experimental). Database version 6. |
+| 5 Study modes | **Built as practice**: recognition, recall, typing, fill in the blank, and listening (experimental). Database version 6. Each word has a practice mastery (0 to 10) per mode, counted from its correct practice answers. |
 | 6 Collections, examples, relationships | **Built.** Database version 7. |
 | 7 Import, export, backup | **Built**: preview-based import of CSV, text, Excel (.xlsx) and the app's own exports; full JSON export; backup and recovery notes. No database change. |
 | 8 Retention estimate and simulation | **Built**: FSRS's own recall estimate per word, and a what-if comparison replayed from saved answers. No database change. |
@@ -22,7 +22,7 @@ code, passing tests and an update to this file.
 
 | Check | Result on 2026-10-11 |
 | --- | --- |
-| `npm test` | 1512 tests in 58 files, all passing |
+| `npm test` | 1558 tests in 60 files, all passing (2026-10-12) |
 | `npm run typecheck`, `npm run lint` | clean |
 | `npm run build` | succeeds (one warning: the main script is over 500 kB) |
 | `npm audit --omit=dev` | no known vulnerabilities |
@@ -45,6 +45,10 @@ it sounds like, or tried it on a phone.
 The plan in sections 3 and 4 is kept as it was written. Where the result
 differs, this list is what is true.
 
+- **Practice mastery is a count, not a stored score** (added 2026-10-12 at the
+  owner's request: one point per correct practice answer in a mode, never
+  above 10, unchanged by a wrong one). It needs no table and no SQL file: it
+  is read off the practice history. It cannot go down and cannot be edited.
 - **Which modes move the schedule: none but the flashcard.** The plan had
   recall, typing and cloze moving it. They are practice instead: recorded and
   reported per mode, never changing mastery, a review date or FSRS. Whether a

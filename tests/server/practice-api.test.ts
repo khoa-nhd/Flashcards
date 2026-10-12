@@ -107,6 +107,7 @@ describe('an answer in each mode', () => {
       correct: true,
       typed: null,
       expected: 'thẳng thắn',
+      modeMastery: 1,
     });
     expect(
       await practised(app, alice, { pageId: candid.id, mode: 'recognition', answer: { kind: 'choice', selectedId: others[0]!.id } }),
@@ -125,6 +126,7 @@ describe('an answer in each mode', () => {
       correct: false,
       typed: null,
       expected: 'candid',
+      modeMastery: 0,
     });
     expect(await rows()).toEqual([
       { kind: 'practice', review_mode: 'recall', action: 'not_remember', answer_correct: false, grading: 'self', submitted_answer: null },
@@ -168,7 +170,13 @@ describe('an answer in each mode', () => {
     const bare = await addWord(app, alice, { word: 'lucid', mastery: 3, reviewDate: TODAY });
     const heard = (text: string) => practised(app, alice, { pageId: bare.id, mode: 'listening', answer: { kind: 'typed', text } });
 
-    expect(await heard('Lucid')).toEqual({ outcome: 'recorded', correct: true, typed: 'exact', expected: 'lucid' });
+    expect(await heard('Lucid')).toEqual({
+      outcome: 'recorded',
+      correct: true,
+      typed: 'exact',
+      expected: 'lucid',
+      modeMastery: 1,
+    });
     expect(await heard('loosid')).toMatchObject({ correct: false, typed: 'incorrect', expected: 'lucid' });
     expect(await rows()).toEqual([
       { kind: 'practice', review_mode: 'listening', action: 'remember', answer_correct: true, grading: 'auto', submitted_answer: 'Lucid' },
@@ -571,6 +579,8 @@ describe('where practice cannot be recorded', () => {
       correct: true,
       typed: 'exact',
       expected: 'candid',
+      // Nothing was recorded, so there is no new score to report.
+      modeMastery: null,
     });
     expect(await old.admin('select count(*)::int as count from public.review_logs')).toEqual([{ count: 0 }]);
 

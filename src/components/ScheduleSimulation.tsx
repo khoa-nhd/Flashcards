@@ -127,41 +127,44 @@ function Result({ result }: { result: SimulationResponse }) {
             </>
           )}
 
-          <table className="w-full text-left text-sm">
-            <caption className={CAPTION}>Next review, word by word</caption>
-            <thead className="text-xs text-muted">
-              <tr>
-                <th scope="col" className="py-1 font-medium">
-                  Word
-                </th>
-                <th scope="col" className="py-1 text-right font-medium">
-                  Saved answers
-                </th>
-                <th scope="col" className="py-1 font-medium">
-                  Mastery schedule
-                </th>
-                <th scope="col" className="py-1 font-medium">
-                  FSRS at {percent(retention)}
-                </th>
-                <th scope="col" className="py-1 text-right font-medium">
-                  Difference
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {cards.slice(0, WORD_ROWS).map((card) => (
-                <tr key={card.id} className="border-t border-line">
-                  <th scope="row" className="max-w-40 truncate py-1 font-medium">
-                    {card.word}
+          {/* Five columns do not fit a phone: the table keeps its width and scrolls sideways instead. */}
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[34rem] whitespace-nowrap text-left text-sm">
+              <caption className={`${CAPTION} sticky left-0`}>Next review, word by word</caption>
+              <thead className="text-xs text-muted">
+                <tr>
+                  <th scope="col" className="py-1 font-medium">
+                    Word
                   </th>
-                  <td className="py-1 text-right tabular-nums">{card.reviews}</td>
-                  <td className="py-1 tabular-nums">{card.masteryDue}</td>
-                  <td className="py-1 tabular-nums">{card.reviews === 0 ? `${card.fsrsDue} (unchanged)` : card.fsrsDue}</td>
-                  <td className="py-1 text-right tabular-nums">{signed(card.differenceDays)}</td>
+                  <th scope="col" className="py-1 text-right font-medium">
+                    Saved answers
+                  </th>
+                  <th scope="col" className="py-1 font-medium">
+                    Mastery schedule
+                  </th>
+                  <th scope="col" className="py-1 font-medium">
+                    FSRS at {percent(retention)}
+                  </th>
+                  <th scope="col" className="py-1 text-right font-medium">
+                    Difference
+                  </th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {cards.slice(0, WORD_ROWS).map((card) => (
+                  <tr key={card.id} className="border-t border-line">
+                    <th scope="row" className="max-w-40 truncate py-1 font-medium">
+                      {card.word}
+                    </th>
+                    <td className="py-1 text-right tabular-nums">{card.reviews}</td>
+                    <td className="py-1 tabular-nums">{card.masteryDue}</td>
+                    <td className="py-1 tabular-nums">{card.reviews === 0 ? `${card.fsrsDue} (unchanged)` : card.fsrsDue}</td>
+                    <td className="py-1 text-right tabular-nums">{signed(card.differenceDays)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           {words.active > WORD_ROWS && (
             <p className={HELP}>Showing the {WORD_ROWS} words FSRS would bring back soonest, of {words.active}.</p>
           )}

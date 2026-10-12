@@ -49,5 +49,9 @@ export default defineConfig({
     // The page tests type into real forms in jsdom. With every file running at once on a busy machine, one
     // that passes in two seconds alone has been seen to take over fifteen; this leaves room for that.
     testTimeout: 30_000,
+    // Every test file gets a process of its own, most with a whole browser page or a whole PostgreSQL in it.
+    // One per processor core starves them all: files fail to start and typing tests time out. Half as many
+    // finishes no later and leaves the machine usable.
+    maxWorkers: '50%',
   },
 });

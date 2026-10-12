@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { PracticeResponse } from '../../shared/api.js';
 import {
+  PRACTICE_MASTERY_MAX,
+  STUDY_MODE_LABELS,
   answerText,
   buildCloze,
   type Choice,
@@ -299,6 +301,11 @@ export function Verdict({ mode, word, result, last, onNext }: VerdictProps) {
           <p className="mt-0.5 text-sm">
             The answer is <strong className="font-semibold">{answer}</strong>
             {mode === 'cloze' && answer.toLowerCase() !== word.word.toLowerCase() ? ` (${word.word})` : ''}.
+          </p>
+        )}
+        {result.modeMastery !== null && (
+          <p className="mt-0.5 text-xs">
+            {STUDY_MODE_LABELS[mode]} mastery for this word: {result.modeMastery} of {PRACTICE_MASTERY_MAX}.
           </p>
         )}
         {result.outcome === 'dry_run' && <p className="mt-0.5 text-xs">Not recorded.</p>}

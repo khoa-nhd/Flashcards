@@ -488,6 +488,28 @@ export const practiceResponseSchema = z.object({
   typed: z.enum(['exact', 'variant', 'incorrect']).nullable(),
   /** The right answer, as the server has it. */
   expected: z.string(),
+  /**
+   * The word's practice mastery in this mode once this answer is counted, from
+   * 0 to 10. `null` when the answer was not recorded, so nothing changed.
+   */
+  modeMastery: z.number().int().min(0).max(10).nullable().default(null),
+});
+
+/** A word's practice mastery in every mode. Read-only; it follows from the recorded practice answers. */
+export const practiceMasteryResponseSchema = z.object({
+  /** False where practice is not recorded (the database predates it). */
+  available: z.boolean(),
+  /** The ceiling a mode's mastery stops at. */
+  max: z.number().int(),
+  modes: z.array(
+    z.object({
+      mode: studyModeSchema,
+      /** Correct practice answers recorded for the word in this mode. */
+      correct: z.number().int().min(0),
+      /** `correct`, stopped at `max`. */
+      mastery: z.number().int().min(0).max(10),
+    }),
+  ),
 });
 
 // ---- Daily goal ----
@@ -784,6 +806,7 @@ export type LibraryResponse = z.infer<typeof libraryResponseSchema>;
 export type ImportResponse = z.infer<typeof importResponseSchema>;
 export type PracticeRequest = z.infer<typeof practiceRequestSchema>;
 export type PracticeResponse = z.infer<typeof practiceResponseSchema>;
+export type PracticeMasteryResponse = z.infer<typeof practiceMasteryResponseSchema>;
 export type WeakWordsResponse = z.infer<typeof weakWordsResponseSchema>;
 export type WeakWordView = z.infer<typeof weakWordSchema>;
 export type ApiErrorBody = z.infer<typeof apiErrorSchema>;
