@@ -483,22 +483,29 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
 
         {entry !== null && (
           <div className="flex flex-wrap items-center gap-2 border-t border-line px-5 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            {/*
+              Each of these buttons has a key of its own, and must keep one. Without keys the Edit
+              button would be redrawn in place as "Save changes" while its own click is still being
+              handled, and the browser would then let that same click submit the form: the editor
+              would open and close again at once.
+            */}
             {editing ? (
               <>
-                <button type="submit" form="word-edit-form" className={BUTTON_PRIMARY} disabled={saving}>
+                <button key="save" type="submit" form="word-edit-form" className={BUTTON_PRIMARY} disabled={saving}>
                   {saving && <Spinner />}
                   {saving ? 'Saving…' : 'Save changes'}
                 </button>
-                <button type="button" className={BUTTON_GHOST} onClick={() => setDraft(null)} disabled={saving}>
+                <button key="cancel" type="button" className={BUTTON_GHOST} onClick={() => setDraft(null)} disabled={saving}>
                   Cancel
                 </button>
               </>
             ) : (
               <>
-                <button type="button" className={BUTTON_PRIMARY} onClick={startEditing} disabled={!canWrite}>
+                <button key="edit" type="button" className={BUTTON_PRIMARY} onClick={startEditing} disabled={!canWrite}>
                   <Icon name="edit" className="size-4" /> Edit
                 </button>
                 <button
+                  key="delete"
                   type="button"
                   className={`${BUTTON_GHOST} ml-auto text-bad-ink hover:text-bad-ink`}
                   onClick={() => {

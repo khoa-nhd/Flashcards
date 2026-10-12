@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { flushSync } from 'react-dom';
 import { beforeEach, describe, expect, it } from 'vitest';
 import type { VocabularyEntry, VocabularyListResponse } from '../../shared/api.js';
 import { App } from '../../src/App.js';
@@ -428,6 +429,33 @@ describe('Word details', () => {
     expect(await within(panel).findByText('a happy accident')).toBeInTheDocument();
     expect(within(panel).queryByLabelText('Definition')).not.toBeInTheDocument();
     expect(screen.getByText('Saved “serendipity”.')).toBeInTheDocument();
+  });
+
+  it('stays in the edit form when Edit is pressed, in the order a browser handles the click', async () => {
+    const { api, panel } = await openWord();
+    const edit = within(panel).getByRole('button', { name: /Edit/ });
+
+    // A browser lets React redraw between running the click's handlers and acting on the click
+    // itself. The test helpers hide that gap, so it is put back here: React is flushed from a
+    // listener that runs after its own, and only then does the click take effect. If Edit were
+    // redrawn in place as the submit button, this same click would submit the form, find nothing
+    // changed, and close the editor the moment it opened.
+    const redraw = () => flushSync(() => {});
+    document.addEventListener('click', redraw);
+    try {
+      edit.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    } finally {
+      document.removeEventListener('click', redraw);
+    }
+
+    const save = await within(panel).findByRole('button', { name: 'Save changes' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(save).toBeInTheDocument();
+    expect(panel.querySelector('#edit-word')).toHaveValue('serendipity');
+    // The button that was pressed is gone, not turned into the one that saves.
+    expect(edit).not.toBeInTheDocument();
+    expect(save).not.toBe(edit);
+    expect(api.updateEntry).not.toHaveBeenCalled();
   });
 
   it('never sends mastery or the review date unless the schedule section was opened', async () => {
