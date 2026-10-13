@@ -152,7 +152,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 8;
+export const LATEST_SCHEMA_VERSION = 9;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -244,6 +244,21 @@ export const practiceStatRowSchema = z.object({
 });
 
 export type PracticeStatRow = z.infer<typeof practiceStatRowSchema>;
+
+export const practiceHistoryRowSchema = z.object({
+  vocabulary_id: z.string(),
+  review_mode: z.string(),
+  answer_correct: z.boolean(),
+  grading: z.string(),
+  submitted_answer: z.string().nullable(),
+  reviewed_on: z.string().refine(isIsoDate),
+  reviewed_at: z.string(),
+  duration_ms: z.number().int().nullable(),
+  confidence: z.number().int().nullable(),
+  session_id: z.string().uuid().nullable(),
+});
+
+export type PracticeHistoryRow = z.infer<typeof practiceHistoryRowSchema>;
 
 export const confidenceStatRowSchema = z.object({
   confidence: z.number().int().min(1).max(3),
@@ -379,6 +394,8 @@ export interface VocabularyDatabase {
   recordPractice(args: PracticeWriteArgs): Promise<PracticeOutcome>;
   /** Practice answers per day and study mode. Needs schema version 6. */
   practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeStatRow[]>;
+  /** Practice history per word, with enough detail for True Mastery. Needs schema version 7. */
+  practiceHistory(since: IsoDate | null): Promise<PracticeHistoryRow[]>;
   /** Answers since `since` that carried a confidence rating, by rating. Needs schema version 5. */
   confidenceStats(since: IsoDate): Promise<ConfidenceStatRow[]>;
   /** The study mode of each correct practice answer recorded for one word. Needs schema version 6. */
@@ -960,6 +977,14 @@ export function createSupabaseDatabase(
       if (error) throw toDatabaseError(error, status);
       const rows = z.array(practiceStatRowSchema).safeParse(data ?? []);
       if (!rows.success) throw new DatabaseError('unavailable', 'The database returned statistics in an unexpected shape.');
+      return rows.data;
+    },
+
+    async practiceHistory(since) {
+      const { data, error, status } = await client.rpc('practice_history', { p_since: since });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(practiceHistoryRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned practice history in an unexpected shape.');
       return rows.data;
     },
 

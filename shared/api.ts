@@ -77,6 +77,8 @@ export const capabilitiesSchema = z.object({
   confidence: z.boolean().default(false),
   /** Answers in the practice modes are recorded. They never move the schedule. */
   practice: z.boolean().default(false),
+  /** Detailed practice history for True Mastery estimation. */
+  practiceHistory: z.boolean().default(false),
   /** Collections, further examples and relationships between words can be kept. */
   library: z.boolean().default(false),
 });
@@ -90,6 +92,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   goals: false,
   confidence: false,
   practice: false,
+  practiceHistory: false,
   library: false,
 };
 

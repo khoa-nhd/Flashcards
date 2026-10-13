@@ -12,6 +12,7 @@ import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vo
 import type {
   ConfidenceStat,
   PracticeDailyStat,
+  PracticeHistoryRow,
   PracticeWrite,
   PracticeWriteResult,
   ReviewWrite,
@@ -73,6 +74,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     confidence: schemaVersion >= 5,
     practice: schemaVersion >= 6,
     library: schemaVersion >= 7,
+    practiceHistory: schemaVersion >= 9,
   };
 }
 
@@ -245,6 +247,23 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     if (!this.capabilities.practice) return counts;
     for (const mode of await this.database.listCorrectPracticeModes(id)) counts.set(mode, (counts.get(mode) ?? 0) + 1);
     return counts;
+  }
+
+  async practiceHistory(since: IsoDate | null): Promise<PracticeHistoryRow[]> {
+    if (!this.capabilities.practiceHistory) return [];
+    const rows = await this.database.practiceHistory(since);
+    return rows.map((row) => ({
+      vocabularyId: row.vocabulary_id,
+      mode: row.review_mode,
+      correct: row.answer_correct,
+      grading: row.grading as 'self' | 'auto',
+      submitted: row.submitted_answer,
+      reviewedOn: row.reviewed_on,
+      reviewedAt: row.reviewed_at,
+      durationMs: row.duration_ms,
+      confidence: row.confidence,
+      sessionId: row.session_id,
+    }));
   }
 
   async confidenceStats(since: IsoDate): Promise<ConfidenceStat[]> {

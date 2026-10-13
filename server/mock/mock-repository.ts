@@ -1,4 +1,5 @@
 import { normalizeId, type Confidence, type SessionSummary } from '../../shared/api.js';
+import type { Capabilities } from '../../shared/api.js';
 import type { DailyStat } from '../../shared/analytics.js';
 import { addDays, type IsoDate } from '../../shared/dates.js';
 import type { HistoryEvent } from '../../shared/export-format.js';
@@ -12,6 +13,7 @@ import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vo
 import type {
   ConfidenceStat,
   PracticeDailyStat,
+  PracticeHistoryRow,
   PracticeWrite,
   PracticeWriteResult,
   ReviewWrite,
@@ -102,7 +104,7 @@ interface MockLog {
 /** In-memory sample vocabulary. Nothing here is ever stored anywhere. */
 export class MockVocabularyRepository implements VocabularyRepository, VocabularyCatalog {
   readonly mode = 'mock' as const;
-  readonly capabilities = {
+  readonly capabilities: Capabilities = {
     sessions: true,
     undo: true,
     fsrs: true,
@@ -110,6 +112,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     goals: true,
     confidence: true,
     practice: true,
+    practiceHistory: true,
     library: true,
   };
 
@@ -451,6 +454,24 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       if (answer.id === normalizeId(id) && answer.correct) counts.set(answer.mode, (counts.get(answer.mode) ?? 0) + 1);
     }
     return counts;
+  }
+
+  async practiceHistory(since: IsoDate | null): Promise<PracticeHistoryRow[]> {
+    return this.practice
+      .filter((answer) => since === null || answer.reviewedOn >= since)
+      .map((answer) => ({
+        vocabularyId: answer.id,
+        mode: answer.mode,
+        correct: answer.correct,
+        grading: answer.grading,
+        submitted: answer.submitted,
+        reviewedOn: answer.reviewedOn,
+        reviewedAt: answer.at,
+        durationMs: answer.durationMs,
+        confidence: answer.confidence,
+        sessionId: answer.sessionId,
+      }))
+      .sort((a, b) => a.reviewedAt.localeCompare(b.reviewedAt));
   }
 
   async confidenceStats(since: IsoDate): Promise<ConfidenceStat[]> {

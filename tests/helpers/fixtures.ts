@@ -3,6 +3,7 @@ import type { ReviewState } from '../../shared/review-logic.js';
 import type { CardHistory } from '../../shared/weak-words.js';
 import type { CardFieldConfig, VocabularyRecord } from '../../shared/vocabulary.js';
 import type {
+  PracticeHistoryRow,
   ReviewWrite,
   ReviewWriteResult,
   SetupReport,
@@ -95,7 +96,7 @@ export const TEST_FIELDS: CardFieldConfig[] = [
  */
 export class FakeRepository implements VocabularyRepository {
   readonly mode = 'mock' as const;
-  readonly capabilities = NO_CAPABILITIES;
+  readonly capabilities = { ...NO_CAPABILITIES, practiceHistory: false };
   readonly updates: Array<{ pageId: string; changes: Partial<ReviewState> }> = [];
   setup: SetupReport = { readIssues: [], writeIssues: [], warnings: [] };
   /** Lets a test corrupt what the "database" reports back after a write. */
@@ -193,6 +194,10 @@ export class FakeRepository implements VocabularyRepository {
 
   async practiceCorrectCounts() {
     return new Map<string, number>();
+  }
+
+  async practiceHistory(): Promise<PracticeHistoryRow[]> {
+    return [];
   }
 
   /** Simulates a change made somewhere else, such as on another device. */

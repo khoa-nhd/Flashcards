@@ -461,6 +461,27 @@ export function createPgVocabularyDatabase(
       return z.array(practiceStatRowSchema).parse(rows.map((row) => row.stat));
     },
 
+    async practiceHistory(since) {
+      const rows = await run((session) =>
+        session.query<{ stat: unknown }>(
+          'select to_jsonb(s) as stat from public.practice_history($1::date) s',
+          [since],
+        ),
+      );
+      return rows.map((row) => row.stat) as {
+        vocabulary_id: string;
+        review_mode: string;
+        answer_correct: boolean;
+        grading: string;
+        submitted_answer: string | null;
+        reviewed_on: string;
+        reviewed_at: string;
+        duration_ms: number | null;
+        confidence: number | null;
+        session_id: string | null;
+      }[];
+    },
+
     async listCorrectPracticeModes(vocabularyId) {
       const rows = await run((session) =>
         session.query<{ review_mode: string }>(

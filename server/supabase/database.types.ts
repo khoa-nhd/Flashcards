@@ -278,6 +278,21 @@ export interface Database {
         Args: { p_from: string; p_to: string };
         Returns: Array<Record<string, string | number | null>>;
       };
+      practice_history: {
+        Args: { p_since: string | null };
+        Returns: Array<{
+          vocabulary_id: string;
+          review_mode: string;
+          answer_correct: boolean;
+          grading: string;
+          submitted_answer: string | null;
+          reviewed_on: string;
+          reviewed_at: string;
+          duration_ms: number | null;
+          confidence: number | null;
+          session_id: string | null;
+        }>;
+      };
       session_summary: {
         Args: { p_session_id: string };
         Returns: Array<{

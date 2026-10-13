@@ -76,6 +76,20 @@ export interface PracticeDailyStat {
   cards: number;
 }
 
+/** One practice answer with full detail for True Mastery calculation. */
+export interface PracticeHistoryRow {
+  vocabularyId: string;
+  mode: string;
+  correct: boolean;
+  grading: 'self' | 'auto';
+  submitted: string | null;
+  reviewedOn: IsoDate;
+  reviewedAt: string;
+  durationMs: number | null;
+  confidence: number | null;
+  sessionId: string | null;
+}
+
 /** How answers given at one level of confidence went. */
 export interface ConfidenceStat {
   confidence: Confidence;
@@ -147,6 +161,8 @@ export interface VocabularyRepository {
   recordPractice(write: PracticeWrite): Promise<PracticeWriteResult>;
   /** Practice answers per day and study mode in a range of the reviewer's days. Empty where none are kept. */
   practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeDailyStat[]>;
+  /** Detailed practice history for True Mastery estimation. Empty where none are kept. */
+  practiceHistory(since: IsoDate | null): Promise<PracticeHistoryRow[]>;
   /** How many correct practice answers one word has in each study mode. Empty where none are kept. */
   practiceCorrectCounts(id: string): Promise<Map<string, number>>;
   /** Standing answers since `since` that carried a confidence rating, by rating. Empty where none are kept. */
