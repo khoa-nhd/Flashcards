@@ -478,4 +478,53 @@ describe('a round trip: export, then import into an empty account', () => {
     expect(result).toBeNull();
     expect(await wordsOf(app, alice)).toHaveLength(2);
   });
+
+  it('brings back every word’s content from a full export, trash included, and nothing else', async () => {
+    const app = on(TODAY);
+    await source(app);
+    // A third word, then put in the trash, and a collection holding one word.
+    const trashedEntry = await addWord(app, alice, {
+      word: 'rhetoric',
+      meaning: 'tu từ, nghị luận',
+      example: 'Plain facts, not rhetoric.',
+      dateAdded: '2026-09-03',
+      mastery: 4,
+      reviewDate: '2026-10-05',
+    });
+    expect((await call(app, alice, `/api/vocabulary/${trashedEntry.id}`, { method: 'DELETE' })).status).toBe(200);
+    const collection = (await (
+      await call(app, alice, '/api/collections', { method: 'POST', body: { name: 'Exam' } })
+    ).json()) as { collection: { id: string } };
+    const candid = (await wordsOf(app, alice)).find((entry) => entry.word === 'candid');
+    await call(app, alice, `/api/collections/${collection.collection.id}/words/${candid!.id}`, {
+      method: 'PUT',
+      body: { member: true },
+    });
+    // A daily goal, so the export has a setting to carry.
+    await call(app, alice, '/api/goal', { method: 'PUT', body: { reviews: 20, minutes: null } });
+
+    const exported = await exportOf(app, alice);
+    expect(exported.counts).toMatchObject({ words: 2, wordsInTrash: 1, collections: 1 });
+
+    const { rows, result } = await importText(app, bob, JSON.stringify(exported), false);
+    expect(rows.map((row) => row.status)).toEqual(['new', 'new', 'new']);
+    expect(result?.results.map((item) => item.outcome)).toEqual(['imported', 'imported', 'imported']);
+
+    // Every word's content is back, the trashed one included — as a live word.
+    const copy = await wordsOf(app, bob);
+    const trashOf = async (user: TestUser) =>
+      (await (await call(app, user, '/api/trash')).json()) as { entries: VocabularyEntry[] };
+    const everything = [...(await wordsOf(app, alice)), ...(await trashOf(alice)).entries];
+    expect(content(copy)).toEqual(content(everything));
+    // Nothing else crosses: no schedule, no collection, no goal.
+    expect(copy.map((entry) => [entry.mastery, entry.reviewDate])).toEqual([
+      [1, null],
+      [1, null],
+      [1, null],
+    ]);
+    const library = (await (await call(app, bob, '/api/library')).json()) as { collections: unknown[] };
+    expect(library.collections).toEqual([]);
+    const plan = (await (await call(app, bob, '/api/plan')).json()) as { goal: { reviews: number | null } };
+    expect(plan.goal.reviews).toBeNull();
+  });
 });

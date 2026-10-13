@@ -439,6 +439,15 @@ export class ReviewService {
    * read from now on, and choosing again reads the first one back.
    */
   async chooseScheduler(next: SchedulerId): Promise<SchedulerReport> {
+    // Which schedule is in charge is a stored setting, so it obeys the same
+    // saving switch as every other write (REVIEW_WRITES_ENABLED).
+    if (!this.options.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
     if (!this.scheduler.available) {
       throw new HttpError(409, 'not_supported', 'The schedule cannot be changed yet: the database needs its latest update.');
     }

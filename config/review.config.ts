@@ -20,6 +20,13 @@ import type { CardFieldConfig, NewWordDefaults } from '../shared/vocabulary.js';
  * How the two answers are rated for FSRS, which is calculated in the
  * background beside the schedule above and does not decide what is due.
  * Remember is Good rather than Easy on purpose; see shared/scheduler/rating-map.ts.
+ *
+ * STATED by the owner (2026-10-13): how a question is PRESENTED never changes
+ * how it is GRADED. From mastery 4 upwards the front of a review card may be
+ * shown as an exercise (cloze, listening) instead of the plain card, but the
+ * answer is still one of the two above, still rated exactly as mapped here,
+ * and an exercise's right/wrong result is never itself written anywhere.
+ * Only presentation changes; this map, and every rule below, stay as they are.
  */
 export const fsrsRatingMap: RatingMap = assertRatingMap({
   remember: FSRS_RATINGS.good,

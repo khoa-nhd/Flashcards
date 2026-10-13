@@ -215,3 +215,12 @@ added by the app and changes none of the rules above.
   in a different order. It cannot make a word due, and its answers follow
   sections 5 and 6 unchanged.
 - **Review activity and weak-word scores** only read the history.
+- **How a question is presented** (STATED by the owner, 2026-10-13). From
+  mastery 4 upwards a review card's front may be shown as an exercise — a
+  cloze drawn from the word's example, or listening and retyping the word —
+  instead of the plain card. This changes nothing in sections 5 and 6: the
+  answer is still "Nhớ" or "Không nhớ", rated and stored exactly as written
+  there, and whether the typed exercise text happened to be correct is
+  recorded nowhere and moves no schedule. A word without an example (or with
+  no speech synthesis available for listening) simply shows the plain card.
+  The presentation choice lives in `shared/review-exercises.ts`.

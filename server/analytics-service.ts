@@ -28,6 +28,12 @@ export interface AnalyticsServiceOptions {
   goals?: GoalStore;
   /** Which schedule decides when a word is due. Without one, the mastery schedule. */
   scheduler?: SchedulerStore;
+  /**
+   * Whether saving is switched on at all (REVIEW_WRITES_ENABLED). The goal is
+   * a stored setting like any other write, so it obeys the same switch.
+   * Defaults to on, so a store built without the flag keeps working.
+   */
+  writesRequested?: boolean;
   now?: () => Date;
 }
 
@@ -49,11 +55,14 @@ export class AnalyticsService {
   private readonly now: () => Date;
   private readonly goals: GoalStore;
   private readonly scheduler: SchedulerStore;
+  /** Saving is on unless the caller says otherwise; the flag is REVIEW_WRITES_ENABLED. */
+  private readonly writesRequested: boolean;
 
   constructor(private readonly options: AnalyticsServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.goals = options.goals ?? NO_GOAL_STORE;
     this.scheduler = options.scheduler ?? MASTERY_ONLY;
+    this.writesRequested = options.writesRequested ?? true;
   }
 
   /** A word's mastery with the review date the schedule in charge gives it: what "due" is judged by. */
@@ -191,6 +200,13 @@ export class AnalyticsService {
   }
 
   async saveGoal(goal: DailyGoal): Promise<DayPlanResponse> {
+    if (!this.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
     if (!this.goals.available) {
       throw new HttpError(409, 'not_supported', 'A daily goal cannot be kept yet: the database needs its latest update.');
     }

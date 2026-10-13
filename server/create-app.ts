@@ -413,6 +413,15 @@ export function createApp({
   app.get('/api/settings', (c) => c.json(settingsOf(c)));
 
   app.put('/api/settings', async (c) => {
+    // Time zone and retention are stored account settings, so they obey the
+    // same saving switch as every other write (REVIEW_WRITES_ENABLED).
+    if (!config.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
     const { session } = c.get('scope');
     if (session === null) {
       throw new HttpError(409, 'not_editable', 'The sample data has no account to keep settings in.');
