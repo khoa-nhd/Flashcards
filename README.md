@@ -74,8 +74,9 @@ exercise** turns it off.
 
 **Focus mode.** A Focus toggle on the Review and Practice pages hides the
 sidebar and navigation and shows a countdown you choose (15 or 20 minutes,
-with pause). It is only a quiet screen and a timer: when it runs out it says
-so, and nothing is ended or rescheduled.
+with pause). When a block runs out it says so and offers a counted 5-minute
+break, and the next block only starts when you ask for it: nothing is ended
+or rescheduled.
 
 | Answer | Mastery | Review date |
 | --- | --- | --- |
@@ -300,11 +301,11 @@ email if your project asks for it.
 - Filters, sorting and the open word are kept in the address, so a view can be
   bookmarked and the Back button works.
 - **Details**: click a word to see everything stored about it, including a
-  **connections graph** — a hand-drawn bubble diagram of that word's
-  synonyms, antonyms, word-family links, collocations, other relations and
-  the words it shares a collection with. It is built only from your own
-  links and collections (no AI, no external service); clicking a bubble
-  opens that word.
+  **connections map** — a hand-drawn mind map of that word's synonyms,
+  antonyms, word-family links, collocations, other relations and the words it
+  shares a collection with, one labelled branch per reason. It is built only
+  from your own links and collections (no AI, no external service); clicking
+  a word in the map opens it.
 - **Edit**: only the fields you change are written. Mastery and the review date
   are in a separate "Review schedule" section and are left alone unless you
   open it.

@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 /**
  * Focus Mode in the browser: the Review and Practice pages can hide the app
- * chrome and show a countdown. It is only a view on the page — it never ends
- * a session, answers a card or intercepts a review key — so several tests
- * here are about what does NOT happen.
+ * chrome and show a countdown, and when a block ends the timer offers a
+ * counted rest before the next block. It is only a view on the page — it
+ * never ends a session, answers a card, starts anything on its own or
+ * intercepts a review key — so several tests here are about what does NOT
+ * happen.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -110,6 +112,33 @@ describe('the Focus switch on Review', () => {
     expect(within(timer()).queryByRole('button', { name: 'Pause' })).not.toBeInTheDocument();
     // The countdown is a reminder on screen only: the session is still going.
     expect(screen.getByTestId('flashcard')).toBeInTheDocument();
+  });
+
+  it('offers a counted break when the block ends, and the next block only on request', async () => {
+    await open('/review', { cards: [card(1)] });
+    await screen.findByTestId('flashcard');
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Focus' }));
+
+    act(() => {
+      vi.advanceTimersByTime(15 * 60 * 1000);
+    });
+    expect(within(timer()).getByRole('status')).toHaveTextContent('Time is up');
+
+    // The rest runs on its own clock and is labelled as a break while it lasts.
+    fireEvent.click(within(timer()).getByRole('button', { name: 'Take a 5 min break' }));
+    expect(within(timer()).getByText('5:00')).toBeInTheDocument();
+    expect(within(timer()).getByText('Break')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(5 * 60 * 1000);
+    });
+    expect(within(timer()).getByRole('status')).toHaveTextContent('Break is over');
+
+    // The next block starts only when it is asked for; nothing runs on its own.
+    fireEvent.click(within(timer()).getByRole('button', { name: 'Start 15 min' }));
+    expect(within(timer()).getByText('15:00')).toBeInTheDocument();
+    expect(within(timer()).queryByText('Break')).not.toBeInTheDocument();
   });
 
   it('is left behind when the reviewer finishes and moves to another page', async () => {

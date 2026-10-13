@@ -11,8 +11,10 @@ import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { ReviewActivityCard, useReviewActivity } from '../components/ReviewActivity.js';
 import { StatTile } from '../components/StatTile.js';
+import { TodayPlan } from '../components/TodayPlan.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, PAGE, SECTION_TITLE } from '../components/ui.js';
+import { useRemote } from '../hooks/useRemote.js';
 import { RECENT_DAYS } from '../lib/bank-query.js';
 import { ROUTES, buildHref, openWord } from '../lib/router.js';
 
@@ -32,10 +34,12 @@ function recentAdditions(entries: readonly VocabularyEntry[]): VocabularyEntry[]
 
 export function DashboardPage() {
   const state = useVocabulary();
-  const { vocabulary } = useApp();
+  const { api, vocabulary } = useApp();
   const settings = useSettings();
   const activity = useReviewActivity();
   const plan = useDayPlan();
+  // Only the count of high-priority weak words is needed, for the plan card.
+  const weak = useRemote(() => api.fetchWeakWords(), 'Could not load your weak words.');
   const { entries, meta } = state;
   const today = meta?.today ?? null;
 
@@ -47,6 +51,7 @@ export function DashboardPage() {
   );
   const recent = useMemo(() => recentAdditions(entries), [entries]);
   const ready = useMemo(() => entries.filter((entry) => entry.reviewable).length, [entries]);
+  const weakHigh = weak.status === 'ready' ? weak.data.words.filter((word) => word.severity === 'high').length : null;
 
   return (
     <div className={PAGE}>
@@ -61,6 +66,7 @@ export function DashboardPage() {
               void vocabulary.reload();
               activity.reload();
               plan.reload();
+              weak.reload();
             }}
             disabled={state.refreshing || state.status === 'loading'}
           >
@@ -112,6 +118,8 @@ export function DashboardPage() {
                 )}
               </section>
             )}
+
+            <TodayPlan due={ready} weakHigh={weakHigh} />
 
             <ReviewActivityCard activity={activity} />
 

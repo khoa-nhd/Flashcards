@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 /**
- * The connection diagram in a word's detail: one bubble per related word or
- * collection-mate, drawn from the links and collections the account already
- * keeps. Nothing is inferred, the ring stays readable as it fills, and
- * opening a bubble opens that word exactly as the bank does.
+ * The connection diagram in a word's detail, drawn as a mind map: one labelled
+ * branch per reason (relation kind or collection) with the connected words
+ * hanging off it, from the links and collections the account already keeps.
+ * Nothing is inferred, and opening a word in the map opens it exactly as the
+ * bank does.
  */
 import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -41,7 +42,7 @@ const diagram = async () =>
   (await within(await screen.findByRole('dialog')).findByRole('heading', { name: 'Connections' })).closest('section')!;
 
 describe('the connection diagram', () => {
-  it('draws one bubble per connected word, carrying every reason on that one bubble', async () => {
+  it('draws one branch per reason, with a word that fits several under the first', async () => {
     await open(`/bank?word=${pageId(1)}`, {
       library: {
         relations: [relation(1, pageId(1), pageId(2), 'synonym')],
@@ -51,9 +52,9 @@ describe('the connection diagram', () => {
     const section = await diagram();
     expect(within(section).getAllByRole('button').map((node) => node.getAttribute('aria-label'))).toEqual(['affect', 'large']);
 
-    // "large" is a synonym and a collection-mate: one bubble, both labels on its spoke.
+    // "large" is a synonym and a collection-mate: one leaf on the Synonym branch, both reasons in the summary.
     expect(within(section).getAllByRole('button', { name: 'large' })).toHaveLength(1);
-    expect(within(section).getByText('Synonym, Exam')).toBeInTheDocument();
+    expect(within(section).getByText('Synonym')).toBeInTheDocument();
     expect(within(section).getByText('Books')).toBeInTheDocument();
     // The same connections, in words, for a screen reader.
     expect(section).toHaveTextContent('Connections for big: affect (Books); large (Synonym, Exam).');
@@ -69,7 +70,7 @@ describe('the connection diagram', () => {
     expect(within(section).queryAllByRole('button')).toHaveLength(0);
   });
 
-  it('caps the ring at thirty words and says how many are left out', async () => {
+  it('caps the map at thirty words and says how many are left out', async () => {
     const many = Array.from({ length: 33 }, (_, index) => entry(index + 1));
     await open(`/bank?word=${pageId(1)}`, {
       entries: many,
@@ -78,8 +79,8 @@ describe('the connection diagram', () => {
     const section = await diagram();
     expect(within(section).getAllByRole('button')).toHaveLength(30);
     expect(within(section).getByText('+2 more not shown.')).toBeInTheDocument();
-    // Spokes are unlabelled at this density; the labels are only in the text summary.
-    expect(within(section).queryByText('Everything')).toBeNull();
+    // The branch keeps its label even at this density — that is what makes it a map.
+    expect(within(section).getByText('Everything')).toBeInTheDocument();
   });
 
   it('opens a connected word the same way the bank does', async () => {

@@ -154,6 +154,24 @@ Four small owner-chosen improvements. No database, AI or dependency changes.
   turning a card, the app asks how sure you were before recording the answer.
   It can still be switched off in Settings, and the tests cover both paths.
 
+### Batch 2 of the 2026-10-13 roadmap (2026-10-13)
+
+Three more owner-chosen improvements. No database, AI or dependency changes.
+
+- **The connections diagram is a mind map now** (`SemanticGraph` rework): the
+  word at the centre, one labelled branch per reason (each relation kind,
+  each collection) split left and right, and the connected words curving off
+  their branch. Still hand-drawn SVG with plain arithmetic; clicking a word
+  opens it exactly as before.
+- **"What to do today" on the Dashboard**: a small card listing the two or
+  three concrete steps for now — review the due cards, practise the
+  high-priority weak words, or add new words when nothing is due — each with
+  a link straight to the page that does it. It reads figures the page already
+  has plus the existing weak-words count, and never orders or limits anything.
+- **Focus blocks get a counted rest** (Pomodoro cycle): when a 15/20-minute
+  block runs out the timer offers a 5-minute break on its own countdown, and
+  the next block starts only on request. Nothing auto-starts or auto-ends.
+
 ## 1. Audit: where the app stands
 
 ### Baseline (run on 2026-10-10)
