@@ -6,6 +6,7 @@ import { useApp, useLibrary, useVocabulary } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { ROUTES, openWord } from '../lib/router.js';
 import { Link } from './Link.js';
+import { SemanticGraph } from './SemanticGraph.js';
 import { BUTTON_SECONDARY, HELP, INPUT, TEXTAREA } from './ui.js';
 
 const HEADING = 'text-xs font-medium uppercase tracking-[0.12em] text-muted';
@@ -61,8 +62,19 @@ export function WordExtras({ entry, canWrite }: { entry: VocabularyEntry; canWri
       <Collections entry={entry} canWrite={canWrite} />
       <Examples entry={entry} canWrite={canWrite} />
       <Relations entry={entry} canWrite={canWrite} />
+      <Connections entry={entry} />
     </>
   );
+}
+
+/**
+ * The same links and collections as the sections above, drawn as a diagram.
+ * The lists are handed over, so the graph stays a plain view of what is there.
+ */
+function Connections({ entry }: { entry: VocabularyEntry }) {
+  const { collections, relations } = useLibrary();
+  const { entries } = useVocabulary();
+  return <SemanticGraph focusId={entry.id} relations={relations} collections={collections} words={entries} />;
 }
 
 function Collections({ entry, canWrite }: { entry: VocabularyEntry; canWrite: boolean }) {
