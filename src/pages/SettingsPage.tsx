@@ -88,6 +88,23 @@ export function SettingsPage() {
               </span>
             </span>
           </label>
+          <label className="flex cursor-pointer items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-[var(--accent)]"
+              checked={settings.reviewExercises}
+              onChange={(event) => set('reviewExercises', event.target.checked)}
+            />
+            <span>
+              <span className="font-medium">Challenge cards with an exercise</span>
+              <span className={`block ${HELP}`}>
+                From mastery 4, the front of a card you already partly know becomes a short exercise: fill in the
+                blank in your own example sentence, or hear the word and type what you hear. Answering is unchanged —
+                still just Remember or Not remember — and nothing you type is saved. A card without what an exercise
+                needs simply shows as usual.
+              </span>
+            </span>
+          </label>
           <div className="flex flex-col gap-1.5 sm:max-w-sm">
             <label htmlFor="answer-keys" className="text-sm font-medium">
               Extra answer keys
@@ -108,6 +125,18 @@ export function SettingsPage() {
               The arrow keys always work. Press ? during a review to see every shortcut.
             </p>
           </div>
+        </section>
+
+        <section className={`${CARD} flex flex-col gap-4 p-5`}>
+          <h2 className={SECTION_TITLE}>AI assistance</h2>
+          <p className="text-sm text-muted">
+            Two features can ask an AI model for a draft. <span className="font-medium">Smart Reader</span> (Add
+            vocabulary) sends only the sentence around the word you picked, and the <span className="font-medium">
+            Writing Challenge</span> coach sends only the sentence you wrote. Nothing else ever leaves: not your
+            vocabulary, not your history, not your settings — and the sentence itself is taken from your own text,
+            never invented. These providers may keep what is sent, so do not paste anything private. Without a
+            configured model both features stay off, and everything can still be entered by hand.
+          </p>
         </section>
 
         <section className={`${CARD} flex flex-col gap-4 p-5`}>

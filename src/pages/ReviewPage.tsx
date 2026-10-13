@@ -1,7 +1,9 @@
 import { useEffect, useState, useSyncExternalStore } from 'react';
 import { REVIEW_FOCUSES, pageIdSchema, reviewFocusSchema } from '../../shared/api.js';
 import { useApp, useLibrary, useSettings } from '../app-context.js';
+import { useFocusMode } from '../components/AppShell.js';
 import { CompletionScreen } from '../components/CompletionScreen.js';
+import { FocusTimer } from '../components/FocusTimer.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { ReviewScreen } from '../components/ReviewScreen.js';
@@ -41,6 +43,7 @@ const HEADER_BUTTON =
 export function ReviewPage() {
   const { session, ensureReviewSession } = useApp();
   const settings = useSettings();
+  const focusMode = useFocusMode();
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const { status, error } = state;
   const [helpOpen, setHelpOpen] = useState(false);
@@ -164,6 +167,16 @@ export function ReviewPage() {
             <Icon name="refresh" className="size-4" />
             Refresh
           </button>
+          <button
+            type="button"
+            onClick={focusMode.toggle}
+            aria-pressed={focusMode.on}
+            title="Hide the navigation and show a timer, for studying without distractions."
+            className={`${HEADER_BUTTON} aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:text-accent`}
+          >
+            Focus
+          </button>
+          {focusMode.on && <FocusTimer />}
         </div>
       </div>
       {/* The finished screen says this itself, with the same way out. */}

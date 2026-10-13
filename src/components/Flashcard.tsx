@@ -1,11 +1,15 @@
-import { useState, type CSSProperties, type MouseEvent, type Ref } from 'react';
+import { useEffect, useState, type CSSProperties, type MouseEvent, type Ref } from 'react';
 import type { ReviewCard } from '../../shared/api.js';
 import { daysBetween, type IsoDate } from '../../shared/dates.js';
+import { checkTyped } from '../../shared/study-modes.js';
+import type { Exercise } from '../../shared/review-exercises.js';
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { SWIPE } from '../config.js';
 import { useReducedMotion } from '../hooks/useReducedMotion.js';
 import { useSwipe } from '../hooks/useSwipe.js';
 import type { SwipeDirection } from '../lib/gesture.js';
+import { DEFAULT_SPEECH_LANGUAGE, speak, stopSpeaking } from '../lib/speech.js';
+import { BUTTON_SECONDARY, HELP, INPUT } from './ui.js';
 
 export interface FlashcardProps {
   card: ReviewCard;
@@ -16,6 +20,17 @@ export interface FlashcardProps {
   /** A save is in flight or has failed; the card is frozen until that resolves. */
   locked: boolean;
   pendingAction: ReviewAction | null;
+  /**
+   * The exercise to show in front of the card, when one applies (see
+   * shared/review-exercises.ts). Null (the default) is the plain card. It only
+   * changes how the question is asked; answering is unchanged.
+   */
+  exercise?: Exercise | null;
+  /** What the reviewer typed into the exercise so far. Local to this screen, never sent anywhere. */
+  typed?: string;
+  onTyped?: (text: string) => void;
+  /** The accent listening reads the word in: the same setting practice listening uses. */
+  speechLang?: string;
   swipeThresholdPx?: number;
   onFlip: () => void;
   onGrade: (action: ReviewAction) => void;
@@ -47,6 +62,11 @@ export function Flashcard({
   canGrade,
   locked,
   pendingAction,
+  exercise = null,
+  typed = '',
+  // Without a caller the input is inert; ReviewScreen always supplies one. The default only keeps older direct uses compiling.
+  onTyped = () => {},
+  speechLang = DEFAULT_SPEECH_LANGUAGE,
   swipeThresholdPx = SWIPE.thresholdPx,
   onFlip,
   onGrade,
@@ -58,6 +78,20 @@ export function Flashcard({
   // The answer is not put in the document until the card is first flipped.
   const [revealed, setRevealed] = useState(flipped);
   if (flipped && !revealed) setRevealed(true);
+
+  // A listening card plays once when it appears, like the listening practice question.
+  useEffect(() => {
+    if (exercise?.kind !== 'listening') return;
+    // A browser that cannot say it leaves the Play button to retry; nothing on the card changes.
+    void speak(card.word, { lang: speechLang }).then(
+      () => {},
+      () => {},
+    );
+    return () => {
+      // Moving on mid-sentence silences it, so no word is spoken over the next card.
+      stopSpeaking();
+    };
+  }, [exercise, card.word, speechLang]);
 
   const handleSwipe = (direction: SwipeDirection) => {
     if (locked) return;
@@ -90,6 +124,11 @@ export function Flashcard({
   // The day the schedule in charge has it due; the mastery date unless something else decided.
   const due = dueLabel(card.dueOn ?? card.nextReview, today);
 
+  // What was typed into the exercise, judged for display only: it never leaves this screen.
+  const typedResult = typed.trim() === '' ? null : checkTyped(typed, card.word);
+  // The blank was made from one particular spelling of the entry, and that is the one shown back.
+  const expectedSpelling = exercise?.kind === 'cloze' ? exercise.blanked : card.word;
+
   return (
     <div
       data-testid="flashcard"
@@ -109,21 +148,72 @@ export function Flashcard({
               {due !== null && <span>{due}</span>}
             </div>
             <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6 text-center">
-              <h2 className="font-serif text-4xl font-semibold tracking-tight wrap-anywhere sm:text-5xl">
-                {card.word}
-              </h2>
-              {card.front.length > 0 && (
-                <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-base text-muted">
-                  {card.front.map((field, index) => (
-                    <span key={field.key} className="flex items-center gap-2">
-                      {index > 0 && <span aria-hidden="true">·</span>}
-                      <span>
-                        <span className="sr-only">{field.label}: </span>
-                        {field.value}
-                      </span>
-                    </span>
-                  ))}
-                </p>
+              {exercise === null ? (
+                <>
+                  <h2 className="font-serif text-4xl font-semibold tracking-tight wrap-anywhere sm:text-5xl">
+                    {card.word}
+                  </h2>
+                  {card.front.length > 0 && (
+                    <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-base text-muted">
+                      {card.front.map((field, index) => (
+                        <span key={field.key} className="flex items-center gap-2">
+                          {index > 0 && <span aria-hidden="true">·</span>}
+                          <span>
+                            <span className="sr-only">{field.label}: </span>
+                            {field.value}
+                          </span>
+                        </span>
+                      ))}
+                    </p>
+                  )}
+                </>
+              ) : (
+                <div
+                  data-testid="review-exercise"
+                  data-kind={exercise.kind}
+                  className="flex w-full flex-col items-center gap-3"
+                  // Tapping the exercise is typing or listening, not flipping the card.
+                  onClick={(event) => event.stopPropagation()}
+                >
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted">
+                    {exercise.kind === 'cloze' ? 'Fill in the blank' : 'Listen and type'}
+                  </p>
+                  {exercise.kind === 'cloze' ? (
+                    <p className="text-lg leading-relaxed wrap-anywhere">
+                      {exercise.before}
+                      <span
+                        aria-hidden="true"
+                        className="mx-1 inline-block w-20 border-b-2 border-muted align-baseline"
+                      />
+                      {exercise.after}
+                    </p>
+                  ) : (
+                    <button
+                      type="button"
+                      className={BUTTON_SECONDARY}
+                      disabled={flipped}
+                      onClick={() => void speak(card.word, { lang: speechLang })}
+                    >
+                      Play / Play again
+                    </button>
+                  )}
+                  <input
+                    type="text"
+                    className={INPUT}
+                    value={typed}
+                    aria-label={
+                      exercise.kind === 'cloze' ? 'The word missing from the sentence' : 'The word you hear'
+                    }
+                    autoComplete="off"
+                    spellCheck={false}
+                    // Once the answer is showing the field has done its work; it stays out of the tab order.
+                    tabIndex={flipped ? -1 : 0}
+                    onChange={(event) => onTyped(event.target.value)}
+                  />
+                  <p className={HELP}>
+                    Type it if you can, then flip the card. Nothing you type is saved.
+                  </p>
+                </div>
               )}
             </div>
           </section>
@@ -155,6 +245,12 @@ export function Flashcard({
                 )}
                 {card.back.length > 0 && card.detailsHidden && (
                   <p className="text-sm text-muted">Other details are hidden at this mastery level.</p>
+                )}
+                {typedResult !== null && (
+                  <p className="text-sm text-muted">
+                    You typed “{typed.trim()}”: {typedResult === 'incorrect' ? 'Not quite' : 'Correct'}. Spelled:{' '}
+                    {expectedSpelling}.
+                  </p>
                 )}
               </div>
             )}

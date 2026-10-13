@@ -1,11 +1,13 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReviewAction } from '../../shared/review-logic.js';
+import { exerciseFor, type Exercise } from '../../shared/review-exercises.js';
 import { HINT_DURATION_MS } from '../config.js';
 import type { Confidence } from '../../shared/api.js';
 import { useSettings } from '../app-context.js';
 import { ANSWER_KEY_SETS, useReviewShortcuts } from '../hooks/useReviewShortcuts.js';
 import type { SessionController } from '../lib/session-controller.js';
 import { canUndo, currentCard, type SessionState } from '../lib/session-machine.js';
+import { speechAvailable } from '../lib/speech.js';
 import { ConfidencePrompt } from './ConfidencePrompt.js';
 import { Flashcard } from './Flashcard.js';
 import { ReviewControls } from './ReviewControls.js';
@@ -31,12 +33,40 @@ const PANEL_BUTTON =
   'h-11 cursor-pointer rounded-xl border px-4 text-sm font-semibold transition active:scale-[0.98]';
 
 export function ReviewScreen({ state, session, onReload, onHelp, paused = false }: ReviewScreenProps) {
-  const { askConfidence, answerKeys } = useSettings();
+  const { askConfidence, answerKeys, reviewExercises, speechLang } = useSettings();
+  // Listening needs the browser to read text aloud; asked once, as Practice does. It does not change mid-session.
+  const [canSpeak] = useState(speechAvailable);
   const card = currentCard(state);
   const cardId = card?.id ?? null;
   const { status, error } = state;
   // `saving` and `error` are only ever reached from a flipped card.
   const flipped = status === 'flipped' || status === 'saving' || status === 'error';
+
+  /**
+   * What the reviewer typed into the card's exercise. Purely local: it is never
+   * sent with the answer, and it is cleared with the card so one card's attempt
+   * can never appear on the next. Reset during render, keyed to the card, rather
+   * than in an effect: the new card must never flash the old text first.
+   */
+  const [typed, setTyped] = useState('');
+  const [typedForCard, setTypedForCard] = useState(cardId);
+  if (cardId !== typedForCard) {
+    setTypedForCard(cardId);
+    setTyped('');
+  }
+
+  // The example is an answer field: the mastery rule withholds it above 5, and a word may have none.
+  const example = card === null ? null : (card.back.find((field) => field.key === 'example')?.value ?? null);
+  const exercise = useMemo<Exercise | null>(
+    () =>
+      card === null
+        ? null
+        : exerciseFor(
+            { word: card.word, mastery: card.mastery, example },
+            { enabled: reviewExercises, canSpeak },
+          ),
+    [card, example, reviewExercises, canSpeak],
+  );
 
   const [hintVisible, setHintVisible] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -149,6 +179,10 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
             canGrade={status === 'flipped'}
             locked={status === 'saving' || status === 'error'}
             pendingAction={state.pendingAction}
+            exercise={exercise}
+            typed={typed}
+            onTyped={setTyped}
+            speechLang={speechLang}
             onFlip={flip}
             onGrade={grade}
             onBlockedGrade={showFlipHint}

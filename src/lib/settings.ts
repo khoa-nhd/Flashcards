@@ -22,6 +22,8 @@ const settingsSchema = z.object({
   askConfidence: z.boolean(),
   /** An extra pair of answer keys beside the arrow keys. */
   answerKeys: z.enum(['none', 'jk', 'fj', 'numbers']),
+  /** Show the front of a well-known card as an exercise (cloze, listening) instead of the plain card. */
+  reviewExercises: z.boolean(),
   /** The accent Listening practice asks the browser to read in. */
   speechLang: z.enum(SPEECH_LANGUAGES.map(([code]) => code)),
 });
@@ -37,6 +39,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reduceMotion: false,
   askConfidence: false,
   answerKeys: 'none',
+  reviewExercises: true,
   speechLang: DEFAULT_SPEECH_LANGUAGE,
 };
 
