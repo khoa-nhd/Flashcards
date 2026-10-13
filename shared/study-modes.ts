@@ -12,7 +12,7 @@
  * mode, with a reason that says what to add.
  */
 
-export const STUDY_MODES = ['recognition', 'recall', 'typing', 'cloze', 'listening'] as const;
+export const STUDY_MODES = ['recognition', 'recall', 'typing', 'cloze', 'listening', 'writing'] as const;
 export type StudyMode = (typeof STUDY_MODES)[number];
 
 export const STUDY_MODE_LABELS: Record<StudyMode, string> = {
@@ -21,6 +21,7 @@ export const STUDY_MODE_LABELS: Record<StudyMode, string> = {
   typing: 'Typing',
   cloze: 'Fill in the blank',
   listening: 'Listening',
+  writing: 'Writing Challenge',
 };
 
 export const STUDY_MODE_SUMMARY: Record<StudyMode, string> = {
@@ -29,6 +30,7 @@ export const STUDY_MODE_SUMMARY: Record<StudyMode, string> = {
   typing: 'See the meaning, type the word.',
   cloze: 'See your example sentence with the word left out, type the word.',
   listening: 'Hear the word read aloud by your browser, type what you hear.',
+  writing: 'Write a sentence using this word.',
 };
 
 /**
@@ -52,7 +54,7 @@ export interface PracticeWord {
 // ---- Text ----
 
 /** Unicode-normalised, trimmed, inner whitespace collapsed. Case is kept. */
-const tidy = (text: string): string => text.normalize('NFC').trim().replace(/\s+/g, ' ');
+export const tidy = (text: string): string => text.normalize('NFC').trim().replace(/\s+/g, ' ');
 
 /**
  * The form two answers are compared in for an **exact** match: tidied, and
@@ -169,6 +171,9 @@ export function ineligibility(mode: StudyMode, word: PracticeWord, pool: readonl
   // Listening asks only for the word itself, which every entry has. Whether this browser can
   // read it aloud is not a property of the word, and is the page's to find out.
   if (mode === 'listening') return null;
+  // Writing asks the reviewer to use the word in their own sentence; judging only needs the
+  // entry itself, so no meaning or example is required to take part.
+  if (mode === 'writing') return null;
   if (mode === 'cloze') {
     if (word.example === null || tidy(word.example) === '') return 'no_example';
     return buildCloze(word) === null ? 'word_not_in_example' : null;
@@ -276,7 +281,7 @@ export type PracticeAnswer =
   | { kind: 'self'; correct: boolean }
   /** Recognition: the word whose meaning was chosen. */
   | { kind: 'choice'; selectedId: string }
-  /** Typing, cloze and listening. */
+  /** Typing, cloze, listening and writing. */
   | { kind: 'typed'; text: string };
 
 export const ANSWER_KIND: Record<StudyMode, PracticeAnswer['kind']> = {
@@ -285,6 +290,7 @@ export const ANSWER_KIND: Record<StudyMode, PracticeAnswer['kind']> = {
   typing: 'typed',
   cloze: 'typed',
   listening: 'typed',
+  writing: 'typed',
 };
 
 export interface Judgement {
@@ -296,6 +302,25 @@ export interface Judgement {
   submitted: string | null;
   /** What the right answer was: shown after answering. */
   expected: string;
+}
+
+/**
+ * Whether the text uses one of the word's spellings as a whole word: not as
+ * part of a longer word, and with any accepted spelling (letters, accents and
+ * spelling itself never altered — only quotes and dashes are forgiven, as in
+ * `looseForm`). Case is ignored.
+ */
+function usesWholeWord(text: string, word: string): boolean {
+  if (text === '') return false;
+  const loose = looseForm(text);
+  return acceptedSpellings(word).some((spelling) => {
+    // Letters, marks and digits on either side would make it part of a longer word.
+    const pattern = new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escapeRegExp(spelling)}(?![\\p{L}\\p{M}\\p{N}])`, 'iu');
+    if (pattern.test(text)) return true;
+    const looseSpelling = looseForm(spelling);
+    if (loose === '' || looseSpelling === '') return false;
+    return new RegExp(`(?<![\\p{L}\\p{M}\\p{N}])${escapeRegExp(looseSpelling)}(?![\\p{L}\\p{M}\\p{N}])`, 'iu').test(loose);
+  });
 }
 
 /**
@@ -312,6 +337,13 @@ export function judge(mode: StudyMode, word: PracticeWord, answer: PracticeAnswe
     const right = answerText(word);
     if (right === null) return null;
     return { correct: answer.selectedId === word.id, grading: 'auto', typed: null, submitted: null, expected: right.text };
+  }
+  if (mode === 'writing') {
+    // The whole sentence is kept for the record; the answer passes when the word is
+    // used whole-word anywhere in it, however the rest of the sentence is written.
+    const submitted = tidy(answer.text);
+    const typed: TypedResult = usesWholeWord(submitted, word.word) ? 'exact' : 'incorrect';
+    return { correct: typed !== 'incorrect', grading: 'auto', typed, submitted, expected: tidy(word.word) };
   }
   const submitted = tidy(answer.text).slice(0, 500);
   if (mode === 'cloze') {

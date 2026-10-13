@@ -62,7 +62,7 @@ describe('the Practice page', () => {
     expect(await main().findByText(/it never changes mastery or review dates/)).toBeInTheDocument();
   });
 
-  it('offers the five modes, each with what it asks for', async () => {
+  it('offers the six modes, each with what it asks for', async () => {
     await open('/practice');
     await main().findByRole('heading', { name: 'Start a practice session' });
     expect(main().getAllByRole('radio').map((radio) => radio.closest('label')?.textContent)).toEqual([
@@ -71,6 +71,7 @@ describe('the Practice page', () => {
       'TypingSee the meaning, type the word.',
       'Fill in the blankSee your example sentence with the word left out, type the word.',
       'ListeningExperimentalHear the word read aloud by your browser, type what you hear.',
+      'Writing ChallengeWrite a sentence using this word.',
     ]);
     expect(main().getByRole('radio', { name: /Recognition/ })).toBeChecked();
   });
@@ -282,6 +283,78 @@ describe('typing', () => {
     await user.type(main().getByLabelText('Your answer'), '1234');
     expect(api.submitPractice).not.toHaveBeenCalled();
     expect(main().getByLabelText('Your answer')).toHaveValue('1234');
+  });
+});
+
+describe('the writing challenge', () => {
+  const box = () => main().getByLabelText('Your sentence');
+  const submit = () => main().getByRole('button', { name: 'Submit' });
+
+  it('shows the word to use, with its meaning and example, above a box for a sentence', async () => {
+    const { user } = await open('/practice?mode=writing');
+    expect(main().getByRole('radio', { name: /Writing Challenge/ })).toBeChecked();
+    await start(user);
+    const word = promptedWord();
+    expect(main().getByText(word.word)).toBeInTheDocument();
+    expect(main().getByText(word.meaning!)).toBeInTheDocument();
+    expect(main().getByText(word.example!)).toBeInTheDocument();
+    expect(box().tagName).toBe('TEXTAREA');
+    expect(box()).toHaveAttribute('maxlength', '6000');
+    expect(main().getByText('0 of 6000 characters')).toBeInTheDocument();
+  });
+
+  it('will not send a sentence that holds nothing but spaces', async () => {
+    const { api, user } = await open('/practice?mode=writing');
+    await start(user);
+    expect(submit()).toBeDisabled();
+    await user.type(box(), '   ');
+    expect(submit()).toBeDisabled();
+    expect(api.submitPractice).not.toHaveBeenCalled();
+  });
+
+  it('sends the whole sentence to be judged, and shows the verdict', async () => {
+    const { api, user } = await open('/practice?mode=writing');
+    await start(user);
+    const word = promptedWord();
+    const sentence = `A ${word.word} answer is always welcome here.`;
+    await user.type(box(), sentence);
+    await user.click(submit());
+
+    expect(sent(api)).toMatchObject({ pageId: word.id, mode: 'writing', answer: { kind: 'typed', text: sentence } });
+    expect(await main().findByRole('status')).toHaveTextContent('Correct.');
+    // The sentence stays on screen as it was judged.
+    expect(box()).toHaveValue(sentence);
+  });
+
+  it('shows the coach’s note when the answer came back with one', async () => {
+    const { api, user } = await open('/practice?mode=writing');
+    await start(user);
+    const word = promptedWord();
+    api.submitPractice.mockResolvedValueOnce({
+      outcome: 'recorded',
+      correct: true,
+      typed: 'exact',
+      expected: word.word,
+      aiFeedback: 'Your sentence is clear. One improvement: add a comma after the opening phrase.',
+      modelAnswer: 'She gave a candid account of the whole day.',
+    });
+    await user.type(box(), `Nothing beats a ${word.word} answer.`);
+    await user.click(submit());
+
+    expect(await main().findByRole('heading', { name: 'Coach feedback' })).toBeInTheDocument();
+    expect(main().getByRole('heading', { name: 'Model answer' })).toBeInTheDocument();
+    expect(main().getByText(/One improvement/)).toBeInTheDocument();
+  });
+
+  it('says so plainly when no coach note came back', async () => {
+    const { user } = await open('/practice?mode=writing');
+    await start(user);
+    const word = promptedWord();
+    await user.type(box(), `Nothing beats a ${word.word} answer.`);
+    await user.click(submit());
+    expect(await main().findByRole('status')).toHaveTextContent('Correct.');
+    expect(main().getByText('No coach note this time — check it yourself.')).toBeInTheDocument();
+    expect(main().queryByRole('heading', { name: 'Coach feedback' })).not.toBeInTheDocument();
   });
 });
 

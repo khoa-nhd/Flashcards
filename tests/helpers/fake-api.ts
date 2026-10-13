@@ -21,6 +21,7 @@ import type {
 import { EXPORT_FORMAT, EXPORT_VERSION } from '../../shared/export-format.js';
 import { collectionKey, orderPair, tidyName } from '../../shared/library.js';
 import { NO_GOAL, planDay, type PlanInput } from '../../shared/session-planner.js';
+import { sentenceContaining } from '../../shared/sentences.js';
 import { judge } from '../../shared/study-modes.js';
 import { normalizeWord } from '../../shared/text.js';
 import { ApiError, type AppApi } from '../../src/lib/api-client.js';
@@ -490,6 +491,15 @@ export function createFakeApi({
       if (timeZone !== undefined) settings.timeZone = timeZone;
       if (fsrsRetention !== undefined) settings.fsrsRetention = fsrsRetention;
       return { ...settings };
+    }),
+
+    // The sentence comes from the reader's own text, like the server does it;
+    // the two fields stand in for the model's draft. Tests wanting a different
+    // reply (or a failure) mockResolvedValueOnce / mockRejectedValueOnce on it.
+    extractSense: vi.fn<AppApi['extractSense']>(async (request) => {
+      const sentence = sentenceContaining(request.text, request.word);
+      if (sentence === null) throw new ApiError('invalid_request', 'That word was not found in the text.', 400);
+      return { sentence, definition: `definition of ${request.word}`, meaning: `nghĩa của ${request.word}` };
     }),
   } satisfies AppApi;
 

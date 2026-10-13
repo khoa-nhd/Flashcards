@@ -20,6 +20,7 @@ import { NO_LIBRARY_STORE } from '../library-store.js';
 import { ReviewService } from '../review-service.js';
 import { MASTERY_ONLY, createSchedulerStore } from '../scheduler-store.js';
 import { VocabularyService } from '../vocabulary-service.js';
+import type { WritingCoach } from '../ai/writing-coach.js';
 import {
   DatabaseError,
   LATEST_SCHEMA_VERSION,
@@ -96,6 +97,12 @@ export interface SupabaseAccountsOptions {
    * has so it never asks for more. Replaceable in tests.
    */
   connect?: (accessToken: string, schemaVersion?: number) => VocabularyDatabase;
+  /**
+   * The Writing Challenge's coach, shared by every account this process
+   * serves. `null` where no model is configured; practice is judged and
+   * recorded either way.
+   */
+  coach?: WritingCoach | null;
   now?: () => Date;
 }
 
@@ -106,6 +113,8 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
   const { url, publicKey, rules, cardFields, defaults, defaultTimeZone, writesRequested, now } = options;
   const verifier = options.verifier ?? createSupabaseVerifier(url, publicKey);
   const ratingMap = options.ratingMap ?? DEFAULT_RATING_MAP;
+  // One coach serves every account this process opens; `null` where none is configured.
+  const coach = options.coach ?? null;
   const connect =
     options.connect ??
     ((accessToken, schemaVersion) => createSupabaseDatabase(createUserClient(url, publicKey, accessToken), schemaVersion));
@@ -169,7 +178,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         timeZone,
         database: { version: schemaVersion, latest: LATEST_SCHEMA_VERSION },
         fsrsRetention,
-        review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, now }),
+        review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, coach, now }),
         vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, now }),
         analytics: new AnalyticsService({
           repository,
@@ -178,6 +187,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           timeZone,
           goals,
           scheduler,
+          writesRequested,
           now,
         }),
         library,

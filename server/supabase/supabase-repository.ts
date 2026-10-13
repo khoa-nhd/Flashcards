@@ -90,7 +90,7 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     private readonly database: VocabularyDatabase,
     private readonly rules: ReviewRules,
     /** The newest migration the database has. Anything it lacks stays switched off. */
-    schemaVersion: number = LATEST_SCHEMA_VERSION,
+    private readonly schemaVersion: number = LATEST_SCHEMA_VERSION,
   ) {
     this.capabilities = capabilitiesAt(schemaVersion);
   }
@@ -227,7 +227,11 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
 
   async recordPractice(write: PracticeWrite): Promise<PracticeWriteResult> {
     if (!this.capabilities.practice) return 'unsupported';
-    return this.database.recordPractice(write);
+    // The coach's note is kept only where the schema has somewhere to put it.
+    // An older database gets the answer exactly as it always did, and the note
+    // is dropped rather than failing the whole recording.
+    const { aiFeedback, modelAnswer, ...answer } = write;
+    return this.database.recordPractice(this.schemaVersion >= 10 ? { ...answer, aiFeedback, modelAnswer } : answer);
   }
 
   async practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeDailyStat[]> {

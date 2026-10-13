@@ -2,6 +2,9 @@ import { cardFields, fsrsRatingMap, newWordDefaults, reviewRules } from '../conf
 import { calendarDateInTimeZone } from '../shared/dates.js';
 import { DEFAULT_FSRS_SETTINGS } from '../shared/scheduler/fsrs.js';
 import { AnalyticsService } from './analytics-service.js';
+import { createAiAdapter } from './ai/adapter.js';
+import { createTokenBucket } from './ai/rate-limit.js';
+import { WRITING_COACH_RATE, createWritingCoach } from './ai/writing-coach.js';
 import { createApp } from './create-app.js';
 import { createGoalStore } from './goal-store.js';
 import { loadConfig, type AppConfig } from './env.js';
@@ -22,6 +25,14 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
 } {
   const config = loadConfig(env);
 
+  // The Writing Coach, if this server has a model to ask. One coach and one
+  // token bucket serve the whole process; without a key practice is judged
+  // and recorded exactly as before, just without a note.
+  const coach =
+    config.ai === null
+      ? null
+      : createWritingCoach({ adapter: createAiAdapter(config.ai), limiter: createTokenBucket(WRITING_COACH_RATE) });
+
   if (config.mode === 'supabase') {
     // Each request is served as the account that made it, so there are no shared services.
     // If the configuration is incomplete the app answers 503 with the reasons; there is
@@ -38,6 +49,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
             ratingMap: fsrsRatingMap,
             defaultTimeZone: config.timeZone,
             writesRequested: config.writesRequested,
+            coach,
           });
     return { app: createApp({ config, service: null, accounts }), config };
   }
@@ -58,6 +70,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     writesRequested: true,
     fsrs: { settings: DEFAULT_FSRS_SETTINGS, ratingMap: fsrsRatingMap },
     scheduler,
+    coach,
   });
   const vocabulary = new VocabularyService({
     catalog: repository,
@@ -76,6 +89,8 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     timeZone,
     goals,
     scheduler,
+    // The sample data is kept in memory for everyone; its goal follows the same switch.
+    writesRequested: true,
   });
   const library = new LibraryService({
     store: createMemoryLibraryStore((id) => repository.ownsWord(id)),

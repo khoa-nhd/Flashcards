@@ -385,6 +385,8 @@ describe('judging an answer', () => {
     expect(judge('recall', candid, { kind: 'typed', text: 'candid' })).toBeNull();
     expect(judge('recognition', candid, { kind: 'typed', text: 'thẳng thắn' })).toBeNull();
     expect(judge('cloze', candid, { kind: 'choice', selectedId: candid.id })).toBeNull();
+    expect(judge('writing', candid, { kind: 'self', correct: true })).toBeNull();
+    expect(judge('writing', candid, { kind: 'choice', selectedId: candid.id })).toBeNull();
   });
 
   it('refuses to judge where the word cannot be used in the mode', () => {
@@ -396,5 +398,77 @@ describe('judging an answer', () => {
     const judged = judge('typing', candid, { kind: 'typed', text: 'x'.repeat(900) })!;
     expect(judged.submitted).toHaveLength(500);
     expect(judged.correct).toBe(false);
+  });
+});
+
+describe('the writing challenge', () => {
+  const candid = word(1, { word: 'candid', meaning: 'thẳng thắn', example: 'He gave a Candid account.' });
+
+  it('needs nothing but the word itself: no meaning or example is asked for', () => {
+    const bare = word(9, { meaning: null, definition: null, example: null });
+    expect(ineligibility('writing', bare, [bare])).toBeNull();
+    expect(judge('writing', bare, { kind: 'typed', text: 'word9 shows up in this sentence.' })).toMatchObject({
+      correct: true,
+      typed: 'exact',
+    });
+  });
+
+  it('is right when the sentence uses the word whole, whatever else it says', () => {
+    expect(judge('writing', candid, { kind: 'typed', text: 'A candid answer is the best one.' })).toEqual({
+      correct: true,
+      grading: 'auto',
+      typed: 'exact',
+      submitted: 'A candid answer is the best one.',
+      expected: 'candid',
+    });
+    // Case and outer spacing are not spelling.
+    expect(judge('writing', candid, { kind: 'typed', text: '  CANDID answers are rare. ' })).toMatchObject({
+      correct: true,
+      typed: 'exact',
+      submitted: 'CANDID answers are rare.',
+    });
+    // Part of a longer word is not the word, and neither is leaving it out.
+    expect(judge('writing', candid, { kind: 'typed', text: 'The candids lined up.' })).toMatchObject({
+      correct: false,
+      typed: 'incorrect',
+    });
+    expect(judge('writing', candid, { kind: 'typed', text: 'Nothing else in this sentence.' })).toMatchObject({
+      correct: false,
+      typed: 'incorrect',
+    });
+    expect(judge('writing', candid, { kind: 'typed', text: '   ' })).toMatchObject({
+      correct: false,
+      typed: 'incorrect',
+      submitted: '',
+    });
+  });
+
+  it('accepts each spelling of an entry written as alternatives, as a whole word', () => {
+    const entry = word(2, { word: 'colour / color' });
+    expect(judge('writing', entry, { kind: 'typed', text: 'What color is the door?' })).toMatchObject({ correct: true, typed: 'exact' });
+    expect(judge('writing', entry, { kind: 'typed', text: 'What colour is the door?' })).toMatchObject({ correct: true, typed: 'exact' });
+    expect(judge('writing', entry, { kind: 'typed', text: 'A colourful hallway.' })).toMatchObject({ correct: false, typed: 'incorrect' });
+  });
+
+  it('takes a phrase for all of the words it is made of, and nothing shorter', () => {
+    const entry = word(3, { word: 'take off' });
+    expect(judge('writing', entry, { kind: 'typed', text: 'The plane will take off at noon.' })).toMatchObject({ correct: true });
+    expect(judge('writing', entry, { kind: 'typed', text: 'Please takeoff your hat.' })).toMatchObject({ correct: false });
+  });
+
+  it('forgives a difference that is not spelling, as typing does', () => {
+    const entry = word(4, { word: 'don’t' });
+    expect(judge('writing', entry, { kind: 'typed', text: "I don't know why." })).toMatchObject({ correct: true, typed: 'exact' });
+    // A missing apostrophe is a different word, here as in typing.
+    expect(judge('writing', entry, { kind: 'typed', text: 'I dont know why.' })).toMatchObject({ correct: false, typed: 'incorrect' });
+  });
+
+  it('keeps the whole sentence for the record, however long', () => {
+    const sentence = `A candid answer: ${'and more of it. '.repeat(60)}`.trim();
+    expect(sentence.length).toBeGreaterThan(500);
+    const judged = judge('writing', candid, { kind: 'typed', text: sentence })!;
+    expect(judged.correct).toBe(true);
+    expect(judged.submitted).toBe(sentence);
+    expect(judged.submitted).toHaveLength(sentence.length);
   });
 });

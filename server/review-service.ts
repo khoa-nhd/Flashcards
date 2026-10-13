@@ -45,12 +45,13 @@ import {
 } from '../shared/scheduler/fsrs.js';
 import { DEFAULT_RATING_MAP, ratingFor, type RatingMap } from '../shared/scheduler/rating-map.js';
 import { simulate } from '../shared/scheduler/simulation.js';
-import { judge, type PracticeWord } from '../shared/study-modes.js';
+import { judge, type PracticeAnswer, type PracticeWord } from '../shared/study-modes.js';
 import type { CardFieldConfig, VocabularyRecord } from '../shared/vocabulary.js';
 import { HttpError } from './errors.js';
 import { KeyedMutex } from './keyed-mutex.js';
 import { MASTERY_ONLY, type SchedulerStore } from './scheduler-store.js';
 import type { FsrsWrite, VocabularyRepository } from './vocabulary-repository.js';
+import type { WritingCoach } from './ai/writing-coach.js';
 
 export interface ReviewServiceOptions {
   repository: VocabularyRepository;
@@ -69,6 +70,12 @@ export interface ReviewServiceOptions {
    * the mastery schedule is always in charge.
    */
   scheduler?: SchedulerStore;
+  /**
+   * When given, a Writing Challenge answer may also get a coach's note on the
+   * sentence. It is asked for after judging and never changes the verdict or
+   * the word's schedule; when it cannot answer, the answer stands without it.
+   */
+  coach?: WritingCoach | null;
   now?: () => Date;
 }
 
@@ -334,6 +341,11 @@ export class ReviewService {
 
     // Judged either way; recorded only where saving is on and the store can hold it.
     if (!repository.capabilities.practice || !(await this.writesEnabled())) return { outcome: 'dry_run', ...result };
+
+    // Once the answer is going to be saved, the coach may add a note — asked for
+    // only for a writing answer, and never able to change the verdict above.
+    const coached = await this.coachNote(request, word, answer);
+    const note = coached === null ? {} : { aiFeedback: coached.feedback, modelAnswer: coached.modelAnswer };
     const outcome = await repository.recordPractice({
       id: pageId,
       requestId: request.requestId,
@@ -345,9 +357,27 @@ export class ReviewService {
       reviewedOn: this.today(),
       durationMs: request.durationMs ?? null,
       confidence: request.confidence ?? null,
+      // A store behind this schema keeps the row as it was and drops these quietly.
+      ...note,
     });
     if (outcome === 'not_found') throw new HttpError(404, 'not_found', 'That word is not in your vocabulary.');
-    return { outcome: outcome === 'unsupported' ? 'dry_run' : outcome, ...result };
+    return { outcome: outcome === 'unsupported' ? 'dry_run' : outcome, ...result, ...note };
+  }
+
+  /**
+   * The Writing Challenge's coach note, where there is a coach to ask and
+   * something to note. `null` for every other mode, and for any failure —
+   * the answer itself never waits on it or changes because of it.
+   */
+  private async coachNote(
+    request: PracticeRequest,
+    word: PracticeWord,
+    answer: PracticeAnswer,
+  ): Promise<{ feedback: string; modelAnswer: string } | null> {
+    const { coach } = this.options;
+    if (coach === null || coach === undefined) return null;
+    if (request.mode !== 'writing' || answer.kind !== 'typed') return null;
+    return coach.note({ word: word.word, meaning: word.meaning, text: answer.text });
   }
 
   /**

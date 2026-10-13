@@ -152,7 +152,9 @@ export const reviewActionRequestSchema = z.strictObject({
   sessionId: z.uuid().optional(),
   /**
    * How sure the reviewer said they were before the answer was shown. Stored
-   * beside the answer; it never changes what the answer does.
+   * beside the answer; it never changes what the answer does to the mastery
+   * schedule. The one thing it tips is the FSRS shadow rating: a "remember"
+   * said while guessing (low) is rated Hard so the next check comes sooner.
    */
   confidence: confidenceSchema.optional(),
 });
@@ -456,29 +458,45 @@ export const deletedResponseSchema = z.object({ id: z.string(), deleted: z.liter
 
 export const studyModeSchema = z.enum(STUDY_MODES);
 
+/**
+ * How long a typed answer may be, by mode. Only the Writing Challenge asks
+ * for a whole sentence; every other typed mode still takes one short answer.
+ */
+export const TYPED_ANSWER_LIMITS = { writing: 6000, other: 500 } as const;
+
 export const practiceAnswerSchema = z.discriminatedUnion('kind', [
   /** Recall: the reviewer says whether they had it. */
   z.strictObject({ kind: z.literal('self'), correct: z.boolean() }),
   /** Recognition: the word whose meaning was chosen. */
   z.strictObject({ kind: z.literal('choice'), selectedId: pageIdSchema }),
-  /** Typing and cloze. */
-  z.strictObject({ kind: z.literal('typed'), text: z.string().max(500) }),
+  /** Typing, cloze, listening and writing. */
+  z.strictObject({ kind: z.literal('typed'), text: z.string().max(TYPED_ANSWER_LIMITS.writing) }),
 ]);
 
 /**
  * One practice answer. The server judges it from its own copy of the word;
  * nothing here can change a word's mastery or review date.
  */
-export const practiceRequestSchema = z.strictObject({
-  pageId: pageIdSchema,
-  mode: studyModeSchema,
-  answer: practiceAnswerSchema,
-  /** Generated once per answer and repeated on a retry, so one answer is recorded once. */
-  requestId: z.uuid(),
-  sessionId: z.uuid().optional(),
-  durationMs: z.number().int().min(0).max(86_400_000).optional(),
-  confidence: confidenceSchema.optional(),
-});
+export const practiceRequestSchema = z
+  .strictObject({
+    pageId: pageIdSchema,
+    mode: studyModeSchema,
+    answer: practiceAnswerSchema,
+    /** Generated once per answer and repeated on a retry, so one answer is recorded once. */
+    requestId: z.uuid(),
+    sessionId: z.uuid().optional(),
+    durationMs: z.number().int().min(0).max(86_400_000).optional(),
+    confidence: confidenceSchema.optional(),
+  })
+  .superRefine((value, ctx) => {
+    // A sentence is allowed only in the Writing Challenge; the short answer
+    // limit stands for every other mode.
+    if (value.answer.kind !== 'typed') return;
+    const limit = value.mode === 'writing' ? TYPED_ANSWER_LIMITS.writing : TYPED_ANSWER_LIMITS.other;
+    if (value.answer.text.length > limit) {
+      ctx.addIssue({ code: 'custom', message: `Keep the answer under ${limit} characters` });
+    }
+  });
 
 export const practiceResponseSchema = z.object({
   /** `dry_run`: judged, but saving is switched off so nothing was recorded. */
@@ -488,6 +506,14 @@ export const practiceResponseSchema = z.object({
   typed: z.enum(['exact', 'variant', 'incorrect']).nullable(),
   /** The right answer, as the server has it. */
   expected: z.string(),
+  /**
+   * Writing Challenge only: the coach's note on the sentence, when a coach
+   * answered. Absent or `null` otherwise. Extra guidance after judging — it
+   * never changes `correct`, and never a word's schedule.
+   */
+  aiFeedback: z.string().max(2000).nullable().optional(),
+  /** Writing Challenge only: one model sentence from the coach, same rules. */
+  modelAnswer: z.string().max(300).nullable().optional(),
 });
 
 // ---- Daily goal ----

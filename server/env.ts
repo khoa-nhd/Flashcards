@@ -19,6 +19,14 @@ export interface AppConfig {
   timeZone: string | null;
   /** False only when saving has been frozen on purpose. */
   writesRequested: boolean;
+  /**
+   * Where a language model is reached, for the features that ask one (Smart
+   * Reader, Writing Challenge). The key is read here and never handed to the
+   * browser — the frontend-secrets test keeps that true. `null` when no key
+   * is set: the AI features then simply do not answer, and the app falls
+   * back to entering everything by hand. Missing AI is not a startup issue.
+   */
+  ai: { baseUrl: string; apiKey: string; model: string; timeoutMs: number } | null;
   port: number;
   host: string;
   /** Problems that stop the app from serving reviews. Never contains secret values. */
@@ -100,6 +108,24 @@ export function loadConfig(env: Env = process.env): AppConfig {
   const port = Number(read(env, 'PORT') ?? '8787');
   if (!Number.isInteger(port) || port <= 0 || port > 65535) issues.push('PORT is not a valid port.');
 
+  // The language model, spoken to through its OpenAI-compatible endpoint. The
+  // default is Gemini's, because its free tier is generous; any other
+  // provider that speaks the same protocol is a different base URL and key.
+  let ai: AppConfig['ai'] = null;
+  const aiKey = read(env, 'AI_API_KEY');
+  if (aiKey !== null) {
+    const aiBaseUrl = read(env, 'AI_BASE_URL') ?? 'https://generativelanguage.googleapis.com/v1beta/openai/';
+    const aiModel = read(env, 'AI_MODEL') ?? 'gemini-2.5-flash';
+    const timeoutRaw = read(env, 'AI_TIMEOUT_MS') ?? '20000';
+    const aiTimeoutMs = Number(timeoutRaw);
+    if (!Number.isInteger(aiTimeoutMs) || aiTimeoutMs < 1000 || aiTimeoutMs > 28_000) {
+      // Below Vercel's own 30s ceiling, so a slow answer is ours to time out, not the platform's.
+      issues.push('AI_TIMEOUT_MS must be a whole number of milliseconds between 1000 and 28000.');
+    } else {
+      ai = { baseUrl: aiBaseUrl.endsWith('/') ? aiBaseUrl : `${aiBaseUrl}/`, apiKey: aiKey, model: aiModel, timeoutMs: aiTimeoutMs };
+    }
+  }
+
   return {
     mode,
     isProduction,
@@ -107,6 +133,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     timeZone,
     // Saving is what the app is for; the switch exists only to freeze changes deliberately.
     writesRequested: mode === 'mock' || read(env, 'REVIEW_WRITES_ENABLED')?.toLowerCase() !== 'false',
+    ai,
     port: Number.isInteger(port) ? port : 8787,
     host: read(env, 'HOST') ?? (isProduction ? '0.0.0.0' : '127.0.0.1'),
     issues,

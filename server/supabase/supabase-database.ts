@@ -152,7 +152,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 9;
+export const LATEST_SCHEMA_VERSION = 10;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -177,6 +177,10 @@ export const reviewLogRowSchema = z.object({
   answer_correct: z.boolean().nullable().optional(),
   submitted_answer: z.string().nullable().optional(),
   grading: z.string().nullable().optional(),
+  /** From schema version 10: the Writing Challenge's coach note. */
+  ai_feedback: z.string().nullable().optional(),
+  /** From schema version 10: one model sentence from the coach. */
+  model_answer: z.string().nullable().optional(),
 });
 export type ReviewLogRow = z.infer<typeof reviewLogRowSchema>;
 
@@ -189,6 +193,7 @@ export const reviewLogColumns = (schemaVersion: number): string =>
     ...(schemaVersion >= 3 ? ['rating'] : []),
     ...(schemaVersion >= 5 ? ['confidence'] : []),
     ...(schemaVersion >= 6 ? ['answer_correct, submitted_answer, grading'] : []),
+    ...(schemaVersion >= 10 ? ['ai_feedback, model_answer'] : []),
   ].join(', ');
 
 export const collectionRowSchema = z.object({ id: z.string(), name: z.string() });
@@ -228,6 +233,10 @@ export interface PracticeWriteArgs {
   reviewedOn: IsoDate;
   durationMs: number | null;
   confidence: number | null;
+  /** The Writing Challenge's coach note, from schema version 10. */
+  aiFeedback?: string | null;
+  /** One model sentence from the coach, from schema version 10. */
+  modelAnswer?: string | null;
 }
 
 export const practiceOutcomeSchema = z.enum(['recorded', 'already_recorded', 'not_found']);
@@ -449,6 +458,10 @@ export function practiceEvent(args: PracticeWriteArgs): Record<string, string | 
     reviewed_on: args.reviewedOn,
     duration_ms: args.durationMs,
     confidence: args.confidence,
+    // A coach's note, where one was asked for. An older `record_practice` simply
+    // does not read these keys, and a database without the columns never gets them.
+    ai_feedback: args.aiFeedback ?? null,
+    model_answer: args.modelAnswer ?? null,
   };
 }
 

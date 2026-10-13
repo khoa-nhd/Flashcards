@@ -48,6 +48,7 @@ import {
   type WeakWordsResponse,
 } from '../../shared/api.js';
 import type { IsoDate } from '../../shared/dates.js';
+import { aiExtractResponseSchema, type AiExtractRequest, type AiExtractResponse } from '../../shared/ai.js';
 import { EXPORT_FORMAT, type AccountExport } from '../../shared/export-format.js';
 import type { ImportItem } from '../../shared/import.js';
 import type { Collection, ExtraExample, Relation, RelationKind } from '../../shared/library.js';
@@ -148,7 +149,18 @@ export interface PracticeApi {
   submitPractice(request: PracticeRequest): Promise<PracticeResponse>;
 }
 
-export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi;
+export interface AiApi {
+  /**
+   * What a picked word means in the sentence it sits in. The sentence comes
+   * from the reader's own text and is taken by the server; only the two
+   * suggested fields are a model's draft, for the reader to check before
+   * anything is saved. Any failure arrives as an ApiError and the reader
+   * simply enters the word by hand — nothing here is required.
+   */
+  extractSense(request: AiExtractRequest): Promise<AiExtractResponse>;
+}
+
+export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi & AiApi;
 
 /** How requests prove who is asking, where the app has accounts. */
 export interface ApiAuth {
@@ -422,6 +434,16 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         body,
         timeoutMs: TIMEOUTS.actionMs,
         timeoutMessage: 'Checking that answer took too long.',
+      }),
+
+    extractSense: (body) =>
+      call('/api/ai/extract', aiExtractResponseSchema, {
+        method: 'POST',
+        body,
+        // The server gives the model less than this; waiting longer than its own
+        // budget only delays the fallback of entering the word by hand.
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'The AI suggestion took too long. Enter the word by hand.',
       }),
 
     fetchPlan: () =>

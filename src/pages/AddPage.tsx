@@ -8,6 +8,7 @@ import { Field, describedBy } from '../components/Field.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { SmartReaderPanel, type Draft } from '../components/SmartReader.js';
 import { Spinner } from '../components/Spinner.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, INPUT, PAGE, TEXTAREA } from '../components/ui.js';
@@ -60,6 +61,8 @@ function validate(values: FormValues): FormErrors {
 
 export function AddPage() {
   const state = useVocabulary();
+  const [tab, setTab] = useState<'manual' | 'reader'>('manual');
+  const [prefill, setPrefill] = useState<Draft | null>(null);
   return (
     <div className={PAGE}>
       <PageHeader
@@ -71,12 +74,62 @@ export function AddPage() {
           </Link>
         }
       />
-      <VocabularyGate state={state}>{state.meta !== null && <AddForm meta={state.meta} entries={state.entries} />}</VocabularyGate>
+      <VocabularyGate state={state}>
+        {state.meta !== null && (
+          <div className="flex flex-col gap-4">
+            {/* Two ways to add: the form always works; the reader is only offered
+                where the server can actually answer it. */}
+            <div className="flex gap-2" role="group" aria-label="How to add a word">
+              <button
+                type="button"
+                className={tab === 'manual' ? BUTTON_SECONDARY : BUTTON_GHOST}
+                aria-pressed={tab === 'manual'}
+                onClick={() => setTab('manual')}
+              >
+                By hand
+              </button>
+              {state.meta.writesEnabled && (
+                <button
+                  type="button"
+                  className={tab === 'reader' ? BUTTON_SECONDARY : BUTTON_GHOST}
+                  aria-pressed={tab === 'reader'}
+                  onClick={() => setTab('reader')}
+                >
+                  Smart Reader
+                </button>
+              )}
+            </div>
+            {/* Both stay mounted so neither loses what is already in it. */}
+            <div hidden={tab !== 'manual'}>
+              <AddForm meta={state.meta} entries={state.entries} prefill={prefill} />
+            </div>
+            {state.meta.writesEnabled && (
+              <div hidden={tab !== 'reader'}>
+                <SmartReaderPanel
+                  onDraft={(draft) => {
+                    setPrefill(draft);
+                    setTab('manual');
+                  }}
+                />
+              </div>
+            )}
+          </div>
+        )}
+      </VocabularyGate>
     </div>
   );
 }
 
-function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyEntry[] }) {
+function AddForm({
+  meta,
+  entries,
+  prefill,
+}: {
+  meta: VocabularyMeta;
+  entries: VocabularyEntry[];
+  /** A draft handed over from the Smart Reader, or null for an empty form. */
+  prefill: Draft | null;
+}) {
   const { api, vocabulary } = useApp();
   const [values, setValues] = useState<FormValues>(() => blankForm(meta));
   const [errors, setErrors] = useState<FormErrors>({});
@@ -93,6 +146,26 @@ function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyE
   const submitting = useRef(false);
   /** One id per distinct submission; a retry of the same content reuses it. */
   const requestId = useRef(newRequestId());
+  /** The last draft folded in, so arriving twice on the same one changes nothing. */
+  const [usedDraft, setUsedDraft] = useState<Draft | null>(null);
+
+  // A draft from the Smart Reader lands here: the ordinary form fills in, ready
+  // to be checked and edited like anything typed by hand. Adjusted during
+  // render rather than in an effect, so the fields are filled in the same paint.
+  if (prefill !== null && prefill !== usedDraft) {
+    setUsedDraft(prefill);
+    setValues((current) => ({ ...current, ...prefill }));
+    setQuick(false);
+    setDuplicates(null);
+    setFailure(null);
+    setErrors((current) => ({ ...current, word: undefined, meaning: undefined, definition: undefined, example: undefined }));
+  }
+
+  // A draft is a distinct submission, so it gets its own id — in an effect,
+  // where refs belong.
+  useEffect(() => {
+    if (prefill !== null) requestId.current = newRequestId();
+  }, [prefill]);
 
   // After a save the fields are enabled again; put the cursor back in Word for the next entry.
   useEffect(() => {

@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { RECENTLY_ADDED_DAYS, pageIdSchema, type PracticeResponse, type VocabularyEntry } from '../../shared/api.js';
+import { useMemo, useRef, useState, type FormEvent } from 'react';
+import { RECENTLY_ADDED_DAYS, TYPED_ANSWER_LIMITS, pageIdSchema, type PracticeResponse, type VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates } from '../../shared/dates.js';
 import {
   EXPERIMENTAL_MODES,
@@ -18,11 +18,13 @@ import {
   type StudyMode,
 } from '../../shared/study-modes.js';
 import { useApp, useLibrary, useSettings, useVocabulary } from '../app-context.js';
+import { useFocusMode } from '../components/AppShell.js';
+import { FocusTimer } from '../components/FocusTimer.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { Checking, PracticeCard, Verdict } from '../components/PracticeCards.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
-import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../components/ui.js';
+import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE, TEXTAREA } from '../components/ui.js';
 import { useRemote } from '../hooks/useRemote.js';
 import { ApiError } from '../lib/api-client.js';
 import { count } from '../lib/format.js';
@@ -95,6 +97,7 @@ interface Run {
 export function PracticePage() {
   const { api, settings: preferences } = useApp();
   const { speechLang } = useSettings();
+  const focusMode = useFocusMode();
   const state = useVocabulary();
   const { query } = useLocation();
   // Listening needs the browser to be able to read text aloud. Asked once: it does not change while the page is open.
@@ -222,25 +225,44 @@ export function PracticePage() {
 
   const word = run?.words[run.index] ?? null;
 
+  /** Sends what was given for the question on screen, timed from when it first appeared. */
+  const onAnswer = (given: PracticeAnswer) => {
+    if (run === null || run.result !== null || run.checking) return;
+    const elapsed = Math.min(Math.max(Date.now() - run.shownAt, 0), 86_400_000);
+    void send(run, given, newRequestId(), elapsed);
+  };
+
   return (
     <div className={PAGE}>
       <PageHeader
         title="Practice"
         description="Other ways to work on your words. Practice is recorded for your statistics; it never changes mastery or review dates."
         actions={
-          run !== null ? (
+          <>
             <button
               type="button"
-              className={BUTTON_SECONDARY}
-              onClick={() => {
-                asked.current = '';
-                setFinished(run.outcomes.length > 0 ? { mode: run.mode, outcomes: run.outcomes } : null);
-                setRun(null);
-              }}
+              className={`${BUTTON_SECONDARY} aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:text-accent`}
+              aria-pressed={focusMode.on}
+              title="Hide the navigation and show a timer, for studying without distractions."
+              onClick={focusMode.toggle}
             >
-              End practice
+              Focus
             </button>
-          ) : undefined
+            {focusMode.on && <FocusTimer />}
+            {run !== null && (
+              <button
+                type="button"
+                className={BUTTON_SECONDARY}
+                onClick={() => {
+                  asked.current = '';
+                  setFinished(run.outcomes.length > 0 ? { mode: run.mode, outcomes: run.outcomes } : null);
+                  setRun(null);
+                }}
+              >
+                End practice
+              </button>
+            )}
+          </>
         }
       />
 
@@ -250,21 +272,28 @@ export function PracticePage() {
             <p className="text-sm text-muted" aria-live="polite">
               {STUDY_MODE_LABELS[run.mode]} · Question {run.index + 1} of {run.words.length}
             </p>
-            <PracticeCard
-              key={`${run.sessionId}:${run.index}`}
-              mode={run.mode}
-              word={word}
-              choices={run.choices[run.index] ?? null}
-              result={run.result}
-              given={run.given}
-              checking={run.checking}
-              speechLang={speechLang}
-              onAnswer={(given) => {
-                if (run.result !== null || run.checking) return;
-                const elapsed = Math.min(Math.max(Date.now() - run.shownAt, 0), 86_400_000);
-                void send(run, given, newRequestId(), elapsed);
-              }}
-            />
+            {run.mode === 'writing' ? (
+              <WritingCard
+                key={`${run.sessionId}:${run.index}`}
+                word={word}
+                result={run.result}
+                given={run.given}
+                checking={run.checking}
+                onAnswer={onAnswer}
+              />
+            ) : (
+              <PracticeCard
+                key={`${run.sessionId}:${run.index}`}
+                mode={run.mode}
+                word={word}
+                choices={run.choices[run.index] ?? null}
+                result={run.result}
+                given={run.given}
+                checking={run.checking}
+                speechLang={speechLang}
+                onAnswer={onAnswer}
+              />
+            )}
             {run.checking && <Checking />}
             {run.error !== null && (
               <div role="alert" className="rounded-2xl border border-bad/40 bg-bad-soft p-4 text-bad-ink">
@@ -292,6 +321,7 @@ export function PracticePage() {
             {run.result !== null && (
               <Verdict mode={run.mode} word={word} result={run.result} last={run.index + 1 >= run.words.length} onNext={next} />
             )}
+            {run.mode === 'writing' && run.result !== null && <CoachNote result={run.result} />}
           </div>
         ) : (
           <div className="flex max-w-2xl flex-col gap-6">
@@ -444,6 +474,105 @@ export function PracticePage() {
         )}
       </VocabularyGate>
     </div>
+  );
+}
+
+/** The card a question is shown on, as the practice cards draw it. */
+const PROMPT = 'rounded-3xl border border-line bg-surface px-6 py-8 text-center shadow-[0_1px_2px_rgb(0_0_0/0.04)]';
+const PROMPT_LABEL = 'text-xs font-semibold uppercase tracking-[0.12em] text-muted';
+
+interface WritingCardProps {
+  word: PracticeWord;
+  /** The server's verdict, once it has answered. Until then the card is still being asked. */
+  result: PracticeResponse | null;
+  /** The answer that was sent, kept so the card can show the sentence as it was judged. */
+  given: PracticeAnswer | null;
+  /** The answer is on its way to the server. */
+  checking: boolean;
+  onAnswer: (answer: PracticeAnswer) => void;
+}
+
+/**
+ * The Writing Challenge's editor: a whole sentence rather than one word.
+ * Only this page builds it; the shared practice card stays a single line,
+ * and the verdict below still comes from the server.
+ */
+function WritingCard({ word, result, given, checking, onAnswer }: WritingCardProps) {
+  const [text, setText] = useState('');
+  const answered = result !== null;
+  const shown = given?.kind === 'typed' ? given.text : text;
+  const meaning = answerText(word)?.text ?? null;
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    // Something written, not just spaces: that is what "checked" means here too.
+    if (answered || checking || text.trim() === '') return;
+    onAnswer({ kind: 'typed', text });
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className={PROMPT}>
+        <p className={PROMPT_LABEL}>Word</p>
+        <p className="mt-2 font-serif text-3xl font-semibold">{word.word}</p>
+        {meaning !== null && <p className="mt-3 text-sm text-muted">{meaning}</p>}
+        {word.example !== null && <p className="mt-3 text-sm text-muted">{word.example}</p>}
+      </div>
+      <form onSubmit={submit} className="flex flex-col gap-2">
+        <label htmlFor="practice-writing" className="text-sm font-medium">
+          Your sentence
+        </label>
+        <textarea
+          id="practice-writing"
+          className={TEXTAREA}
+          value={shown}
+          readOnly={answered}
+          disabled={checking}
+          autoFocus
+          maxLength={TYPED_ANSWER_LIMITS.writing}
+          placeholder={`Write a sentence using “${word.word}”.`}
+          onChange={(event) => setText(event.target.value)}
+        />
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className={HELP} aria-live="polite">
+            {shown.length} of {TYPED_ANSWER_LIMITS.writing} characters
+          </p>
+          {!answered && (
+            <button type="submit" className={BUTTON_PRIMARY} disabled={checking || text.trim() === ''}>
+              Submit
+            </button>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}
+
+/**
+ * The Writing Challenge's coach note, under the verdict. It is extra guidance
+ * only: the verdict above already stands, whether the coach answered or not.
+ */
+function CoachNote({ result }: { result: PracticeResponse }) {
+  const feedback = result.aiFeedback ?? null;
+  const modelAnswer = result.modelAnswer ?? null;
+  if (feedback === null && modelAnswer === null) {
+    return <p className={HELP}>No coach note this time — check it yourself.</p>;
+  }
+  return (
+    <section className={`${CARD} flex flex-col gap-3 p-5`} aria-label="Coach feedback">
+      {feedback !== null && (
+        <div>
+          <h3 className={SECTION_TITLE}>Coach feedback</h3>
+          <p className="mt-1.5 text-sm">{feedback}</p>
+        </div>
+      )}
+      {modelAnswer !== null && (
+        <div>
+          <h3 className={SECTION_TITLE}>Model answer</h3>
+          <p className="mt-1.5 text-sm">{modelAnswer}</p>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -28,7 +28,11 @@ import {
   type AppConfigResponse,
 } from '../shared/api.js';
 import { bearerToken, type AccountGateway, type AccountSession } from './accounts.js';
+import { createAiAdapter, AiError } from './ai/adapter.js';
+import { createTokenBucket } from './ai/rate-limit.js';
+import { AI_RATE, SmartReader, aiErrorToHttp } from './ai/smart-reader.js';
 import type { AnalyticsService } from './analytics-service.js';
+import { aiExtractRequestSchema } from '../shared/ai.js';
 import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
 import type { ExportService } from './export-service.js';
@@ -122,6 +126,11 @@ export function createApp({
 
   const notConfigured = () =>
     new HttpError(503, 'setup_incomplete', `The server is not configured yet. ${config.issues.join(' ')}`);
+
+  // The language model for the AI features, if this server has one. Built
+  // once for the app; without a key the adapter answers "not configured" and
+  // the features fall back to being done by hand.
+  const reader = new SmartReader({ adapter: createAiAdapter(config.ai), limiter: createTokenBucket(AI_RATE) });
 
   const requireService = (c: Context<AppEnv>): ReviewService => {
     const { review } = c.get('scope');
@@ -435,6 +444,32 @@ export function createApp({
       fsrsRetention: fsrsRetention === undefined ? session.fsrsRetention : await session.saveFsrsRetention(fsrsRetention),
     };
     return c.json(body);
+  });
+
+  // ---- Smart Reader: the sentence a picked word sits in, and what it means there ----
+
+  app.post('/api/ai/extract', async (c) => {
+    // Asking the model costs quota, and its answer is only ever a draft for a
+    // word the reader then saves — so a frozen account is refused here too.
+    if (!config.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
+    const request = await parseBody(c, aiExtractRequestSchema);
+    // One limit per account; the sample words belong to nobody, so they share one.
+    const accountKey = c.get('scope').session?.account.id ?? 'sample';
+    try {
+      return c.json(await reader.extract(accountKey, request));
+    } catch (error) {
+      if (error instanceof AiError) {
+        const http = aiErrorToHttp(error);
+        throw new HttpError(http.status, http.code, http.message);
+      }
+      throw error;
+    }
   });
 
   // ---- Vocabulary bank. Every write goes through VocabularyService's allow-list. ----

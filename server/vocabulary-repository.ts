@@ -37,7 +37,11 @@ export interface ReviewWrite {
   sessionId: string | null;
   /** What FSRS made of the answer, to be saved with it where the store keeps FSRS state. */
   fsrs?: FsrsWrite | null;
-  /** How sure the reviewer said they were beforehand, where the store keeps it. Never affects the result. */
+  /**
+   * How sure the reviewer said they were beforehand, where the store keeps it.
+   * Never affects the mastery schedule; it only picks the FSRS rating when a
+   * word is remembered through a guess (server/review-service.ts).
+   */
   confidence?: Confidence | null;
   /**
    * Which schedule was in charge, for a store that has no settings of its own
@@ -60,6 +64,10 @@ export interface PracticeWrite {
   reviewedOn: IsoDate;
   durationMs: number | null;
   confidence: Confidence | null;
+  /** The Writing Challenge's coach note, where the store keeps it. Never affects the verdict. */
+  aiFeedback?: string | null;
+  /** One model sentence from the coach, beside its note. */
+  modelAnswer?: string | null;
 }
 
 /** `unsupported`: the store does not record practice (its schema is behind). */
