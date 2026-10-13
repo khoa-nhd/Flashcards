@@ -188,6 +188,17 @@ travels the existing recorded `POST /api/practice` path — mastery, review
 dates and FSRS untouched, as everywhere else. No preset exams are bundled;
 the AI-suggested exam plan stays deferred (owner decision, Đợt 5).
 
+### Batch 4 of the 2026-10-13 roadmap (planned 2026-10-14, not started)
+
+Word families: an AI builder whose answer is always a draft, a
+`root_id` column (migration v11, capability-gated) so the direction
+root → derived is stored and not guessed, timelines in the word panel,
+and example sentences written around the reader's saved collocations.
+The full design — every file path, the migration sketch and the order of
+work — is in `docs/word-family-design.md`. Owner decision: the code is
+built now; applying v9–v11 to live Supabase stays the owner's step, and
+the features stay off until the schema catches up.
+
 ## 1. Audit: where the app stands
 
 ### Baseline (run on 2026-10-10)
