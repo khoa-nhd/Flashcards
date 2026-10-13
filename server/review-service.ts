@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import {
   normalizeId,
   type CardField,
+  type Confidence,
   type PracticeRequest,
   type PracticeResponse,
   type QueueResponse,
@@ -35,6 +36,7 @@ import {
   DEFAULT_FSRS_SETTINGS,
   FSRS_ENGINE,
   FSRS_RATING_NAMES,
+  FSRS_RATINGS,
   FSRS_RETENTION,
   fsrsRetrievability,
   fsrsReview,
@@ -257,7 +259,8 @@ export class ReviewService {
     const next = ruleFor(action, rules) === null ? null : applyAction(action, current, today, rules);
     if (next === null || !(await this.writesEnabled())) return { outcome: 'dry_run', state: next };
 
-    const fsrs = this.fsrsFor(record, action);
+    // The confidence only reaches FSRS: what the mastery schedule writes never depends on it.
+    const fsrs = this.fsrsFor(record, action, request.confidence ?? null);
     // Beside the mastery schedule a failed FSRS calculation costs nothing. In charge, saving
     // without it would leave the word exactly where it was, so the answer is refused instead.
     if (scheduler === 'fsrs' && fsrs === null) {
@@ -384,11 +387,15 @@ export class ReviewService {
    * A failure is logged and reported as `null`; what that means for the answer
    * is the caller's decision.
    */
-  private fsrsFor(record: VocabularyRecord, action: ReviewAction): FsrsWrite | null {
+  private fsrsFor(record: VocabularyRecord, action: ReviewAction, confidence: Confidence | null): FsrsWrite | null {
     const { fsrs } = this.options;
     if (fsrs == null || !this.fsrsRunning()) return null;
     try {
-      const rating = ratingFor(action, fsrs.ratingMap);
+      // A word remembered only through a guess (low confidence) needs an earlier check,
+      // so it is rated Hard instead of the mapped Good. A misspoken confidence never
+      // changes a lapse: Not remember stays Again whatever confidence came with it.
+      const rating =
+        action === 'remember' && confidence === 1 ? FSRS_RATINGS.hard : ratingFor(action, fsrs.ratingMap);
       const before = record.fsrs ?? null;
       return {
         rating,

@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest';
+import { fsrsRatingMap } from '../../config/review.config.js';
 import { sampleRules } from '../../server/mock/sample-rules.js';
 import { ReviewService, type ReviewServiceOptions } from '../../server/review-service.js';
+import type { FsrsWrite } from '../../server/vocabulary-repository.js';
+import { NO_CAPABILITIES } from '../../shared/api.js';
 import type { ReviewRules } from '../../shared/review-logic.js';
+import { DEFAULT_FSRS_SETTINGS, FSRS_RATINGS, fsrsReview } from '../../shared/scheduler/fsrs.js';
 import type { VocabularyRecord } from '../../shared/vocabulary.js';
 import { FakeRepository, NOW, TIME_ZONE, TODAY, pageId, record } from '../helpers/fixtures.js';
 import { TEST_FIELDS } from '../helpers/fixtures.js';
@@ -258,6 +262,67 @@ describe('submitAction', () => {
     // Nothing was written, so the retry applies the answer exactly once.
     await expect(service.submitAction(request)).resolves.toMatchObject({ outcome: 'applied' });
     expect(repository.updates).toHaveLength(1);
+  });
+});
+
+/** A service with FSRS running beside the mastery schedule, keeping the FSRS write each answer made. */
+function setupFsrs(records: VocabularyRecord[]) {
+  const { repository, service } = setup(records, {
+    fsrs: { settings: DEFAULT_FSRS_SETTINGS, ratingMap: fsrsRatingMap },
+  });
+  Object.assign(repository, { capabilities: { ...NO_CAPABILITIES, fsrs: true } });
+  const writes: Array<FsrsWrite | null> = [];
+  const save = repository.applyReview.bind(repository);
+  repository.applyReview = async (write) => {
+    writes.push(write.fsrs ?? null);
+    return save(write);
+  };
+  return { service, writes };
+}
+
+describe('the FSRS rating an answer is given', () => {
+  const shown = { mastery: 3, nextReview: '2026-10-01' };
+
+  it('rates Remember with low confidence (a guess) as Hard, so the word comes back sooner', async () => {
+    const { service, writes } = setupFsrs([record(1, shown)]);
+    const result = await service.submitAction({
+      pageId: pageId(1),
+      action: 'remember',
+      expected: shown,
+      confidence: 1,
+    });
+    // Confidence never touches the mastery schedule: Remember writes exactly what it always did.
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 4, nextReview: '2026-10-13' } });
+    expect(writes[0]).toMatchObject({ rating: FSRS_RATINGS.hard });
+    expect(writes[0]?.after).toEqual(fsrsReview(null, FSRS_RATINGS.hard, NOW));
+    expect(writes[0]?.after).not.toEqual(fsrsReview(null, FSRS_RATINGS.good, NOW));
+  });
+
+  it('rates Remember at Good without a confidence and at medium or high', async () => {
+    for (const confidence of [undefined, 2, 3] as const) {
+      const { service, writes } = setupFsrs([record(1, shown)]);
+      await service.submitAction({
+        pageId: pageId(1),
+        action: 'remember',
+        expected: shown,
+        ...(confidence === undefined ? {} : { confidence }),
+      });
+      expect(writes[0]).toMatchObject({ rating: FSRS_RATINGS.good });
+      expect(writes[0]?.after).toEqual(fsrsReview(null, FSRS_RATINGS.good, NOW));
+    }
+  });
+
+  it('rates Not remember as Again even with low confidence: a misspoken confidence never softens a lapse', async () => {
+    const { service, writes } = setupFsrs([record(1, shown)]);
+    const result = await service.submitAction({
+      pageId: pageId(1),
+      action: 'not_remember',
+      expected: shown,
+      confidence: 1,
+    });
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 3, nextReview: '2026-10-10' } });
+    expect(writes[0]).toMatchObject({ rating: FSRS_RATINGS.again });
+    expect(writes[0]?.after).toEqual(fsrsReview(null, FSRS_RATINGS.again, NOW));
   });
 });
 
