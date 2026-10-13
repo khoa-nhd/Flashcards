@@ -52,6 +52,16 @@ const MAX_DURATION_MS = 86_400_000;
 /** Failures after which trying the same Undo again cannot succeed. */
 const UNDO_IS_OVER = new Set(['conflict', 'not_found', 'not_supported', 'read_only']);
 
+/** Internal timer for tracking active review time per card. */
+interface ReviewTimer {
+  /** The card id this timer belongs to. */
+  cardId: string;
+  /** Accumulated active time in milliseconds. */
+  accumulatedMs: number;
+  /** Monotonic timestamp when the timer was last started, or null if paused. */
+  startedAt: number | null;
+}
+
 export function createSessionController(
   api: Pick<ReviewApi, 'fetchQueue' | 'submitAction' | 'undoAction'>,
   /** Called once an answer is confirmed as saved, so other views know their data has changed. */
@@ -64,21 +74,104 @@ export function createSessionController(
   let focus: ReviewFocus | null = null;
   /** The collection the queue is narrowed to instead, if any. */
   let collection: string | null = null;
-  /** When the card on screen appeared, to record how long it took to answer. */
-  let shown: { id: string; at: number } | null = null;
+  /** Timer for the currently active card. */
+  let timer: ReviewTimer | null = null;
+  /** Visibility change handler reference for cleanup. */
+  let visibilityHandler: (() => void) | null = null;
   /** Identifies the answer being saved. A retry repeats it, so one answer is recorded once. */
   let answer: { requestId: string; durationMs: number } | null = null;
   /** Identifies the Undo of one answer. Pressing Undo again after a failure repeats it. */
   let undoRequest: { of: string; requestId: string } | null = null;
   const listeners = new Set<() => void>();
 
+  /** Start or resume the timer for a card. */
+  const startTimer = (cardId: string) => {
+    if (timer?.cardId === cardId && timer.startedAt !== null) {
+      // Already running for this card
+      return;
+    }
+    const now = performance.now();
+    if (timer?.cardId === cardId) {
+      // Resuming existing timer for same card
+      timer.startedAt = now;
+    } else {
+      // New card
+      timer = { cardId, accumulatedMs: 0, startedAt: now };
+    }
+  };
+
+  /** Pause the timer for a card, accumulating elapsed active time. */
+  const pauseTimer = (cardId: string) => {
+    if (timer?.cardId === cardId && timer.startedAt !== null) {
+      const now = performance.now();
+      timer.accumulatedMs += now - timer.startedAt;
+      timer.startedAt = null;
+    }
+  };
+
+  /** Get the total active time for the current card and stop the timer. */
+  const stopTimer = (cardId: string): number => {
+    if (timer?.cardId === cardId) {
+      if (timer.startedAt !== null) {
+        const now = performance.now();
+        timer.accumulatedMs += now - timer.startedAt;
+        timer.startedAt = null;
+      }
+      const total = Math.round(timer.accumulatedMs);
+      timer = null;
+      return total;
+    }
+    return 0;
+  };
+
+  /** Set up visibility change handling to pause/resume the timer. */
+  const setupVisibilityHandler = () => {
+    if (visibilityHandler !== null || typeof document === 'undefined') return;
+    visibilityHandler = () => {
+      const card = currentCard(state);
+      if (card === null || timer === null || timer.cardId !== card.id) return;
+      if (document.visibilityState === 'hidden') {
+        pauseTimer(card.id);
+      } else if (document.visibilityState === 'visible') {
+        // Only resume if the same card is still active and we're in a state where timing makes sense
+        if (state.status === 'ready' || state.status === 'flipped') {
+          startTimer(card.id);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', visibilityHandler);
+  };
+
+  /** Clean up visibility handler. */
+  const cleanupVisibilityHandler = () => {
+    if (visibilityHandler !== null && typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', visibilityHandler);
+      visibilityHandler = null;
+    }
+  };
+
   const dispatch = (event: SessionEvent): boolean => {
     const next = transition(state, event);
     if (next === state) return false;
+    const previousCard = currentCard(state);
     state = next;
     const card = currentCard(state);
-    if (card === null) shown = null;
-    else if (shown?.id !== card.id) shown = { id: card.id, at: Date.now() };
+    
+    // Handle timer transitions
+    if (previousCard !== null && card !== null && previousCard.id !== card.id) {
+      // Card changed - stop timer for old card, start for new card
+      stopTimer(previousCard.id);
+      startTimer(card.id);
+    } else if (card === null) {
+      // No card active
+      if (timer !== null) {
+        stopTimer(timer.cardId);
+      }
+    } else if (timer === null || timer.cardId !== card.id) {
+      // New card or timer was lost
+      startTimer(card.id);
+    }
+    
     for (const listener of listeners) listener();
     return true;
   };
@@ -140,6 +233,9 @@ export function createSessionController(
       }
       // A newer load supersedes any still in flight.
       const sequence = ++loadSequence;
+      // Clean up any existing timer and visibility handler before starting fresh
+      if (timer !== null) stopTimer(timer.cardId);
+      cleanupVisibilityHandler();
       dispatch({ type: 'LOAD' });
       try {
         const { cards, ...meta } = await api.fetchQueue(collection === null ? { focus } : { focus: null, collection });
@@ -147,6 +243,8 @@ export function createSessionController(
         // A freshly loaded queue is a new sitting.
         sessionId = newRequestId();
         dispatch({ type: 'LOAD_SUCCEEDED', cards, meta });
+        // Set up visibility handler after successful load
+        setupVisibilityHandler();
       } catch (error) {
         if (sequence !== loadSequence) return;
         dispatch({
@@ -168,9 +266,10 @@ export function createSessionController(
     },
 
     grade(action) {
-      const elapsed = shown === null ? 0 : Date.now() - shown.at;
+      const card = currentCard(state);
+      const elapsed = card === null ? 0 : stopTimer(card.id);
       if (!dispatch({ type: 'GRADE', action })) return false;
-      answer = { requestId: newRequestId(), durationMs: Math.min(Math.max(Math.round(elapsed), 0), MAX_DURATION_MS) };
+      answer = { requestId: newRequestId(), durationMs: Math.min(Math.max(elapsed, 0), MAX_DURATION_MS) };
       void save();
       return true;
     },
