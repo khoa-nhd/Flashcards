@@ -93,6 +93,8 @@ interface MockLog {
   confidence: Confidence | null;
   /** Which schedule was in charge when it was given. */
   scheduler: SchedulerId;
+  /** The study mode this answer was given in. */
+  reviewMode: string;
   /** When it was recorded. */
   at: string;
 }
@@ -225,6 +227,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       fsrs,
       confidence: write.confidence ?? null,
       scheduler: write.scheduler ?? DEFAULT_SCHEDULER,
+      reviewMode: 'flashcard',
       at: this.now().toISOString(),
     });
     return { outcome: 'applied', state: write.next };
@@ -270,18 +273,20 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       fsrs: null,
       confidence: null,
       scheduler: target.scheduler,
+      reviewMode: target.reviewMode,
       at: this.now().toISOString(),
     });
     return { outcome: 'undone', id: word.id, state: target.before };
   }
 
   async reviewDailyStats(from: IsoDate, to: IsoDate): Promise<DailyStat[]> {
-    const byDay = new Map<IsoDate, DailyStat & { words: Set<string> }>();
+    const byDayAndMode = new Map<string, DailyStat & { words: Set<string> }>();
     for (const log of this.logs) {
       if (!this.stands(log) || log.reviewedOn < from || log.reviewedOn > to) continue;
-      const day = byDay.get(log.reviewedOn) ?? {
+      const key = `${log.reviewedOn}|${log.reviewMode}`;
+      const day = byDayAndMode.get(key) ?? {
         day: log.reviewedOn,
-        mode: 'flashcard',
+        mode: log.reviewMode,
         reviews: 0,
         remembered: 0,
         notRemembered: 0,
@@ -305,10 +310,10 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       day.timedReviews += log.durationMs === null ? 0 : 1;
       day.words.add(log.wordId);
       day.cards = day.words.size;
-      byDay.set(log.reviewedOn, day);
+      byDayAndMode.set(key, day);
     }
-    return [...byDay.values()]
-      .sort((a, b) => a.day.localeCompare(b.day))
+    return [...byDayAndMode.values()]
+      .sort((a, b) => a.day.localeCompare(b.day) || a.mode.localeCompare(b.mode))
       .map(({ words: _words, ...stat }) => {
         void _words;
         return stat;
