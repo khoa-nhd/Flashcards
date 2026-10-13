@@ -25,6 +25,7 @@ import {
 import { downloadFile, toCsv, toJson } from '../lib/export.js';
 import { ROUTES, buildHref, navigate, openWord, useLocation } from '../lib/router.js';
 import type { SortKey } from '../lib/settings.js';
+import { computeSimpleTrueMastery } from '../hooks/useTrueMastery.js';
 
 const SORT_LABELS: Record<SortKey, string> = {
   word: 'Word',
@@ -32,6 +33,235 @@ const SORT_LABELS: Record<SortKey, string> = {
   reviewDate: 'Review date',
   mastery: 'Mastery',
 };
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  options: Array<[value: string, label: string]>;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1 text-xs font-medium text-muted">
+      {label}
+      <select className={INPUT} value={value} onChange={(event) => onChange(event.target.value)}>
+        {options.map(([optionValue, optionLabel]) => (
+          <option key={optionValue} value={optionValue}>
+            {optionLabel}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+interface BankTableProps {
+  entries: VocabularyEntry[];
+  today: IsoDate | null;
+  query: BankQuery;
+  onSort: (key: SortKey) => void;
+  trueMasteryMap: Map<string, { mastery: number; tier: string; adjustment: number }>;
+}
+
+function BankTable({
+  entries,
+  today,
+  query,
+  onSort,
+  trueMasteryMap,
+}: BankTableProps) {
+  const header = (key: SortKey, className = '') => {
+    const active = query.sort === key;
+    return (
+      <th
+        scope="col"
+        aria-sort={active ? (query.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
+        className={`px-3 py-2 font-medium ${className}`}
+      >
+        <button
+          type="button"
+          onClick={() => onSort(key)}
+          className={`inline-flex cursor-pointer items-center gap-1 ${active ? 'text-ink' : 'hover:text-ink'}`}
+        >
+          {SORT_LABELS[key]}
+          <span aria-hidden="true" className={active ? '' : 'opacity-0'}>
+            {query.direction === 'asc' ? '↑' : '↓'}
+          </span>
+        </button>
+      </th>
+    );
+  };
+
+  return (
+    <div className={`${CARD} overflow-x-auto`}>
+      <table className="w-full text-sm">
+        <thead className="border-b border-line text-left text-xs text-muted">
+          <tr>
+            {header('word')}
+            <th scope="col" className="hidden px-3 py-2 font-medium md:table-cell">
+              Meaning
+            </th>
+            {header('mastery', 'w-24')}
+            <th scope="col" className="w-32 px-3 py-2 font-medium">True Mastery</th>
+            {header('reviewDate', 'w-40')}
+            {header('dateAdded', 'hidden w-32 sm:table-cell')}
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry) => {
+            const trueMastery = trueMasteryMap.get(entry.id);
+            return (
+              <tr
+                key={entry.id}
+                onClick={() => openWord(entry.id)}
+                className="cursor-pointer border-t border-line first:border-t-0 hover:bg-line/20"
+              >
+                <th scope="row" className="max-w-56 px-3 py-2.5 text-left font-medium">
+                  <span className="flex items-center gap-2">
+                    {/* The row is clickable for the mouse; this button is the keyboard and screen-reader route. */}
+                    <button
+                      type="button"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openWord(entry.id);
+                      }}
+                      className="cursor-pointer truncate text-left hover:underline"
+                    >
+                      {entry.word}
+                    </button>
+                    <QualityFlag entry={entry} />
+                  </span>
+                </th>
+                <td className="hidden max-w-xs px-3 py-2.5 text-muted md:table-cell">
+                  <span className="line-clamp-1">{entry.meaning ?? entry.definition ?? '—'}</span>
+                </td>
+                <td className="px-3 py-2.5">
+                  <MasteryPill mastery={entry.mastery} />
+                </td>
+                <td className="px-3 py-2.5">
+                  {trueMastery && (
+                    <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span
+                        className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                          trueMastery.tier === 'Mastered'
+                            ? 'bg-good-soft text-good-ink'
+                            : trueMastery.tier === 'Strong'
+                            ? 'bg-accent-soft text-accent'
+                            : trueMastery.tier === 'Good'
+                            ? 'bg-accent-soft text-accent'
+                            : trueMastery.tier === 'Learning'
+                            ? 'bg-warn-soft text-warn-ink'
+                            : trueMastery.tier === 'Weak'
+                            ? 'bg-bad-soft text-bad-ink'
+                            : 'bg-line/50 text-muted'
+                        }`}
+                      >
+                        {trueMastery.tier} ({trueMastery.mastery.toFixed(1)})
+                      </span>
+                      {trueMastery.adjustment !== 0 && (
+                        <span
+                          className={`text-xs font-mono ${
+                            trueMastery.adjustment > 0 ? 'text-good-ink' : 'text-bad-ink'
+                          }`}
+                        >
+                          {trueMastery.adjustment > 0 ? '+' : ''}{trueMastery.adjustment.toFixed(1)}
+                        </span>
+                      )}
+                    </span>
+                  )}
+                </td>
+                <td className="px-3 py-2.5">
+                  <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <StatusBadge status={entry.reviewStatus} />
+                    {entry.reviewDate !== null && entry.reviewStatus !== 'mastered' && (
+                      <span className="whitespace-nowrap text-xs text-muted">{relativeDay(entry.reviewDate, today)}</span>
+                    )}
+                  </span>
+                </td>
+                <td className="hidden whitespace-nowrap px-3 py-2.5 text-muted sm:table-cell">
+                  {formatDate(entry.dateAdded, 'short')}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+interface BankListProps {
+  entries: VocabularyEntry[];
+  today: IsoDate | null;
+  trueMasteryMap: Map<string, { mastery: number; tier: string; adjustment: number }>;
+}
+
+function BankList({ entries, today, trueMasteryMap }: BankListProps) {
+  return (
+    <ul className={`${CARD} m-0 flex list-none flex-col divide-y divide-line p-0`}>
+      {entries.map((entry) => {
+        const trueMastery = trueMasteryMap.get(entry.id);
+        return (
+          <li key={entry.id}>
+            <button
+              type="button"
+              onClick={() => openWord(entry.id)}
+              className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left hover:bg-line/20"
+            >
+              <MasteryPill mastery={entry.mastery} />
+              <span className="min-w-0 flex-1 truncate">
+                <span className="font-medium">{entry.word}</span>
+                {entry.meaning !== null && <span className="text-muted"> — {entry.meaning}</span>}
+              </span>
+              <QualityFlag entry={entry} />
+              {trueMastery && (
+                <span className="shrink-0 flex items-center gap-2">
+                  <span
+                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+                      trueMastery.tier === 'Mastered'
+                        ? 'bg-good-soft text-good-ink'
+                        : trueMastery.tier === 'Strong'
+                        ? 'bg-accent-soft text-accent'
+                        : trueMastery.tier === 'Good'
+                        ? 'bg-accent-soft text-accent'
+                        : trueMastery.tier === 'Learning'
+                        ? 'bg-warn-soft text-warn-ink'
+                        : trueMastery.tier === 'Weak'
+                        ? 'bg-bad-soft text-bad-ink'
+                        : 'bg-line/50 text-muted'
+                    }`}
+                  >
+                    {trueMastery.tier} ({trueMastery.mastery.toFixed(1)})
+                  </span>
+                  {trueMastery.adjustment !== 0 && (
+                    <span
+                      className={`text-xs font-mono ${
+                        trueMastery.adjustment > 0 ? 'text-good-ink' : 'text-bad-ink'
+                      }`}
+                    >
+                      {trueMastery.adjustment > 0 ? '+' : ''}{trueMastery.adjustment.toFixed(1)}
+                    </span>
+                  )}
+                </span>
+              )}
+              <span className="shrink-0 text-xs text-muted">
+                {entry.reviewStatus === 'mastered'
+                  ? 'mastered'
+                  : entry.reviewDate === null
+                    ? 'no date'
+                    : relativeDay(entry.reviewDate, today)}
+              </span>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
 
 export function BankPage() {
   const state = useVocabulary();
@@ -59,6 +289,28 @@ export function BankPage() {
   const filtering = hasActiveFilters(query) || collectionId !== null;
   const sorted = useMemo(() => sortEntries(filtered, query.sort, query.direction), [filtered, query.sort, query.direction]);
   const page = useMemo(() => paginate(sorted, query.page, settings.bankPageSize), [sorted, query.page, settings.bankPageSize]);
+
+  // Compute true mastery for entries on the current page
+  const trueMasteryMap = useMemo(() => {
+    if (!today) return new Map<string, { mastery: number; tier: string; adjustment: number }>();
+    const map = new Map<string, { mastery: number; tier: string; adjustment: number }>();
+    for (const entry of page.items) {
+      const result = computeSimpleTrueMastery({
+        entry: {
+          mastery: entry.mastery,
+          reviewDate: entry.reviewDate,
+          reviewStatus: entry.reviewStatus,
+        },
+        today: today!,
+      });
+      map.set(entry.id, {
+        mastery: result.mastery,
+        tier: result.tier,
+        adjustment: result.adjustment,
+      });
+    }
+    return map;
+  }, [page.items, today]);
 
   /** Applies a change to the filters or sorting. Anything but a page change starts again at page 1. */
   const update = (patch: Partial<BankQuery>, options: { replace?: boolean; collection?: string | null } = {}) => {
@@ -123,7 +375,6 @@ export function BankPage() {
           </>
         }
       />
-
       <VocabularyGate state={state}>
         {today !== null && (
           <div className={`flex flex-col gap-4 ${state.refreshing ? 'opacity-70' : ''}`}>
@@ -235,7 +486,7 @@ export function BankPage() {
                   </button>
                 )}
 
-                <div className="ml-auto flex flex-wrap items-center gap-2">
+                <div className="ml-auto flex flex-wrap items-center gap-3">
                   <label className="flex items-center gap-2 text-sm text-muted">
                     Sort by
                     <select
@@ -277,8 +528,12 @@ export function BankPage() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
 
-            {page.total === 0 ? (
+        <div>
+          {page.total === 0 ? (
+            <>
               <div className={`${CARD} flex flex-col items-center gap-3 px-6 py-12 text-center`}>
                 <p className="font-serif text-xl font-semibold">
                   {state.entries.length === 0 ? 'Your vocabulary is empty' : 'No words match these filters'}
@@ -302,188 +557,48 @@ export function BankPage() {
                   </button>
                 )}
               </div>
-            ) : settings.bankView === 'table' ? (
-              <BankTable entries={page.items} today={today} query={query} onSort={sortBy} />
-            ) : (
-              <BankList entries={page.items} today={today} />
-            )}
+            </>
+          ) : settings.bankView === 'table' ? (
+            <>
+              <BankTable
+                entries={page.items as VocabularyEntry[]}
+                today={today}
+                query={query}
+                onSort={sortBy}
+                trueMasteryMap={trueMasteryMap}
+              />
+            </>
+          ) : (
+            <>
+              <BankList entries={page.items as VocabularyEntry[]} today={today} trueMasteryMap={trueMasteryMap} />
+            </>
+          )}
 
-            {page.pageCount > 1 && (
-              <nav aria-label="Pages" className="flex items-center justify-center gap-3">
-                <button
-                  type="button"
-                  className={BUTTON_GHOST}
-                  disabled={page.page <= 1}
-                  onClick={() => update({ page: page.page - 1 })}
-                >
-                  <Icon name="left" className="size-4" /> Previous
-                </button>
-                <span className="text-sm tabular-nums text-muted">
-                  Page {page.page} of {page.pageCount}
-                </span>
-                <button
-                  type="button"
-                  className={BUTTON_GHOST}
-                  disabled={page.page >= page.pageCount}
-                  onClick={() => update({ page: page.page + 1 })}
-                >
-                  Next <Icon name="right" className="size-4" />
-                </button>
-              </nav>
-            )}
-          </div>
-        )}
+          {page.pageCount > 1 && (
+            <nav aria-label="Pages" className="flex items-center justify-center gap-3">
+              <button
+                type="button"
+                className={BUTTON_GHOST}
+                disabled={page.page <= 1}
+                onClick={() => update({ page: page.page - 1 })}
+              >
+                <Icon name="left" className="size-4" /> Previous
+              </button>
+              <span className="text-sm tabular-nums text-muted">
+                Page {page.page} of {page.pageCount}
+              </span>
+              <button
+                type="button"
+                className={BUTTON_GHOST}
+                disabled={page.page >= page.pageCount}
+                onClick={() => update({ page: page.page + 1 })}
+              >
+                Next <Icon name="right" className="size-4" />
+              </button>
+            </nav>
+          )}
+        </div>
       </VocabularyGate>
     </div>
-  );
-}
-
-function FilterSelect({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string;
-  value: string;
-  options: Array<[value: string, label: string]>;
-  onChange: (value: string) => void;
-}) {
-  return (
-    <label className="flex flex-col gap-1 text-xs font-medium text-muted">
-      {label}
-      <select className={INPUT} value={value} onChange={(event) => onChange(event.target.value)}>
-        {options.map(([optionValue, optionLabel]) => (
-          <option key={optionValue} value={optionValue}>
-            {optionLabel}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function BankTable({
-  entries,
-  today,
-  query,
-  onSort,
-}: {
-  entries: VocabularyEntry[];
-  today: IsoDate;
-  query: BankQuery;
-  onSort: (key: SortKey) => void;
-}) {
-  const header = (key: SortKey, className = '') => {
-    const active = query.sort === key;
-    return (
-      <th
-        scope="col"
-        aria-sort={active ? (query.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
-        className={`px-3 py-2 font-medium ${className}`}
-      >
-        <button
-          type="button"
-          onClick={() => onSort(key)}
-          className={`inline-flex cursor-pointer items-center gap-1 ${active ? 'text-ink' : 'hover:text-ink'}`}
-        >
-          {SORT_LABELS[key]}
-          <span aria-hidden="true" className={active ? '' : 'opacity-0'}>
-            {query.direction === 'asc' ? '↑' : '↓'}
-          </span>
-        </button>
-      </th>
-    );
-  };
-
-  return (
-    <div className={`${CARD} overflow-x-auto`}>
-      <table className="w-full text-sm">
-        <thead className="border-b border-line text-left text-xs text-muted">
-          <tr>
-            {header('word')}
-            <th scope="col" className="hidden px-3 py-2 font-medium md:table-cell">
-              Meaning
-            </th>
-            {header('mastery', 'w-24')}
-            {header('reviewDate', 'w-40')}
-            {header('dateAdded', 'hidden w-32 sm:table-cell')}
-          </tr>
-        </thead>
-        <tbody>
-          {entries.map((entry) => (
-            <tr
-              key={entry.id}
-              onClick={() => openWord(entry.id)}
-              className="cursor-pointer border-t border-line first:border-t-0 hover:bg-line/20"
-            >
-              <th scope="row" className="max-w-56 px-3 py-2.5 text-left font-medium">
-                <span className="flex items-center gap-2">
-                  {/* The row is clickable for the mouse; this button is the keyboard and screen-reader route. */}
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openWord(entry.id);
-                    }}
-                    className="cursor-pointer truncate text-left hover:underline"
-                  >
-                    {entry.word}
-                  </button>
-                  <QualityFlag entry={entry} />
-                </span>
-              </th>
-              <td className="hidden max-w-xs px-3 py-2.5 text-muted md:table-cell">
-                <span className="line-clamp-1">{entry.meaning ?? entry.definition ?? '—'}</span>
-              </td>
-              <td className="px-3 py-2.5">
-                <MasteryPill mastery={entry.mastery} />
-              </td>
-              <td className="px-3 py-2.5">
-                <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <StatusBadge status={entry.reviewStatus} />
-                  {entry.reviewDate !== null && entry.reviewStatus !== 'mastered' && (
-                    <span className="whitespace-nowrap text-xs text-muted">{relativeDay(entry.reviewDate, today)}</span>
-                  )}
-                </span>
-              </td>
-              <td className="hidden whitespace-nowrap px-3 py-2.5 text-muted sm:table-cell">
-                {formatDate(entry.dateAdded, 'short')}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function BankList({ entries, today }: { entries: VocabularyEntry[]; today: IsoDate }) {
-  return (
-    <ul className={`${CARD} m-0 flex list-none flex-col divide-y divide-line p-0`}>
-      {entries.map((entry) => (
-        <li key={entry.id}>
-          <button
-            type="button"
-            onClick={() => openWord(entry.id)}
-            className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left hover:bg-line/20"
-          >
-            <MasteryPill mastery={entry.mastery} />
-            <span className="min-w-0 flex-1 truncate">
-              <span className="font-medium">{entry.word}</span>
-              {entry.meaning !== null && <span className="text-muted"> — {entry.meaning}</span>}
-            </span>
-            <QualityFlag entry={entry} />
-            <span className="shrink-0 text-xs text-muted">
-              {entry.reviewStatus === 'mastered'
-                ? 'mastered'
-                : entry.reviewDate === null
-                  ? 'no date'
-                  : relativeDay(entry.reviewDate, today)}
-            </span>
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }

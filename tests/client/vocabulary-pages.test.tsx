@@ -321,7 +321,7 @@ describe('Vocabulary bank', () => {
     expect(rowWords()).toEqual(['serendipity', 'candid', 'alleviate']);
     expect(header('Word')).toHaveAttribute('aria-sort', 'descending');
 
-    await user.click(within(header('Mastery')).getByRole('button'));
+    await user.click(within(header('^Mastery$')).getByRole('button'));
     expect(rowWords()).toEqual(['candid', 'alleviate', 'serendipity']);
     expect(screen.getByLabelText('Sort by')).toHaveValue('mastery');
   });
