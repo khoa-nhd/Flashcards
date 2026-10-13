@@ -339,12 +339,147 @@ The rule is in [`shared/study-modes.ts`](../shared/study-modes.ts)
 
 | | |
 | --- | --- |
-| What it is | For one word and one practice mode, a score from 0 to 10: **one point for every correct practice answer recorded for that word in that mode, stopping at 10.** A wrong answer adds nothing and takes nothing away. |
+| What it is | For one word and one practice mode, a score from 0 to 3: **one point for every correct practice answer recorded for that word in that mode, stopping at 3.** A wrong answer adds nothing and takes nothing away. |
 | Per mode | Recognition, recall, typing, fill in the blank and listening each have their own score for each word. They are never added together. In recall, "correct" is what you said about yourself. |
 | Where it comes from | It is counted from the practice history each time it is shown. It is not a second number stored beside the history, so it cannot disagree with it, an answer sent twice counts once, and practice recorded before the score existed counts too. |
 | What it is not | Review mastery. It never decides when a word is due, never hides a definition, never retires a word, and is not read by either schedule. Reviewing a word, or editing its review mastery, does not change it. |
 | What changes it | Only a recorded practice answer. It cannot be edited by hand. An answer judged while saving is switched off is not recorded, so it is not counted. |
 | When it is shown | Where practice is recorded (database version 6 or later). Elsewhere the section is left out rather than filled with zeros. |
+
+## True Mastery
+
+An evidence-based estimate (0–100) of demonstrated vocabulary knowledge,
+computed from **practice history** across all modes. The algorithm is in
+[`shared/true-mastery.ts`](../shared/true-mastery.ts) (`calculateTrueMastery`).
+It is an **estimate**, not a ground-truth measurement, and the UI labels it as
+such.
+
+### What it uses
+
+Only recorded practice answers that are still standing (not undone, not from
+technical failures). Each answer provides:
+
+| Field | Meaning |
+| --- | --- |
+| `correct` | `true` = correct, `false` = incorrect |
+| `mode` | One of: recognition, recall, typing, cloze, listening |
+| `grading` | `auto` (server-judged) or `self` (recall: you said whether you had it) |
+| `reviewedOn` | The reviewer's calendar day (for recency) |
+| `reviewedAt` | Full timestamp (for session ordering) |
+| `sessionId` | Groups retries so repeated attempts in one sitting don't inflate evidence |
+
+Answers with missing timestamps, future dates, or `grading` not in `{auto, self}`
+are excluded. Self-assessed recall answers are included but the UI notes their
+subjective nature.
+
+### Formula (per word)
+
+For each practice mode `m`, collect its eligible answers `i`. Let:
+
+- `y_i = 1` if correct, `0` if incorrect
+- `d_i` = age of attempt `i` in days (from `reviewedOn` to today)
+- `h` = recency half-life (default 30 days)
+
+**Recency weight:** `r_i = 2^(-d_i / h)`
+
+**Weighted evidence per mode:**
+- `S_m = Σ r_i y_i` (weighted correct)
+- `F_m = Σ r_i (1 - y_i)` (weighted incorrect)
+- `n_eff,m = Σ r_i` (effective evidence count)
+
+**Beta smoothing** (prior α=2, β=2):
+- `P_m = (α + S_m) / (α + β + S_m + F_m)` — smoothed accuracy (0–1)
+
+**Confidence** (evidence-strength heuristic, not a calibrated probability):
+- `c_m = n_eff,m / (n_eff,m + k)` with `k = 5`
+
+**Mode weights** (evidence strength defaults):
+- Recognition: 0.15, Recall: 0.20, Typing: 0.30, Cloze: 0.25, Listening: 0.10
+
+**Aggregate True Mastery:**
+```
+T = 100 * (Σ a_m c_m P_m) / (Σ a_m c_m)
+```
+where `a_m` is the mode weight. Modes with no evidence are **excluded** from the
+sum (not treated as zero).
+
+**Session cap:** Within one session, at most the last answer counts, and the
+total effective evidence per session is capped at 3 (default), so unlimited
+retries cannot create unlimited confidence.
+
+### Evidence coverage
+
+| Level | Condition |
+| --- | --- |
+| Insufficient data | No practice answers at all, or all filtered out |
+| Low evidence | `n_eff ≥ 1` |
+| Moderate evidence | `n_eff ≥ 5` AND ≥ 2 modes with evidence |
+| High evidence | `n_eff ≥ 15` AND ≥ 3 modes with evidence |
+
+Coverage reflects both **quantity** and **diversity** of practice. A word with
+30 typing answers but no other mode gets "Low evidence", not "High".
+
+### What True Mastery is NOT
+
+| Not this | Why |
+| --- | --- |
+| Review Mastery (0–10) | That is the scheduler's state; True Mastery uses practice evidence only. |
+| FSRS Predicted Recall | That estimates recall probability at a moment; True Mastery summarizes demonstrated practice performance. |
+| Practice Mastery (0–3 per mode) | That counts correct answers per mode; True Mastery combines modes with recency, smoothing, and confidence. |
+| Overdue penalty | Being overdue does not directly lower True Mastery; it only affects review priority. |
+
+### Display
+
+| Element | Meaning |
+| --- | --- |
+| Score (0–100) | `T` from the formula above; `—` when insufficient data |
+| Tier | Excellent (≥90), Strong (≥75), Good (≥60), Developing (≥40), Weak (≥20), New (<20), Unknown (insufficient data) |
+| Evidence label | "Insufficient data", "Low evidence", "Moderate evidence", "High evidence" |
+| Per-mode breakdown | Accuracy, effective evidence, confidence, weight, correct/incorrect counts, last attempt |
+
+### Limitations
+
+- **Not a calibrated probability.** `T/100` is not the chance of remembering tomorrow.
+- **History gaps.** Practice before the database supported it (schema version < 6) is not available. Legacy history without reliable correctness is not fabricated.
+- **Recall is self-assessed.** The `grading: 'self'` flag distinguishes it; treat with appropriate caution.
+- **Listening depends on device speech synthesis.** Quality varies.
+- **Thresholds are heuristic.** The coverage tiers and weight defaults are starting points, not validated constants.
+
+### Changing the model
+
+All tunable parameters live in `DEFAULT_TRUE_MASTERY_CONFIG` in
+`shared/true-mastery.ts`:
+
+```ts
+recencyHalfLifeDays: 30,
+priorAlpha: 2,
+priorBeta: 2,
+confidenceK: 5,
+minEvidenceLow: 1,
+minEvidenceModerate: 5,
+minEvidenceHigh: 15,
+minModesModerate: 2,
+minModesHigh: 3,
+modeWeights: { recognition: 0.15, recall: 0.20, typing: 0.30, cloze: 0.25, listening: 0.10 },
+sessionMaxEffectiveEvidence: 3,
+```
+
+Changing them affects all words immediately; no migration is needed because the
+model is computed on the fly from raw history.
+
+### Empirical validation protocol
+
+To validate the model against an independent delayed-recall test:
+
+1. Select a cohort of words with **High evidence** True Mastery.
+2. After a fixed delay (e.g., 7 days) without review, test recall.
+3. Compare True Mastery score bands (e.g., 80–100, 60–80, 40–60, 20–40, 0–20)
+   against observed recall rates.
+4. Report calibration curves and Brier scores.
+5. Iterate weights, half-life, or priors only after such validation.
+
+Until validated, treat True Mastery as a **heuristic for prioritising study**,
+not a scientific measurement.
 
 ## Estimated recall (FSRS)
 

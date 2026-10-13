@@ -1,97 +1,122 @@
-/**
- * Simplified true mastery calculation for client-side use.
- * Only uses data available in VocabularyEntry: mastery, reviewDate, reviewStatus.
- */
+import { useMemo, useState, useEffect, useCallback } from 'react';
+import type { IsoDate } from '../../shared/dates.js';
+import {
+  calculateTrueMastery,
+  getEvidenceCoverageLabel,
+  getTrueMasteryTier,
+  type PracticeAnswer,
+  type TrueMasteryResult,
+} from '../../shared/true-mastery.js';
+import { useApp, useVocabulary } from '../app-context.js';
 
 /**
- * Compute a simplified true mastery based on data available in VocabularyEntry.
- * 
- * Adjustments:
- * - Overdue penalty: -0.5 per day overdue (max -2.0)
- * - No review date penalty: -1.0 (if not mastered)
- * - Overdue status: -0.5
- * - Due today: -0.2
- * 
- * Total adjustment clamped to [-2.0, 0] (only penalties in this simplified version).
+ * Hook for computing True Mastery from practice history.
+ * Uses the canonical evidence-based implementation from shared/true-mastery.ts
  */
 
-/** Input for simplified true mastery calculation */
-export interface SimpleTrueMasteryInput {
+export interface TrueMasteryEntry {
   mastery: number | null;
-  reviewDate: string | null;
-  reviewStatus: string;
+  tier: string;
+  coverage: 'insufficient' | 'low' | 'moderate' | 'high';
+  coverageLabel: string;
+  totalEffectiveEvidence: number;
+  modesWithEvidence: number;
+  modes: TrueMasteryResult['modes'];
+  hasAnyPractice: boolean;
 }
 
-/** Result of simplified true mastery calculation */
-export interface SimpleTrueMasteryResult {
-  mastery: number;
-  tier: 'Mastered' | 'Strong' | 'Good' | 'Learning' | 'Weak' | 'New';
-  adjustment: number;
+export interface UseTrueMasteryReturn {
+  /** Map from vocabulary entry ID to True Mastery data */
+  trueMasteryMap: Map<string, TrueMasteryEntry>;
+  /** Whether practice history is still loading */
+  loading: boolean;
+  /** Error message if loading failed */
+  error: string | null;
+  /** Reload practice history */
+  reload: () => void;
 }
 
 /**
- * Compute a simplified true mastery based on data available in VocabularyEntry.
- * 
- * @param input - Entry data and today's date
- * @returns True mastery result with mastery score, tier, and adjustment
+ * Hook to compute True Mastery for vocabulary entries.
+ * Fetches practice history from the API and computes evidence-based mastery.
  */
-export function computeSimpleTrueMastery(input: {
-  entry: { mastery: number | null; reviewDate: string | null; reviewStatus: string };
-  today: string;
-}): { mastery: number; tier: string; adjustment: number } {
-  const baseMastery = input.entry.mastery ?? 0;
-  
-  // Special cases
-  if (input.entry.reviewStatus === 'mastered' || baseMastery >= 10) {
-    return { mastery: 10, tier: 'Mastered', adjustment: 0 };
-  }
-  if (baseMastery === 0) {
-    return { mastery: 0, tier: 'New', adjustment: 0 };
-  }
-  
-  let adjustment = 0;
-  
-  // Overdue penalty: -0.5 per day overdue, max -2.0
-  if (input.entry.reviewDate) {
-    const todayDate = new Date(input.today);
-    const dueDate = new Date(input.entry.reviewDate);
-    const daysOverdue = Math.floor((todayDate.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
-    
-    if (daysOverdue > 0) {
-      adjustment -= Math.min(2.0, daysOverdue * 0.5);
+export function useTrueMastery(): UseTrueMasteryReturn {
+  const { api } = useApp();
+  const { entries, meta } = useVocabulary();
+
+  const [history, setHistory] = useState<PracticeAnswer[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const loadHistory = useCallback(async () => {
+    const today = meta?.today;
+    if (!today) {
+      setHistory([]);
+      return;
     }
-  } else if (input.entry.mastery !== null && input.entry.mastery < 10) {
-    // No review date but not mastered - scheduling gap
-    adjustment -= 1.0;
-  }
-  
-  // Review status modifiers
-  if (input.entry.reviewStatus === 'overdue') {
-    adjustment -= 0.5;
-  } else if (input.entry.reviewStatus === 'due_today') {
-    adjustment -= 0.2;
-  }
-  
-  // Clamp adjustment to [-2.0, 0]
-  adjustment = Math.max(-2.0, Math.min(0, adjustment));
-  
-  const finalMastery = Math.max(0, Math.min(10, baseMastery + adjustment));
-  
-  return {
-    mastery: Math.round(finalMastery * 10) / 10,
-    tier: getTrueMasteryTier(finalMastery),
-    adjustment: Math.round(adjustment * 10) / 10,
-  };
-}
 
-/**
- * Get the tier label for a true mastery score.
- */
-export function getTrueMasteryTier(mastery: number): 'Mastered' | 'Strong' | 'Good' | 'Learning' | 'Weak' | 'New' {
-  if (mastery >= 9) return 'Mastered';
-  if (mastery >= 7.5) return 'Strong';
-  if (mastery >= 6) return 'Good';
-  if (mastery >= 4) return 'Learning';
-  if (mastery >= 2) return 'Weak';
-  return 'New';
+    setLoading(true);
+    setError(null);
+    try {
+      // Fetch practice history for all words in the vocabulary
+      // We fetch since the beginning to get all history
+      const since: IsoDate | null = null; // null means all history
+      const response = await api.fetchPracticeHistory(since);
+      if (response.available) {
+        setHistory(response.answers);
+      } else {
+        setHistory([]);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to load practice history');
+    } finally {
+      setLoading(false);
+    }
+  }, [api, meta?.today]);
+
+  // Load on mount and when today changes
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- data fetching on mount/dependency change
+    void loadHistory();
+  }, [loadHistory]);
+
+  const trueMasteryMap = useMemo(() => {
+    const today = meta?.today;
+    if (!today) return new Map<string, TrueMasteryEntry>();
+
+    const map = new Map<string, TrueMasteryEntry>();
+
+    // Group history by vocabulary ID
+    const historyByVocab = new Map<string, PracticeAnswer[]>();
+    for (const answer of history) {
+      const arr = historyByVocab.get(answer.vocabularyId) ?? [];
+      arr.push(answer);
+      historyByVocab.set(answer.vocabularyId, arr);
+    }
+
+    // Compute True Mastery for each entry that has history
+    for (const entry of entries) {
+      const vocabHistory = historyByVocab.get(entry.id) ?? [];
+      const result = calculateTrueMastery(vocabHistory, today);
+      map.set(entry.id, {
+        mastery: result.mastery,
+        tier: getTrueMasteryTier(result.mastery),
+        coverage: result.coverage,
+        coverageLabel: getEvidenceCoverageLabel(result.coverage),
+        totalEffectiveEvidence: result.totalEffectiveEvidence,
+        modesWithEvidence: result.modesWithEvidence,
+        modes: result.modes,
+        hasAnyPractice: result.hasAnyPractice,
+      });
+    }
+
+    return map;
+  }, [entries, history, meta?.today]);
+
+  return {
+    trueMasteryMap,
+    loading,
+    error,
+    reload: loadHistory,
+  };
 }

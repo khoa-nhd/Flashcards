@@ -25,7 +25,7 @@ import {
 import { downloadFile, toCsv, toJson } from '../lib/export.js';
 import { ROUTES, buildHref, navigate, openWord, useLocation } from '../lib/router.js';
 import type { SortKey } from '../lib/settings.js';
-import { computeSimpleTrueMastery } from '../hooks/useTrueMastery.js';
+import { useTrueMastery, type TrueMasteryEntry } from '../hooks/useTrueMastery.js';
 
 const SORT_LABELS: Record<SortKey, string> = {
   word: 'Word',
@@ -64,7 +64,7 @@ interface BankTableProps {
   today: IsoDate | null;
   query: BankQuery;
   onSort: (key: SortKey) => void;
-  trueMasteryMap: Map<string, { mastery: number; tier: string; adjustment: number }>;
+  trueMasteryMap: Map<string, TrueMasteryEntry>;
 }
 
 function BankTable({
@@ -143,34 +143,33 @@ function BankTable({
                   <MasteryPill mastery={entry.mastery} />
                 </td>
                 <td className="px-3 py-2.5">
-                  {trueMastery && (
+                  {trueMastery && trueMastery.mastery !== null && (
                     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                       <span
                         className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                          trueMastery.tier === 'Mastered'
+                          trueMastery.tier === 'Excellent'
                             ? 'bg-good-soft text-good-ink'
                             : trueMastery.tier === 'Strong'
                             ? 'bg-accent-soft text-accent'
                             : trueMastery.tier === 'Good'
                             ? 'bg-accent-soft text-accent'
-                            : trueMastery.tier === 'Learning'
+                            : trueMastery.tier === 'Developing'
                             ? 'bg-warn-soft text-warn-ink'
                             : trueMastery.tier === 'Weak'
                             ? 'bg-bad-soft text-bad-ink'
                             : 'bg-line/50 text-muted'
                         }`}
                       >
-                        {trueMastery.tier} ({trueMastery.mastery.toFixed(1)})
+                        {trueMastery.tier} ({trueMastery.mastery})
                       </span>
-                      {trueMastery.adjustment !== 0 && (
-                        <span
-                          className={`text-xs font-mono ${
-                            trueMastery.adjustment > 0 ? 'text-good-ink' : 'text-bad-ink'
-                          }`}
-                        >
-                          {trueMastery.adjustment > 0 ? '+' : ''}{trueMastery.adjustment.toFixed(1)}
-                        </span>
-                      )}
+                      <span className="text-xs text-muted" title={trueMastery.coverageLabel}>
+                        {trueMastery.coverageLabel}
+                      </span>
+                    </span>
+                  )}
+                  {trueMastery && trueMastery.mastery === null && (
+                    <span className="text-xs text-muted">
+                      {trueMastery.coverageLabel}
                     </span>
                   )}
                 </td>
@@ -197,7 +196,7 @@ function BankTable({
 interface BankListProps {
   entries: VocabularyEntry[];
   today: IsoDate | null;
-  trueMasteryMap: Map<string, { mastery: number; tier: string; adjustment: number }>;
+  trueMasteryMap: Map<string, TrueMasteryEntry>;
 }
 
 function BankList({ entries, today, trueMasteryMap }: BankListProps) {
@@ -218,34 +217,35 @@ function BankList({ entries, today, trueMasteryMap }: BankListProps) {
                 {entry.meaning !== null && <span className="text-muted"> — {entry.meaning}</span>}
               </span>
               <QualityFlag entry={entry} />
-              {trueMastery && (
+              {trueMastery && trueMastery.mastery !== null && (
                 <span className="shrink-0 flex items-center gap-2">
                   <span
                     className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                      trueMastery.tier === 'Mastered'
+                      trueMastery.tier === 'Excellent'
                         ? 'bg-good-soft text-good-ink'
                         : trueMastery.tier === 'Strong'
                         ? 'bg-accent-soft text-accent'
                         : trueMastery.tier === 'Good'
                         ? 'bg-accent-soft text-accent'
-                        : trueMastery.tier === 'Learning'
+                        : trueMastery.tier === 'Developing'
                         ? 'bg-warn-soft text-warn-ink'
                         : trueMastery.tier === 'Weak'
                         ? 'bg-bad-soft text-bad-ink'
                         : 'bg-line/50 text-muted'
                     }`}
                   >
-                    {trueMastery.tier} ({trueMastery.mastery.toFixed(1)})
+                    {trueMastery.tier} ({trueMastery.mastery})
                   </span>
-                  {trueMastery.adjustment !== 0 && (
-                    <span
-                      className={`text-xs font-mono ${
-                        trueMastery.adjustment > 0 ? 'text-good-ink' : 'text-bad-ink'
-                      }`}
-                    >
-                      {trueMastery.adjustment > 0 ? '+' : ''}{trueMastery.adjustment.toFixed(1)}
-                    </span>
-                  )}
+                  <span className="text-xs text-muted" title={trueMastery.coverageLabel}>
+                    {trueMastery.coverageLabel}
+                  </span>
+                </span>
+              )}
+              {trueMastery && trueMastery.mastery === null && (
+                <span className="shrink-0 flex items-center gap-2">
+                  <span className="text-xs text-muted" title={trueMastery.coverageLabel}>
+                    {trueMastery.coverageLabel}
+                  </span>
                 </span>
               )}
               <span className="shrink-0 text-xs text-muted">
@@ -290,27 +290,8 @@ export function BankPage() {
   const sorted = useMemo(() => sortEntries(filtered, query.sort, query.direction), [filtered, query.sort, query.direction]);
   const page = useMemo(() => paginate(sorted, query.page, settings.bankPageSize), [sorted, query.page, settings.bankPageSize]);
 
-  // Compute true mastery for entries on the current page
-  const trueMasteryMap = useMemo(() => {
-    if (!today) return new Map<string, { mastery: number; tier: string; adjustment: number }>();
-    const map = new Map<string, { mastery: number; tier: string; adjustment: number }>();
-    for (const entry of page.items) {
-      const result = computeSimpleTrueMastery({
-        entry: {
-          mastery: entry.mastery,
-          reviewDate: entry.reviewDate,
-          reviewStatus: entry.reviewStatus,
-        },
-        today: today!,
-      });
-      map.set(entry.id, {
-        mastery: result.mastery,
-        tier: result.tier,
-        adjustment: result.adjustment,
-      });
-    }
-    return map;
-  }, [page.items, today]);
+  // Use the new True Mastery hook
+  const { trueMasteryMap } = useTrueMastery();
 
   /** Applies a change to the filters or sorting. Anything but a page change starts again at page 1. */
   const update = (patch: Partial<BankQuery>, options: { replace?: boolean; collection?: string | null } = {}) => {

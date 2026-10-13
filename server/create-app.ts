@@ -441,6 +441,12 @@ export function createApp({
   // A word's practice mastery per study mode: a count of recorded practice answers. Reads only.
   app.get('/api/vocabulary/:id/practice-mastery', async (c) => c.json(await requireService(c).practiceMastery(entryId(c))));
 
+  // Practice history for True Mastery: detailed answers with correctness, timestamps, mode, grading, session.
+  app.get('/api/practice-history', async (c) => {
+    const since = c.req.query('since') ?? null;
+    return c.json(await requireService(c).practiceHistory(since));
+  });
+
   app.get('/api/trash', async (c) => c.json({ entries: await requireVocabulary(c).listTrashed() }));
 
   app.get('/api/vocabulary/:id', async (c) => c.json({ entry: await requireVocabulary(c).get(entryId(c)) }));

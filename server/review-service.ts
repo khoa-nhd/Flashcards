@@ -14,6 +14,7 @@ import {
   type SchedulerReport,
   type SessionSummary,
   type SimulationResponse,
+  type PracticeHistoryRow,
 } from '../shared/api.js';
 import { calendarDateInTimeZone, compareDates, type IsoDate } from '../shared/dates.js';
 import {
@@ -377,6 +378,22 @@ export class ReviewService {
           })
         : [],
     };
+  }
+
+  /**
+   * Practice history for True Mastery: detailed answers with correctness, timestamps, mode, grading, session.
+   * Returns all practice answers for the current user, optionally filtered by date.
+   */
+  async practiceHistory(since: string | null): Promise<PracticeHistoryRow[]> {
+    const { repository } = this.options;
+    if (!repository.capabilities.practiceHistory) return [];
+    const sinceDate = since ?? null;
+    const rows = await repository.practiceHistory(sinceDate);
+    // Convert repository's PracticeHistoryRow (mode: string) to shared/api PracticeHistoryRow (mode: StudyMode)
+    return rows.map((r) => ({
+      ...r,
+      mode: r.mode as PracticeHistoryRow['mode'],
+    }));
   }
 
   /**

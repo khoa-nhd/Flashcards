@@ -9,6 +9,7 @@ import {
   extraExampleSchema,
   importResponseSchema,
   libraryResponseSchema,
+  practiceHistoryResponseSchema,
   practiceMasteryResponseSchema,
   practiceResponseSchema,
   relationSchema,
@@ -29,6 +30,7 @@ import {
   type DayPlanResponse,
   type ImportResponse,
   type LibraryResponse,
+  type PracticeHistoryResponse,
   type PracticeMasteryResponse,
   type PracticeRequest,
   type PracticeResponse,
@@ -150,6 +152,8 @@ export interface PracticeApi {
   submitPractice(request: PracticeRequest): Promise<PracticeResponse>;
   /** One word's practice mastery in every study mode. Read-only. */
   fetchPracticeMastery(id: string): Promise<PracticeMasteryResponse>;
+  /** Practice history for True Mastery: detailed answers with correctness, timestamps, mode, grading, session. */
+  fetchPracticeHistory(since: string | null): Promise<PracticeHistoryResponse>;
 }
 
 export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi;
@@ -432,7 +436,14 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
       call(`/api/vocabulary/${encodeURIComponent(id)}/practice-mastery`, practiceMasteryResponseSchema, {
         method: 'GET',
         timeoutMs: TIMEOUTS.queueMs,
-        timeoutMessage: 'Loading this word’s practice mastery took too long.',
+        timeoutMessage: "Loading this word's practice mastery took too long.",
+      }),
+
+    fetchPracticeHistory: (since) =>
+      call(`/api/practice-history${since ? `?since=${encodeURIComponent(since)}` : ''}`, practiceHistoryResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading practice history took too long.',
       }),
 
     fetchPlan: () =>

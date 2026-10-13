@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isIsoDate, isValidTimeZone } from './dates.js';
 import { LIBRARY_LIMITS, RELATION_KINDS } from './library.js';
 import { DEFAULT_SCHEDULER, SCHEDULERS } from './scheduler/active.js';
-import { STUDY_MODES } from './study-modes.js';
+import { PRACTICE_MASTERY_MAX, STUDY_MODES } from './study-modes.js';
 
 export const isoDateSchema = z.string().refine(isIsoDate, 'Expected a YYYY-MM-DD calendar date');
 
@@ -493,9 +493,9 @@ export const practiceResponseSchema = z.object({
   expected: z.string(),
   /**
    * The word's practice mastery in this mode once this answer is counted, from
-   * 0 to 10. `null` when the answer was not recorded, so nothing changed.
+   * 0 to the ceiling. `null` when the answer was not recorded, so nothing changed.
    */
-  modeMastery: z.number().int().min(0).max(10).nullable().default(null),
+  modeMastery: z.number().int().min(0).max(PRACTICE_MASTERY_MAX).nullable().default(null),
 });
 
 /** A word's practice mastery in every mode. Read-only; it follows from the recorded practice answers. */
@@ -510,10 +510,35 @@ export const practiceMasteryResponseSchema = z.object({
       /** Correct practice answers recorded for the word in this mode. */
       correct: z.number().int().min(0),
       /** `correct`, stopped at `max`. */
-      mastery: z.number().int().min(0).max(10),
+      mastery: z.number().int().min(0).max(PRACTICE_MASTERY_MAX),
     }),
   ),
 });
+
+/** One practice answer with full detail for True Mastery calculation. */
+export const practiceHistoryRowSchema = z.object({
+  vocabularyId: pageIdSchema,
+  mode: studyModeSchema,
+  correct: z.boolean(),
+  grading: z.enum(['self', 'auto']),
+  submitted: z.string().max(500).nullable(),
+  reviewedOn: isoDateSchema,
+  reviewedAt: z.string(),
+  durationMs: z.number().int().nullable(),
+  confidence: z.number().int().min(1).max(3).nullable(),
+  sessionId: z.uuid().nullable(),
+});
+
+/** Detailed practice history for True Mastery estimation. */
+export const practiceHistoryResponseSchema = z.object({
+  /** False where practice history is not available (database predates it). */
+  available: z.boolean(),
+  /** All practice answers, oldest first. */
+  answers: z.array(practiceHistoryRowSchema),
+});
+
+export type PracticeHistoryRow = z.infer<typeof practiceHistoryRowSchema>;
+export type PracticeHistoryResponse = z.infer<typeof practiceHistoryResponseSchema>;
 
 // ---- Daily goal ----
 

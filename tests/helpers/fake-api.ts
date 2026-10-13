@@ -517,6 +517,10 @@ export function createFakeApi({
           })
         : [],
     })),
+    fetchPracticeHistory: vi.fn<AppApi['fetchPracticeHistory']>(async () => ({
+      available: practiceMasteryAvailable,
+      answers: [],
+    })),
     fetchPlan: vi.fn<AppApi['fetchPlan']>(async () => dayPlan({ ...planFigures, goal })),
     saveGoal: vi.fn<AppApi['saveGoal']>(async (next) => {
       goal = next;
