@@ -43,7 +43,14 @@ async function addWord(app: TestApp, user: TestUser, input: Record<string, unkno
 }
 
 /** Answers a card with whatever state it currently holds, and returns the request id. */
-async function answer(app: TestApp, user: TestUser, id: string, action: 'remember' | 'not_remember', durationMs?: number) {
+async function answer(
+  app: TestApp,
+  user: TestUser,
+  id: string,
+  action: 'remember' | 'not_remember',
+  durationMs?: number,
+  confidence?: number,
+) {
   const current = entryResponseSchema.parse(await (await call(app, user, `/api/vocabulary/${id}`)).json()).entry;
   const requestId = newId();
   const response = await call(app, user, '/api/review-action', {
@@ -54,6 +61,7 @@ async function answer(app: TestApp, user: TestUser, id: string, action: 'remembe
       expected: { mastery: current.mastery, nextReview: current.reviewDate },
       requestId,
       ...(durationMs === undefined ? {} : { durationMs }),
+      ...(confidence === undefined ? {} : { confidence }),
     },
   });
   expect(response.status, `${action} on ${current.word}`).toBe(200);
@@ -204,6 +212,36 @@ describe('weak words', () => {
     expect(second?.reasons).toEqual([{ code: 'recent_failures', points: 2, detail: 'Not remembered 1 time in the last 30 days.' }]);
   });
 
+  it('names a word the reviewer felt sure of and still did not remember, from the stored confidence', async () => {
+    const day1 = on('2026-10-08');
+    const overconfident = await addWord(day1, alice, {
+      word: 'overconfident',
+      meaning: 'm',
+      definition: 'd',
+      example: 'e',
+      mastery: 3,
+      reviewDate: '2026-10-08',
+    });
+    await answer(day1, alice, overconfident.id, 'not_remember', undefined, 3);
+
+    // The history function reports the confidence behind the answer that still stands…
+    const [stats] = await db.as(alice.id, (session) =>
+      session.query<Record<string, unknown>>('select last_action, last_confidence from public.card_review_stats($1::date)', [
+        '2026-10-08',
+      ]),
+    );
+    expect(stats).toEqual({ last_action: 'not_remember', last_confidence: 3 });
+
+    // …and the weak words carry the reason only that confidence can produce.
+    const result = await weakOf(on('2026-10-09'), alice);
+    expect(result.words).toHaveLength(1);
+    expect(result.words[0]?.reasons).toContainEqual({
+      code: 'critical_misconception',
+      points: 5,
+      detail: 'Said “very sure” but did not remember it.',
+    });
+  });
+
   it('includes long-overdue and incomplete words even without any review history', async () => {
     const app = on('2026-10-09');
     await addWord(app, alice, { word: 'waiting', meaning: 'm', definition: 'd', example: 'e', mastery: 3, reviewDate: '2026-09-20' });
@@ -292,5 +330,46 @@ describe('a database one migration behind (version 3)', () => {
 
     const queue = queueResponseSchema.parse(await (await call(app, owner, '/api/review-queue')).json());
     expect(queue.capabilities).toEqual({ ...NO_CAPABILITIES, sessions: true, undo: true, fsrs: true });
+  });
+});
+
+describe('a database one migration behind (version 8)', () => {
+  let old: TestDatabase;
+  let owner: TestUser;
+
+  beforeAll(async () => {
+    old = await createTestDatabase({ migrations: 8 });
+  }, 60_000);
+
+  afterAll(async () => {
+    await old.close();
+  });
+
+  beforeEach(async () => {
+    await old.admin('delete from auth.users');
+    owner = await createTestUser(old, 'owner');
+  });
+
+  it('keeps storing confidence but never reports it, so the word is weak for its failures alone', async () => {
+    const app = createSupabaseTestApp(old, [owner], { now: () => new Date('2026-10-08T05:00:00Z') });
+    const word = await addWord(app, owner, {
+      word: 'overconfident',
+      meaning: 'm',
+      definition: 'd',
+      example: 'e',
+      mastery: 3,
+      reviewDate: '2026-10-08',
+    });
+    await answer(app, owner, word.id, 'not_remember', undefined, 3);
+
+    // The answer itself kept its confidence rating…
+    expect(await old.admin('select confidence from public.review_logs')).toEqual([{ confidence: 3 }]);
+    // …but the history at this version cannot report it, so the new reason never fires.
+    const weak = await weakOf(app, owner);
+    expect(weak.historyAvailable).toBe(true);
+    expect(weak.words).toHaveLength(1);
+    expect(weak.words[0]?.reasons).toEqual([
+      { code: 'recent_failures', points: 2, detail: 'Not remembered 1 time in the last 30 days.' },
+    ]);
   });
 });

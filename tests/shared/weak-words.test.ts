@@ -18,6 +18,7 @@ const history = (overrides: Partial<CardHistory> = {}): CardHistory => ({
   lastReviewedOn: '2026-10-08',
   lastFailedOn: null,
   lastAction: 'remember',
+  lastConfidence: null,
   ...overrides,
 });
 
@@ -82,6 +83,37 @@ describe('the reasons', () => {
       word('learning', { mastery: 2, history: history({ lastAction: 'not_remember', recentFailures: 1, failedDays: 1 }) }),
     );
     expect(learning?.reasons.map((reason) => reason.code)).toEqual(['recent_failures']);
+  });
+
+  it('names a word that felt sure and was not remembered anyway', () => {
+    const result = score(
+      word('overconfident', {
+        history: history({ lastAction: 'not_remember', lastConfidence: 3, recentFailures: 1, failedDays: 1 }),
+      }),
+    );
+    expect(result?.reasons).toContainEqual({
+      code: 'critical_misconception',
+      points: 5,
+      detail: 'Said “very sure” but did not remember it.',
+    });
+    expect(result?.score).toBe(7);
+    // The belief is the heavier matter, so it is named first.
+    expect(result?.reasons[0]?.code).toBe('critical_misconception');
+  });
+
+  it('says nothing about confidence that was lower, not given, or met no failure', () => {
+    for (const lastConfidence of [null, 1, 2] as const) {
+      const unsure = score(
+        word(`unsure-${lastConfidence ?? 'none'}`, {
+          history: history({ lastAction: 'not_remember', lastConfidence, recentFailures: 1, failedDays: 1 }),
+        }),
+      );
+      expect(unsure?.reasons.map((reason) => reason.code)).toEqual(['recent_failures']);
+    }
+    // Feeling sure while remembering is not this reason, on its own or with anything else.
+    expect(score(word('sure', { history: history({ lastConfidence: 3 }) }))).toBeNull();
+    const confident = score(word('confident', { history: history({ lastConfidence: 3, recentFailures: 1, failedDays: 1 }) }));
+    expect(confident?.reasons.map((reason) => reason.code)).toEqual(['recent_failures']);
   });
 
   it('names a word that has been due for a long time, more so the longer it waits', () => {

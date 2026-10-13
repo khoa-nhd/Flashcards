@@ -22,6 +22,8 @@ export interface CardHistory {
   lastReviewedOn: IsoDate | null;
   lastFailedOn: IsoDate | null;
   lastAction: 'remember' | 'not_remember' | null;
+  /** How sure the reviewer said they were before that answer; `null` when not given or the store keeps none. */
+  lastConfidence: 1 | 2 | 3 | null;
 }
 
 export interface WeakWordInput {
@@ -43,6 +45,7 @@ export type WeakReasonCode =
   | 'recent_failures'
   | 'low_recent_accuracy'
   | 'slipped_after_progress'
+  | 'critical_misconception'
   | 'long_overdue'
   | 'incomplete';
 
@@ -86,6 +89,8 @@ export interface WeakWordWeights {
   /** When a word at `progressMastery` or above was forgotten at its latest review. */
   slippedAfterProgress: number;
   progressMastery: number;
+  /** When the latest answer was "not remember" at high confidence: the word felt known, and was not. */
+  perCriticalMisconception: number;
   /** When due for `longOverdueDays` or more, plus `perExtraOverdueWeek` per further week up to `overdueWeeksCap`. */
   longOverdue: number;
   longOverdueDays: number;
@@ -107,6 +112,7 @@ export const DEFAULT_WEAK_WORD_WEIGHTS: WeakWordWeights = {
   lowAccuracyBelow: 0.6,
   slippedAfterProgress: 3,
   progressMastery: 6,
+  perCriticalMisconception: 5,
   longOverdue: 2,
   longOverdueDays: 7,
   perExtraOverdueWeek: 1,
@@ -123,6 +129,7 @@ const ACTIONS: Record<WeakReasonCode, string> = {
   recent_failures: 'Review it again soon.',
   low_recent_accuracy: 'Review it now and check that the definition is clear.',
   slipped_after_progress: 'Review it again: it was known and has slipped.',
+  critical_misconception: 'Review it now and relearn what was misunderstood.',
   long_overdue: 'Review it: it has been waiting a long time.',
   incomplete: 'Fill in what is missing so the card can be reviewed properly.',
 };
@@ -175,6 +182,12 @@ export function scoreWeakWord(
         weights.slippedAfterProgress,
         `At mastery ${input.mastery}, but not remembered at the latest review.`,
       );
+    }
+
+    // Being sure and still failing is not an ordinary slip: the word is believed
+    // to be known, so what needs fixing is the belief itself.
+    if (history.lastAction === 'not_remember' && history.lastConfidence === 3) {
+      add('critical_misconception', weights.perCriticalMisconception, 'Said “very sure” but did not remember it.');
     }
   }
 

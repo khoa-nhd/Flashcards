@@ -191,6 +191,9 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
           lastReviewedOn: row.last_reviewed_on,
           lastFailedOn: row.last_failed_on,
           lastAction: row.last_action === 'remember' || row.last_action === 'not_remember' ? row.last_action : null,
+          // Anything but a rating the app recognises reads as "not said", like a store that predates them.
+          lastConfidence:
+            row.last_confidence === 1 || row.last_confidence === 2 || row.last_confidence === 3 ? row.last_confidence : null,
         },
       ]),
     );

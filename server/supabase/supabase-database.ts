@@ -152,7 +152,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 8;
+export const LATEST_SCHEMA_VERSION = 9;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -278,9 +278,19 @@ export const cardStatRowSchema = z.object({
   last_reviewed_on: dateSchema,
   last_failed_on: dateSchema,
   last_action: z.string().nullable(),
+  /** From schema version 9; absent where the store is behind. */
+  last_confidence: z.number().int().nullable().optional(),
 });
 
 export type CardStatRow = z.infer<typeof cardStatRowSchema>;
+
+/** The card-stat columns a database at this version has. */
+export const cardStatColumns = (schemaVersion: number): string =>
+  [
+    'vocabulary_id, reviews, failures, recent_reviews, recent_failures',
+    'failed_days, last_reviewed_on, last_failed_on, last_action',
+    ...(schemaVersion >= 9 ? ['last_confidence'] : []),
+  ].join(', ');
 
 export const undoResultSchema = z.object({
   outcome: z.enum(['undone', 'already_undone', 'not_latest', 'conflict', 'not_found']),
@@ -730,7 +740,10 @@ export function createSupabaseDatabase(
     },
 
     async cardReviewStats(since) {
-      const { data, error, status } = await client.rpc('card_review_stats', { p_since: since });
+      // The column list keeps an older database from being asked for a column it does not have.
+      const { data, error, status } = await client
+        .rpc('card_review_stats', { p_since: since })
+        .select(cardStatColumns(schemaVersion));
       if (error) throw toDatabaseError(error, status);
       const rows = z.array(cardStatRowSchema).safeParse(data ?? []);
       if (!rows.success) throw new DatabaseError('unavailable', 'The database returned statistics in an unexpected shape.');

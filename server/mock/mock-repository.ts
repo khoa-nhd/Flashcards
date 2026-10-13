@@ -328,6 +328,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         lastReviewedOn: null,
         lastFailedOn: null,
         lastAction: null,
+        lastConfidence: null,
         days: new Set<IsoDate>(),
       };
       const failed = log.action === 'not_remember';
@@ -342,6 +343,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       entry.lastReviewedOn = log.reviewedOn;
       if (failed) entry.lastFailedOn = log.reviewedOn;
       entry.lastAction = log.action;
+      entry.lastConfidence = log.confidence;
       stats.set(log.wordId, entry);
     }
     return new Map(
