@@ -9,6 +9,7 @@ import {
   type StudyMode,
 } from '../../shared/study-modes.js';
 import { ListenPrompt } from './ListenPrompt.js';
+import { SpeakButton } from './SpeakButton.js';
 import { Spinner } from './Spinner.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT } from './ui.js';
 
@@ -71,7 +72,7 @@ function MeaningPrompt({ word }: { word: PracticeWord }) {
   );
 }
 
-function Recognition({ word, choices, result, given, checking, onAnswer }: PracticeCardProps) {
+function Recognition({ word, choices, result, given, checking, onAnswer, speechLang = 'en-US' }: PracticeCardProps) {
   const options = choices ?? [];
   const answered = result !== null;
   const chosen = given?.kind === 'choice' ? given.selectedId : null;
@@ -88,6 +89,9 @@ function Recognition({ word, choices, result, given, checking, onAnswer }: Pract
       <div className={PROMPT}>
         <Label>Word</Label>
         <p className="mt-2 font-serif text-3xl font-semibold">{word.word}</p>
+        <div className="mt-2 flex justify-center">
+          <SpeakButton word={word.word} lang={speechLang} />
+        </div>
       </div>
       <div role="group" aria-label="Choose the meaning" className="flex flex-col gap-2">
         {options.map((option, index) => {
@@ -124,7 +128,7 @@ function Recognition({ word, choices, result, given, checking, onAnswer }: Pract
   );
 }
 
-function Recall({ word, result, checking, onAnswer }: PracticeCardProps) {
+function Recall({ word, result, checking, onAnswer, speechLang = 'en-US' }: PracticeCardProps) {
   const [shown, setShown] = useState(false);
   const answered = result !== null;
   useKeys((key) => {
@@ -151,6 +155,9 @@ function Recall({ word, result, checking, onAnswer }: PracticeCardProps) {
           <div className={PROMPT}>
             <Label>Word</Label>
             <p className="mt-2 font-serif text-3xl font-semibold">{word.word}</p>
+            <div className="mt-2 flex justify-center">
+              <SpeakButton word={word.word} lang={speechLang} />
+            </div>
           </div>
           {!answered && (
             <div role="group" aria-label="Did you recall it?" className="grid grid-cols-2 gap-3">

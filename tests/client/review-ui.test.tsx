@@ -17,8 +17,12 @@ beforeEach(() => {
   window.history.replaceState(null, '', '/review');
 });
 
-const renderAt = (api: ReturnType<typeof createFakeApi>['api']) =>
-  render(<App api={api} settings={createSettingsStore(null)} />);
+const renderAt = (api: ReturnType<typeof createFakeApi>['api']) => {
+  // The app asks for confidence by default; these tests exercise the plain flow.
+  const settings = createSettingsStore(null);
+  settings.update({ askConfidence: false });
+  return render(<App api={api} settings={settings} />);
+};
 
 async function renderApp(cards: ReviewCard[] = [card(1), card(2), card(3)], meta: Partial<QueueResponse> = {}) {
   const { api, saves } = createFakeApi({ cards, queue: meta });

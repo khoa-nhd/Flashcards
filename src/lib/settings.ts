@@ -37,7 +37,9 @@ export const DEFAULT_SETTINGS: Settings = {
   bankPageSize: 50,
   dashboardDays: 30,
   reduceMotion: false,
-  askConfidence: false,
+  // Said by default: naming how sure you were is part of learning, and the answer
+  // feeds the weak-word reasons and the FSRS guess rule. It can be switched off here.
+  askConfidence: true,
   answerKeys: 'none',
   reviewExercises: true,
   speechLang: DEFAULT_SPEECH_LANGUAGE,

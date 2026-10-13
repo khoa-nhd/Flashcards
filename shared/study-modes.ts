@@ -33,13 +33,6 @@ export const STUDY_MODE_SUMMARY: Record<StudyMode, string> = {
   writing: 'Write a sentence using this word.',
 };
 
-/**
- * Modes that depend on something outside the app. Listening has the browser
- * read the word aloud; how that sounds, and whether it works at all, depends
- * on the device, so the mode is offered as an experiment and says so.
- */
-export const EXPERIMENTAL_MODES: readonly StudyMode[] = ['listening'];
-
 /** How many choices a recognition question offers. */
 export const RECOGNITION_OPTIONS = 4;
 

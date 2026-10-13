@@ -123,7 +123,7 @@ differs, this list is what is true.
 - **Cloze uses the word's own example.** There is no editing of the blank, and
   further examples (Phase 6) are for reference only.
 - **Listening uses the browser's speech synthesis.** There is no pronunciation
-  audio and no external service. It is marked experimental.
+  audio and no external service.
 - **Excel import reads `.xlsx`, first sheet only.** Not `.xls`.
 - **The daily goal is a yardstick.** There is no planner that orders or limits
   cards by it. The queue is always the full due queue, narrowed only on
@@ -132,6 +132,27 @@ differs, this list is what is true.
   words have no trend over time.
 - **No rating-button choice in settings, no "suspended" state, no tags or
   pronunciation fields.**
+
+### Batch 1 of the 2026-10-13 roadmap (2026-10-13)
+
+Four small owner-chosen improvements. No database, AI or dependency changes.
+
+- **Listening is a normal way to practise now.** The "Experimental" tag is gone
+  from the Practice page and the README. Replaying, reading slowly and showing
+  the word after a miss were already built and tested; the review card's
+  listening front gained the slow reading too.
+- **A speaker on every card that shows a word**: the review card front, the
+  recognition and recall questions, the writing prompt, and the word panel. It
+  is the same browser speech synthesis listening uses, in the accent chosen in
+  practice settings, and is not shown where the browser has no speech.
+- **"Practise these" on Weak Words was already built and tested** — it opens
+  Practice with the weak words as the pool. Nothing needed adding.
+- **Settings nudges about backups.** Under the download buttons it says when a
+  file was last downloaded from this browser, and asks for a fresh copy once
+  that is over a week old. The record lives in this browser only.
+- **Confidence is asked by default now** (owner decision, metacognition): after
+  turning a card, the app asks how sure you were before recording the answer.
+  It can still be switched off in Settings, and the tests cover both paths.
 
 ## 1. Audit: where the app stands
 

@@ -12,6 +12,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ReviewActionResponse, ReviewCard } from '../../shared/api.js';
 import { App } from '../../src/App.js';
+import { SPEECH_RATES } from '../../src/lib/speech.js';
 import { createSettingsStore, type Settings } from '../../src/lib/settings.js';
 import { createFakeApi, type FakeApiOptions } from '../helpers/fake-api.js';
 import { card } from '../helpers/fixtures.js';
@@ -27,7 +28,8 @@ async function open(path: string, { settings = {}, ...options }: Options = {}) {
   window.history.replaceState(null, '', path);
   const fake = createFakeApi({ ...options });
   const store = createSettingsStore(null);
-  store.update(settings);
+  // The app asks for confidence by default; these tests exercise the plain flow unless a test asks for it.
+  store.update({ askConfidence: false, ...settings });
   const view = render(<App api={fake.api} settings={store} />);
   await screen.findAllByRole('navigation');
   return { ...fake, store, user: userEvent.setup(), ...view };
@@ -132,9 +134,13 @@ describe('the cloze front', () => {
 describe('the listening front', () => {
   /** jsdom has no speech synthesis, so the browser's side is stood in for here. */
   let spoken: string[] = [];
+  /** The speed each reading was started at, so "Play slowly" can be told apart from a normal play. */
+  let speeds: number[] = [];
 
   function stubSpeech() {
     const words: string[] = [];
+    const rates: number[] = [];
+    speeds = rates;
     class Utterance {
       text: string;
       lang = '';
@@ -152,6 +158,7 @@ describe('the listening front', () => {
       // Ends at once: the tests care that the word was said, not how long speech takes.
       speak: (utterance: InstanceType<typeof Utterance>) => {
         words.push(utterance.text);
+        rates.push(utterance.rate);
         utterance.onend?.();
       },
     };
@@ -187,6 +194,14 @@ describe('the listening front', () => {
     expect(isFlipped()).toBe(false);
     press(' ');
     expect(typedLine()).toHaveTextContent('You typed “ephemeral”: Not quite. Spelled: word-1.');
+  });
+
+  it('reads it slowly on request, at the slower speed', async () => {
+    const { user } = await open('/review', { cards: [listeningCard(1)] });
+    await screen.findByTestId('flashcard');
+
+    await user.click(screen.getByRole('button', { name: 'Play slowly' }));
+    expect(speeds.at(-1)).toBe(SPEECH_RATES.slow);
   });
 
   it('is the plain card when the browser cannot read aloud at all', async () => {

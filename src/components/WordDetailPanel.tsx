@@ -1,13 +1,14 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { FIELD_LIMITS, type UpdateEntryInput, type VocabularyEntry } from '../../shared/api.js';
 import { isIsoDate } from '../../shared/dates.js';
-import { useApp, useVocabulary } from '../app-context.js';
+import { useApp, useSettings, useVocabulary } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { MISSING_LABELS, missingFields } from '../lib/bank-query.js';
 import { MasteryPill, StatusBadge, formatDate, relativeDay } from './badges.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { Field, describedBy } from './Field.js';
 import { Icon } from './Icon.js';
+import { SpeakButton } from './SpeakButton.js';
 import { Spinner } from './Spinner.js';
 import { WordExtras } from './WordExtras.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT, TEXTAREA } from './ui.js';
@@ -63,6 +64,7 @@ function validate(draft: Draft, scheduleOpen: boolean): DraftErrors {
  */
 export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const { api, vocabulary, toasts } = useApp();
+  const { speechLang } = useSettings();
   // Subscribing also loads the vocabulary if this panel was opened from a direct link.
   const loaded = useVocabulary();
   const cached = loaded.entries.find((entry) => entry.id === entryId) ?? null;
@@ -249,6 +251,11 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
             <h2 id="word-panel-title" className="font-serif text-2xl font-semibold tracking-tight wrap-anywhere">
               {entry?.word ?? 'Word'}
             </h2>
+            {entry !== null && (
+              <div className="mt-1">
+                <SpeakButton word={entry.word} lang={speechLang} />
+              </div>
+            )}
           </div>
           <button
             ref={closeButton}

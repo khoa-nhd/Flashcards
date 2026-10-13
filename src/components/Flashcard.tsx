@@ -8,7 +8,8 @@ import { SWIPE } from '../config.js';
 import { useReducedMotion } from '../hooks/useReducedMotion.js';
 import { useSwipe } from '../hooks/useSwipe.js';
 import type { SwipeDirection } from '../lib/gesture.js';
-import { DEFAULT_SPEECH_LANGUAGE, speak, stopSpeaking } from '../lib/speech.js';
+import { DEFAULT_SPEECH_LANGUAGE, SPEECH_RATES, speak, stopSpeaking } from '../lib/speech.js';
+import { SpeakButton } from './SpeakButton.js';
 import { BUTTON_SECONDARY, HELP, INPUT } from './ui.js';
 
 export interface FlashcardProps {
@@ -153,6 +154,7 @@ export function Flashcard({
                   <h2 className="font-serif text-4xl font-semibold tracking-tight wrap-anywhere sm:text-5xl">
                     {card.word}
                   </h2>
+                  <SpeakButton word={card.word} lang={speechLang} />
                   {card.front.length > 0 && (
                     <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-base text-muted">
                       {card.front.map((field, index) => (
@@ -188,14 +190,24 @@ export function Flashcard({
                       {exercise.after}
                     </p>
                   ) : (
-                    <button
-                      type="button"
-                      className={BUTTON_SECONDARY}
-                      disabled={flipped}
-                      onClick={() => void speak(card.word, { lang: speechLang })}
-                    >
-                      Play / Play again
-                    </button>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      <button
+                        type="button"
+                        className={BUTTON_SECONDARY}
+                        disabled={flipped}
+                        onClick={() => void speak(card.word, { lang: speechLang })}
+                      >
+                        Play / Play again
+                      </button>
+                      <button
+                        type="button"
+                        className={BUTTON_SECONDARY}
+                        disabled={flipped}
+                        onClick={() => void speak(card.word, { lang: speechLang, rate: SPEECH_RATES.slow })}
+                      >
+                        Play slowly
+                      </button>
+                    </div>
                   )}
                   <input
                     type="text"

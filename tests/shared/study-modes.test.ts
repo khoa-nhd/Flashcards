@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  EXPERIMENTAL_MODES,
   RECOGNITION_OPTIONS,
   STUDY_MODES,
   acceptedSpellings,
@@ -375,7 +374,6 @@ describe('judging an answer', () => {
     expect(ineligibility('typing', bare, [bare])).toBe('no_meaning');
     expect(judge('listening', bare, { kind: 'typed', text: 'word9' })).toMatchObject({ correct: true, typed: 'exact' });
     // Whether a browser can speak is not something the shared rules know or ask about.
-    expect(EXPERIMENTAL_MODES).toEqual(['listening']);
   });
 
   it('refuses an answer of the wrong kind for the mode', () => {

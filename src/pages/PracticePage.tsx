@@ -2,7 +2,6 @@ import { useMemo, useRef, useState, type FormEvent } from 'react';
 import { RECENTLY_ADDED_DAYS, TYPED_ANSWER_LIMITS, pageIdSchema, type PracticeResponse, type VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates } from '../../shared/dates.js';
 import {
-  EXPERIMENTAL_MODES,
   INELIGIBLE_TEXT,
   STUDY_MODES,
   STUDY_MODE_LABELS,
@@ -23,6 +22,7 @@ import { FocusTimer } from '../components/FocusTimer.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { Checking, PracticeCard, Verdict } from '../components/PracticeCards.js';
+import { SpeakButton } from '../components/SpeakButton.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE, TEXTAREA } from '../components/ui.js';
 import { useRemote } from '../hooks/useRemote.js';
@@ -280,6 +280,7 @@ export function PracticePage() {
                 given={run.given}
                 checking={run.checking}
                 onAnswer={onAnswer}
+                speechLang={speechLang}
               />
             ) : (
               <PracticeCard
@@ -350,11 +351,6 @@ export function PracticePage() {
                     />
                     <span>
                       <span className="font-medium">{STUDY_MODE_LABELS[key]}</span>
-                      {EXPERIMENTAL_MODES.includes(key) && (
-                        <span className="ml-2 rounded-full border border-line px-2 py-0.5 text-xs text-muted">
-                          Experimental
-                        </span>
-                      )}
                       <span className={`block ${HELP}`}>{STUDY_MODE_SUMMARY[key]}</span>
                     </span>
                   </label>
@@ -490,6 +486,8 @@ interface WritingCardProps {
   /** The answer is on its way to the server. */
   checking: boolean;
   onAnswer: (answer: PracticeAnswer) => void;
+  /** The accent the word is read in, the same setting listening uses. */
+  speechLang?: string;
 }
 
 /**
@@ -497,7 +495,7 @@ interface WritingCardProps {
  * Only this page builds it; the shared practice card stays a single line,
  * and the verdict below still comes from the server.
  */
-function WritingCard({ word, result, given, checking, onAnswer }: WritingCardProps) {
+function WritingCard({ word, result, given, checking, onAnswer, speechLang = 'en-US' }: WritingCardProps) {
   const [text, setText] = useState('');
   const answered = result !== null;
   const shown = given?.kind === 'typed' ? given.text : text;
@@ -515,6 +513,9 @@ function WritingCard({ word, result, given, checking, onAnswer }: WritingCardPro
       <div className={PROMPT}>
         <p className={PROMPT_LABEL}>Word</p>
         <p className="mt-2 font-serif text-3xl font-semibold">{word.word}</p>
+        <div className="mt-2 flex justify-center">
+          <SpeakButton word={word.word} lang={speechLang} />
+        </div>
         {meaning !== null && <p className="mt-3 text-sm text-muted">{meaning}</p>}
         {word.example !== null && <p className="mt-3 text-sm text-muted">{word.example}</p>}
       </div>

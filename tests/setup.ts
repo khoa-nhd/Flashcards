@@ -5,4 +5,9 @@ import { afterEach } from 'vitest';
 if (typeof document !== 'undefined') {
   const { cleanup } = await import('@testing-library/react');
   afterEach(() => cleanup());
+
+  // Review tests exercise the plain two-button flow. The app asks for confidence by
+  // default now; these tests seed it off in this browser store, and study-experience
+  // pins the default-on path itself.
+  window.localStorage.setItem('vocabulary-review:settings:v1', JSON.stringify({ askConfidence: false }));
 }

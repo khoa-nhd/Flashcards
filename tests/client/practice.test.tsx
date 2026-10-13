@@ -70,7 +70,7 @@ describe('the Practice page', () => {
       'RecallSee the meaning, recall the word, then say whether you had it.',
       'TypingSee the meaning, type the word.',
       'Fill in the blankSee your example sentence with the word left out, type the word.',
-      'ListeningExperimentalHear the word read aloud by your browser, type what you hear.',
+      'ListeningHear the word read aloud by your browser, type what you hear.',
       'Writing ChallengeWrite a sentence using this word.',
     ]);
     expect(main().getByRole('radio', { name: /Recognition/ })).toBeChecked();

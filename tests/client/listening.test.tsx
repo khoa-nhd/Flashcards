@@ -86,11 +86,11 @@ afterEach(() => {
 });
 
 describe('where the browser can read text aloud', () => {
-  it('offers Listening as an experiment, and says where the voice comes from', async () => {
+  it('offers Listening like any other way to practise, and says where the voice comes from', async () => {
     installSpeech();
     await open();
     const option = (await main().findByRole('radio', { name: /Listening/ })).closest('label')!;
-    expect(option).toHaveTextContent('Experimental');
+    expect(option).not.toHaveTextContent('Experimental');
     expect(option).toHaveTextContent('Hear the word read aloud by your browser, type what you hear.');
     expect(main().getByText(/read by this browser’s own voice/)).toHaveTextContent('Nothing is sent anywhere');
     // Listening asks only for the word, so even an entry with nothing else can be used.

@@ -9,6 +9,7 @@ import { SkippedNotice } from '../components/SkippedNotice.js';
 import { BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { ApiError } from '../lib/api-client.js';
 import { sortEntries } from '../lib/bank-query.js';
+import { backupAgeDays, backupSummary, lastBackupAt, recordBackup } from '../lib/backup.js';
 import { downloadFile, toCsv, toJson } from '../lib/export.js';
 import { ROUTES } from '../lib/router.js';
 import type { Settings, SortKey } from '../lib/settings.js';
@@ -39,6 +40,12 @@ export function SettingsPage() {
   const exportName = `vocabulary-${meta?.today ?? 'export'}`;
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  // Kept in this browser only: it decides the reminder line under the buttons.
+  const [backupDays, setBackupDays] = useState<number | null>(() => backupAgeDays(lastBackupAt()));
+  const downloaded = () => {
+    recordBackup();
+    setBackupDays(0);
+  };
 
   const exportEverything = async () => {
     setExporting(true);
@@ -46,6 +53,7 @@ export function SettingsPage() {
     try {
       const everything = await api.fetchExport();
       downloadFile(`vocabulary-everything-${meta?.today ?? 'export'}.json`, 'application/json', JSON.stringify(everything, null, 2));
+      downloaded();
     } catch (cause) {
       setExportError(cause instanceof ApiError ? cause.message : 'The export could not be prepared.');
     } finally {
@@ -238,7 +246,10 @@ export function SettingsPage() {
               type="button"
               className={BUTTON_SECONDARY}
               disabled={entries.length === 0}
-              onClick={() => downloadFile(`${exportName}.csv`, 'text/csv;charset=utf-8', toCsv(sortEntries(entries, 'word', 'asc')))}
+              onClick={() => {
+                downloadFile(`${exportName}.csv`, 'text/csv;charset=utf-8', toCsv(sortEntries(entries, 'word', 'asc')));
+                downloaded();
+              }}
             >
               Export CSV
             </button>
@@ -246,13 +257,15 @@ export function SettingsPage() {
               type="button"
               className={BUTTON_SECONDARY}
               disabled={entries.length === 0}
-              onClick={() =>
-                downloadFile(`${exportName}.json`, 'application/json', toJson(sortEntries(entries, 'word', 'asc'), new Date().toISOString()))
-              }
+              onClick={() => {
+                downloadFile(`${exportName}.json`, 'application/json', toJson(sortEntries(entries, 'word', 'asc'), new Date().toISOString()));
+                downloaded();
+              }}
             >
               Export JSON
             </button>
           </div>
+          <p className={HELP}>{backupSummary(backupDays)}</p>
           {state.status !== 'ready' && <p className={HELP}>Your vocabulary is still loading.</p>}
 
           <div className="flex flex-col gap-2 border-t border-line pt-3">

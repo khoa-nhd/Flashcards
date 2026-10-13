@@ -35,7 +35,8 @@ async function open(path: string, { settings = {}, ...options }: Options = {}) {
   window.history.replaceState(null, '', path);
   const fake = createFakeApi({ entries: [entry(1), entry(2)], ...options });
   const store = createSettingsStore(null);
-  store.update(settings);
+  // The app asks for confidence by default; these tests exercise the plain flow unless a test asks for it.
+  store.update({ askConfidence: false, ...settings });
   const view = render(<App api={fake.api} settings={store} />);
   await screen.findAllByRole('navigation');
   return { ...fake, store, user: userEvent.setup(), ...view };
@@ -255,10 +256,18 @@ describe('rating confidence before the answer', () => {
   const prompt = () => screen.queryByRole('group', { name: 'How sure are you that you know it?' });
   const asking = { queue: RATED, settings: { askConfidence: true } };
 
-  it('is not asked unless switched on', async () => {
+  it('is not asked when switched off', async () => {
     await open('/review', { cards: [card(1)], queue: RATED });
     await screen.findByTestId('flashcard');
     expect(prompt()).not.toBeInTheDocument();
+  });
+
+  it('is asked by default, with nothing seeded but the app defaults', async () => {
+    window.history.replaceState(null, '', '/review');
+    const fake = createFakeApi({ entries: [entry(1), entry(2)], cards: [card(1)], queue: RATED });
+    render(<App api={fake.api} settings={createSettingsStore(null)} />);
+    await screen.findByTestId('flashcard');
+    expect(prompt()).toBeInTheDocument();
   });
 
   it('is not asked where the rating would not be stored', async () => {

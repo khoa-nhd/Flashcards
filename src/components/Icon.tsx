@@ -22,6 +22,7 @@ const PATHS = {
   download: 'M12 4v11m0 0-4-4m4 4 4-4M5 20h14',
   table: 'M4 6h16v12H4V6Zm0 4h16M4 14h16M10 6v12',
   list: 'M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01',
+  speaker: 'M4 9h3.5L13 5v14l-5.5-4H4V9Zm12.5 3a4 4 0 0 0-2-3.46v6.92A4 4 0 0 0 16.5 12Z',
 } as const;
 
 export type IconName = keyof typeof PATHS;
