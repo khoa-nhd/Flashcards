@@ -24,6 +24,7 @@ Reference documents:
 - [docs/metrics.md](docs/metrics.md) — the exact definition of every number shown.
 - [docs/supabase-migration.md](docs/supabase-migration.md) — the record of the move from Notion to Supabase.
 - [docs/import-and-export.md](docs/import-and-export.md) — importing a list, the export format, and backup and recovery.
+- [docs/ai-features.md](docs/ai-features.md) — what the AI features send, how to configure one, and how they fail safe.
 - [docs/upgrade-plan.md](docs/upgrade-plan.md) — the plan for turning this into a fuller learning system, and how far it has got.
 - [docs/offline-mode-design.md](docs/offline-mode-design.md) — what offline review would take. Not built.
 
@@ -61,6 +62,20 @@ under the card do the same as the keys and swipes. These shortcuts are active
 on the Review tab only, and never while you are typing in a field. Settings →
 Review preferences can add a second pair of answer keys (`J`/`K`, `F`/`J` or
 `1`/`2`) and can ask how sure you are before each answer is shown.
+
+**Challenge cards.** From mastery 4 the front of a card you already partly
+know can become a short exercise instead of the plain card: fill in the blank
+in your own example sentence (mastery 4–5), or hear the word and type what you
+hear (mastery 6–9). This changes only how the question is *presented*: the
+answer is still the same two buttons, still graded and saved exactly as
+before, and nothing you type in the exercise is recorded. A card without what
+an exercise needs shows as usual. Settings → **Challenge cards with an
+exercise** turns it off.
+
+**Focus mode.** A Focus toggle on the Review and Practice pages hides the
+sidebar and navigation and shows a countdown you choose (15 or 20 minutes,
+with pause). It is only a quiet screen and a timer: when it runs out it says
+so, and nothing is ended or rescheduled.
 
 | Answer | Mastery | Review date |
 | --- | --- | --- |
@@ -107,6 +122,15 @@ why.
 | Typing | The meaning | Type the word | The server |
 | Fill in the blank | Your example with the word left out | Type the word | The server |
 | Listening (experimental) | Nothing: the word is read aloud | Type what you hear | The server |
+| Writing | The word, its meaning and example | Write a sentence using the word | The server |
+
+**The Writing Challenge** judges only whether your sentence uses the word
+itself (as a whole word, with the same slash alternatives and quote/dash
+forgiveness as typing) — never whether the sentence is *good*. Where a model
+is configured, its short coaching note and one model sentence are saved beside
+the answer as extra guidance; they never change the verdict or anything about
+the word, and without a model the mode works the same with no note. See
+[docs/ai-features.md](docs/ai-features.md).
 
 Practice is recorded and reported one mode at a time, and **never changes
 mastery, a review date or FSRS**. Listening uses the browser's own speech
@@ -169,6 +193,8 @@ in the Supabase dashboard (SQL Editor → paste the file → Run):
 | `20261015090000_practice_modes.sql` | 6 | Recording practice in the other study modes. |
 | `20261016090000_collections_and_relations.sql` | 7 | Collections, further examples, related words. |
 | `20261017090000_scheduler_switch.sql` | 8 | Choosing which schedule is in charge (FSRS or mastery). Changes nothing until an account chooses FSRS. |
+| `20261018090000_weak_confidence.sql` | 9 | The "critical misconception" reason in Weak words (the confidence of a card's latest answer). |
+| `20261019090000_writing_mode.sql` | 10 | The Writing Challenge: long written answers and the coach's note beside them. |
 
 Each file only adds things; none changes or removes existing data. The app
 checks the database version and keeps working on an older one, with the newer
@@ -205,6 +231,13 @@ Copy `.env.example` to `.env` and fill in:
 | `DATA_MODE` | Optional. `supabase` or `mock`. Empty means Supabase in a deployment or when `SUPABASE_URL` is set, sample data otherwise. |
 | `REVIEW_TIMEZONE` | Optional. The zone a new account starts with if its browser reports none. |
 | `REVIEW_WRITES_ENABLED` | Optional. Exactly `false` freezes all changes; anything else leaves saving on. |
+| `AI_API_KEY` | Optional. Enables Smart Reader and the Writing Challenge coach. Without it both features are off and say so. The key stays on the server. |
+| `AI_BASE_URL` | Optional. An OpenAI-compatible endpoint. Defaults to Google Gemini's. |
+| `AI_MODEL` | Optional. Model name. Defaults to `gemini-2.5-flash`. |
+| `AI_TIMEOUT_MS` | Optional. Milliseconds to wait, 1000–28000. Defaults to `20000`. |
+
+Details of what the AI features send, their limits and their failure
+behaviour: [docs/ai-features.md](docs/ai-features.md).
 
 Both Supabase values are public by design: the server hands them to the
 browser. **Never use the secret / `service_role` key.** The server refuses to
@@ -246,6 +279,14 @@ email if your project asks for it.
 - **Quick add** reduces the form to word and meaning; Enter saves and returns
   the cursor to the word field. In the full form, Ctrl + Enter saves from any
   field.
+- **Smart Reader** (the second tab here) takes a pasted reading: select a word
+  in it and get a draft — the sentence the word sits in (always taken from
+  your own text by the server, never written by the model), a suggested
+  definition and a Vietnamese meaning. Nothing is saved by itself: "Use in the
+  form" hands the draft to the ordinary form to check, edit and save. Only
+  that one sentence leaves the browser. Without a configured model, or on any
+  failure, the tab says so and the form works as it always has.
+  [docs/ai-features.md](docs/ai-features.md).
 - Success is shown only after the server has confirmed the new word.
 
 ## Vocabulary bank
@@ -258,7 +299,12 @@ email if your project asks for it.
 - **Views**: table or compact list. Results are paged.
 - Filters, sorting and the open word are kept in the address, so a view can be
   bookmarked and the Back button works.
-- **Details**: click a word to see everything stored about it.
+- **Details**: click a word to see everything stored about it, including a
+  **connections graph** — a hand-drawn bubble diagram of that word's
+  synonyms, antonyms, word-family links, collocations, other relations and
+  the words it shares a collection with. It is built only from your own
+  links and collections (no AI, no external service); clicking a bubble
+  opens that word.
 - **Edit**: only the fields you change are written. Mastery and the review date
   are in a separate "Review schedule" section and are left alone unless you
   open it.
@@ -333,7 +379,9 @@ links work.
 
 1. In Vercel choose **Add New → Project** and import the GitHub repository.
    Keep the detected **Vite** preset and the default build settings.
-2. Add the environment variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+2. Add the environment variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. Add
+   `AI_API_KEY` too if you want Smart Reader and the Writing Challenge coach;
+   without it those features are off and the app says so.
 3. Deploy, then open `/api/health` and confirm `"ok": true` and
    `"mode": "supabase"`.
 4. In Supabase, set **Authentication → URL Configuration → Site URL** to the
@@ -369,6 +417,9 @@ shared/                     Pure logic used by browser and server
   weak-words.ts               Which words need attention, and why
   scheduler/                  FSRS, the rating map, which schedule is in charge, the comparison, the what-if
   study-modes.ts              The practice modes: what each needs and how an answer is judged
+  review-exercises.ts         The exercise fronts for review cards (cloze, listening), and when one applies
+  sentences.ts                The sentence a picked word sits in
+  ai.ts                       What the AI features send and accept
   session-planner.ts          The daily goal against what was saved
   library.ts                  Collections, further examples, links between words
   import.ts, export-format.ts Reading a list to import; the account export
@@ -383,6 +434,7 @@ server/
   vocabulary-service.ts       List, create, edit, import, trash, restore
   library-service.ts          Collections, examples and links
   export-service.ts           The account export
+  ai/                         One place a language model is asked anything: adapter, limits, the reader, the coach
   supabase/                   Database gateway, repository, account sessions, backup import
   mock/                       Sample words and illustrative rules
   index.ts                    Node entry (self-hosting)
@@ -434,6 +486,7 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | `POST /api/vocabulary/:id/examples`, `PATCH`, `DELETE /api/examples/:id` | Further example sentences for a word. |
 | `POST /api/relations`, `DELETE /api/relations/:id` | `{ fromId, toId, kind }`: link two of your words. Stored once per pair and kind. |
 | `GET /api/settings`, `PUT /api/settings` | The account's time zone and FSRS target retention; the database version found. |
+| `POST /api/ai/extract` | `{ text, word }` → the sentence your word sits in (always taken from your own text), plus a suggested definition and meaning. Smart Reader only; refused (`409`) where no model is configured, rate-limited per account (`429`), and frozen with the rest of saving. Every failure leaves the form working by hand. See [docs/ai-features.md](ai-features.md). |
 
 ## Development
 

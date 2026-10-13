@@ -3,6 +3,55 @@
 Written 2026-10-10 against commit `fa2ae97`. Each phase ends with working
 code, passing tests and an update to this file.
 
+## Status (2026-10-13): the second batch — six features and three repairs
+
+Built and verified 2026-10-13. Nothing here changes a review rule: the two
+answer buttons, the mastery schedule, the rating map and the practice
+invariants are exactly as section 3 describes them.
+
+| Item | State |
+| --- | --- |
+| **D1** Grade ≠ presentation | **Done.** The rule that presenting a question never changes how it is graded is written into `config/review.config.ts` and [review-logic.md](review-logic.md) §14. |
+| **D2** The saving switch everywhere | **Done.** The daily goal, the scheduler choice and account settings now refuse with `read_only` when `REVIEW_WRITES_ENABLED=false`, like every other write. `tests/server/read-only-gate.test.ts`. |
+| **D3** Export/import round-trip | **Done** at content level: a full export (trash, collections, goal included) re-imports every word's content, and nothing else crosses — pinned by a new round-trip test. Restoring *progress* from a file stays deliberately out: [import-and-export.md](import-and-export.md) documents that as the database backup's job. |
+| **4.6 Focus mode** | **Built.** A Focus toggle on Review and Practice hides the sidebar and navigation and shows a 15/20-minute countdown with pause; running out only says so. `src/components/FocusTimer.tsx`, `tests/client/focus-mode.test.tsx`. |
+| **4.5 part 1 — critical misconception** | **Built.** Database version 9: the weak-word history now carries the confidence of a card's latest standing answer, and "Not remember said with very sure" scores 5 as its own reason. Absent (never guessed at) below version 9. |
+| **4.3 — challenge cards** | **Built** as presentation only: from mastery 4 the review card's *front* becomes a cloze (4–5) or listening (6–9) exercise; the answer is still the same two buttons, the exercise text is never recorded, and cards without what an exercise needs fall back to the plain card. Setting: "Challenge cards with an exercise", on by default. `shared/review-exercises.ts`. |
+| **4.5 part 2 — a guess checks sooner** | **Built.** Remember + low confidence is rated FSRS *Hard* instead of the mapped Good; Not remember stays Again whatever the confidence, and `shared/scheduler/rating-map.ts` is untouched. The mastery schedule never sees confidence. |
+| **AI infrastructure** | **Built.** One OpenAI-compatible adapter (`server/ai/adapter.ts`) with named failures, an env-switchable provider (`AI_API_KEY`, `AI_BASE_URL`, `AI_MODEL`, `AI_TIMEOUT_MS`), per-account rate limits, keys server-side only, and a privacy note in Settings. [ai-features.md](ai-features.md). |
+| **4.1 — Smart Reader** | **Built.** Add vocabulary → Smart Reader: pick a word in a pasted reading, get the sentence (always taken from your own text by this server), a suggested definition and meaning. Nothing saves itself; every failure lands back on entering by hand. |
+| **4.4 — Writing Challenge** | **Built.** Database version 10 (essays up to 6000 characters, `writing` as a history mode, `ai_feedback`/`model_answer`). A new practice mode judged purely on whether the sentence *uses the word*; where a model is configured, its coaching note and one model sentence are stored beside the already-judged answer and never change it. Without a model the mode works the same with no note. |
+| **4.2 phase 1 — connections graph** | **Built.** A hand-rolled SVG bubble diagram under a word's relations in the detail panel: relations and collection-mates, deduplicated, clickable, no new dependency, no AI. Cap of 30 nodes with an accessible full summary. |
+
+### How it was checked (2026-10-13)
+
+| Check | Result |
+| --- | --- |
+| `npm test` | 1606 tests in 68 files passing, 3 pre-existing skips |
+| `npm run typecheck`, `npm run lint` | clean |
+| `npm run build` | succeeds (the same pre-existing warning: the main script is over 500 kB) |
+| Invariant suites | `fsrs-shadow`, `undo-api`, `practice-api`, `frontend-secrets` pass **unmodified** |
+
+**Still not checked: anything against the live Supabase project.** Database
+versions 9 and 10 now join 2 to 8 as SQL files until the owner runs
+`npm run supabase:verify`; the app keeps the features that need them switched
+off until the version is found, and says so. The AI features were exercised
+against a stand-in model endpoint; nobody has yet run them against a real
+provider key (free-tier quotas are documented as needing re-verification when
+first configured).
+
+Decisions worth remembering, all in the code comments where they bite:
+
+- The exercise in a review card and the coach's note are **guidance only**;
+  neither is ever a verdict, a score, or a schedule input.
+- The Writing Challenge judges *usage*, not quality — quality belongs to the
+  coach note, which can be absent without the mode being broken.
+- The connections graph is drawn from your own links and collections only,
+  deliberately: AI-suggested links (phase 2) were deferred over hallucination
+  risk.
+- CEFR labels and Vis.js were dropped from the plan; both were guesses at a
+  number or a dependency nobody had stated.
+
 ## Status (2026-10-11)
 
 | Phase | State |

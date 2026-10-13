@@ -47,9 +47,11 @@ order.
 | 6 | `20261015090000_practice_modes.sql` | The `practice` kind of history row; `answer_correct`, `submitted_answer`, `grading` on `review_logs`; `record_practice`, `practice_daily_stats`. | Recording practice in the other study modes. |
 | 7 | `20261016090000_collections_and_relations.sql` | `collections`, `collection_items`, `vocabulary_examples`, `vocabulary_relations`; `set_preferred_example`. | Collections, further examples, related words. |
 | 8 | `20261017090000_scheduler_switch.sql` | `scheduler` on `user_settings`; `record_review` now stamps the history with the schedule in charge. | Choosing which schedule decides what is due. |
+| 9 | `20261018090000_weak_confidence.sql` | `last_confidence` on the `card_review_stats` function (the confidence of the card's latest standing answer). | "Critical misconception" in Weak words. |
+| 10 | `20261019090000_writing_mode.sql` | `submitted_answer` up to 6000 characters; `writing` as a history mode; `ai_feedback`, `model_answer` on `review_logs`; `record_practice` reads the two new keys. | The Writing Challenge and its coach note. |
 
 There are no database credentials in the project, so the owner runs each file
-in the Supabase SQL Editor. Nothing in versions 2 to 8 alters or removes
+in the Supabase SQL Editor. Nothing in versions 2 to 10 alters or removes
 existing rows.
 
 If the hosting project is linked to Supabase through Vercel's integration,
@@ -141,7 +143,12 @@ answer. It is recorded only and decides nothing. From version 6: `kind` may
 also be `practice`, and `answer_correct`, `submitted_answer` (what was typed,
 up to 500 characters) and `grading` (`self` or `auto`) describe a practice
 answer. `review_mode` is held to `flashcard`, `recognition`, `recall`,
-`typing`, `cloze` or `listening`.
+`typing`, `cloze` or `listening`. From version 10: `submitted_answer` may be
+up to 6000 characters (a written answer is a sentence, not a word),
+`review_mode` may also be `writing`, and `ai_feedback` and `model_answer`
+keep what a language model said about a written answer — always beside an
+answer that was already judged and saved by the app, and always null where no
+model is configured.
 
 - **A practice row cannot record a change of schedule.** A check requires
   `mastery_before = mastery_after`, the same review date before and after, no
@@ -256,7 +263,7 @@ empty `search_path`, executable by `authenticated` only.
 | `review_daily_stats(from, to)` | (Version 4.) One row per day and study mode from the answers that still stand: reviews, remembered, repeat reviews, time. |
 | `card_review_stats(since)` | (Version 4.) Per word: reviews, failures, recent reviews and failures, days failed on, last reviewed, last failed, last answer. |
 | `confidence_stats(since)` | (Version 5.) Per confidence level: standing answers that carried it, and how many were remembered. |
-| `record_practice(event)` | (Version 6.) Appends one practice answer, once per request id, for a live word of the caller's. Returns `recorded`, `already_recorded` or `not_found`. Never updates anything. |
+| `record_practice(event)` | (Version 6.) Appends one practice answer, once per request id, for a live word of the caller's. Returns `recorded`, `already_recorded` or `not_found`. Never updates anything. From version 10 the event may also carry `ai_feedback` and `model_answer`, read only when present. |
 | `practice_daily_stats(from, to)` | (Version 6.) Practice answers per day and study mode: answers, correct, time. |
 
 The new mastery and review date are computed by the API server with the same

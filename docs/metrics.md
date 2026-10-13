@@ -187,6 +187,7 @@ reason that is shown beside the word.
 | Recent misses | 2 each, up to 6 | "Not remember" answers in the last 30 days. |
 | Low recent accuracy | 3 | At least 3 reviews in the last 30 days and fewer than 60% remembered. |
 | Slipped after progress | 3 | Mastery 6 or higher, and the latest answer was "Not remember". |
+| Critical misconception | 5 | The latest answer was "Not remember", said with high confidence — “very sure” and wrong, which is worth more than an ordinary miss. Needs a store from version 9. |
 | Long overdue | 2, plus 1 per further week, up to 5 | Review date 7 or more days in the past (not for mastered words). |
 | Incomplete | 1 per field, up to 2 | Meaning, definition or example is empty. |
 
@@ -198,7 +199,9 @@ reason that is shown beside the word.
   be listed for being long overdue or incomplete; nothing is guessed about how
   well it is known.
 - Where the database keeps no review history yet (below version 4), only the
-  last two reasons can apply, and the page says so.
+  last two reasons can apply, and the page says so. Below version 9 the
+  confidence of each answer is not in the history the server reads, so
+  "critical misconception" never fires there — the other reasons are unchanged.
 - At most 100 words are sent; the page says when there are more.
 
 **Reviewing the weakest words** (`/review?focus=weak`) shows the words on this
@@ -266,8 +269,9 @@ Insights shows, for the last 30 days:
 
 ## Practice modes
 
-The Practice page offers four further ways to work on a word. They are
-**practice**: each answer is recorded (database version 6), and none of them
+The Practice page offers five further ways to work on a word. They are
+**practice**: each answer is recorded (database version 6; the Writing
+Challenge's longer answers and coach note are version 10), and none of them
 changes a word's mastery, its review date or its FSRS state. Only the
 flashcard review on the Review tab moves the schedule. This is deliberate: the
 review rules belong to the owner, and whether another mode should count as a
@@ -279,6 +283,7 @@ review is their decision to make, not the app's.
 | Recall | The meaning | The word, from memory | You: after the word is shown, you say whether you had it. |
 | Typing | The meaning | The word, typed | The server, by the rules below. |
 | Fill in the blank | Your example sentence with the word taken out | The word, typed | The server, by the same rules. |
+| Writing | The word, its meaning and example | A sentence of your own using the word | The server: correct when the sentence uses the word (rules below). |
 
 "The meaning" is the Vietnamese meaning where there is one, otherwise the
 definition. Every prompt, choice and sentence is your own text; nothing is
@@ -294,6 +299,7 @@ mode, and the page says how many and why.
   is entered, as a whole word. An inflected form in the sentence ("alleviated"
   for "alleviate") is not blanked, because the entry would be the wrong answer
   to it. Edit the example to use the word as entered to make it eligible.
+- Writing: any word at all. The sentence may be up to 6000 characters.
 
 **Recognition choices.** The three wrong choices are drawn at random from your
 other words and the four are shuffled, so neither which are offered nor where
@@ -311,6 +317,16 @@ the right one sits follows a pattern. All four are the same kind of text
 An entry written as alternatives separated by a slash ("colour / color")
 accepts each of them, because that is your own list. Nothing else is treated
 as an alternative.
+
+**Written answers** (the Writing Challenge). Correct means your sentence
+*uses the word itself*, as a whole word — each slash alternative counts, and
+quotes and dashes are forgiven exactly as in typing, but a misspelling or the
+word inside a longer word ("candids") never passes. Empty is never correct.
+Whether the sentence is any *good* is not judged: the app marks it, and where
+a language model is configured its coaching note and one model sentence are
+stored beside the answer (database version 10) as guidance — they never change
+the verdict, move a schedule, or appear for any other mode. Without a model
+the mode works the same and simply has no note.
 
 **Figures** (Insights, "Practice by mode, last 30 days"):
 
