@@ -33,8 +33,10 @@ import { ROUTES, buildHref, openWord, useLocation } from '../lib/router.js';
 import { SPEECH_LANGUAGES, speechAvailable, type SpeechLanguage } from '../lib/speech.js';
 
 const SOURCES = ['due', 'weak', 'recent', 'all'] as const;
-/** One of the built-in sets, or one collection. */
-type Source = (typeof SOURCES)[number] | `collection:${string}`;
+/** One of the built-in sets, one collection, or the words missed in an exam. */
+type Source = (typeof SOURCES)[number] | `collection:${string}` | `missed:${string}`;
+/** Same ceiling the exam report uses, so a drill address fits in a browser. */
+const MAX_MISSED = 30;
 
 const SOURCE_LABELS: Record<(typeof SOURCES)[number], string> = {
   due: 'Words due for review',
@@ -54,6 +56,15 @@ function sourceFromQuery(query: URLSearchParams): Source {
   const collection = query.get('collection');
   if (collection !== null && pageIdSchema.safeParse(collection).success) return `collection:${collection}`;
   const source = query.get('source');
+  if (source !== null && source.startsWith('missed:')) {
+    // The exam report's drill: a list of word ids, kept only if at least one is a real id.
+    const ids = source
+      .slice('missed:'.length)
+      .split(',')
+      .filter((id) => pageIdSchema.safeParse(id).success)
+      .slice(0, MAX_MISSED);
+    if (ids.length > 0) return `missed:${ids.join(',')}`;
+  }
   return isSource(source) ? source : 'due';
 }
 
@@ -126,6 +137,10 @@ export function PracticePage() {
       if (source.startsWith('collection:')) {
         const wanted = source.slice('collection:'.length);
         return collections.find((collection) => collection.id === wanted)?.wordIds.includes(entry.id) ?? false;
+      }
+      if (source.startsWith('missed:')) {
+        const wanted = new Set(source.slice('missed:'.length).split(','));
+        return wanted.has(entry.id);
       }
       return true;
     });
@@ -399,6 +414,7 @@ export function PracticePage() {
                     value={source}
                     onChange={(event) => setSource(event.target.value as Source)}
                   >
+                    {source.startsWith('missed:') && <option value={source}>Words you missed in an exam</option>}
                     {SOURCES.map((key) => (
                       <option key={key} value={key} disabled={key === 'weak' && weak.status === 'failed'}>
                         {SOURCE_LABELS[key]}
@@ -464,6 +480,21 @@ export function PracticePage() {
                   Start
                 </button>
                 <span className={HELP}>Questions come in a random order.</span>
+              </div>
+            </section>
+
+            <section className={`${CARD} flex flex-col gap-3 p-5`} aria-labelledby="practice-exam-title">
+              <h2 id="practice-exam-title" className={SECTION_TITLE}>
+                Exam practice
+              </h2>
+              <p className="text-sm text-muted">
+                Put several sections together — a way of asking, a length, and optionally a time limit each — and sit the
+                whole thing as one test with a report at the end.
+              </p>
+              <div>
+                <Link to={ROUTES.exam} className={BUTTON_SECONDARY}>
+                  Build an exam
+                </Link>
               </div>
             </section>
           </div>

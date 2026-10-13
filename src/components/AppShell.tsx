@@ -74,10 +74,15 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
     main.current?.scrollTo?.({ top: 0 });
   }, [active]);
 
-  // Importing is part of adding vocabulary, and is reached from there.
+  // Importing is part of adding vocabulary, and is reached from there; the
+  // exam sits off the nav on purpose and is reached from Practice.
   const section: RouteKey | null = active === 'import' ? 'add' : active;
   const title =
-    active === 'import' ? 'Import' : ([...PRIMARY, ...SECONDARY].find((item) => item.route === active)?.label ?? 'Vocabulary');
+    active === 'import'
+      ? 'Import'
+      : active === 'exam'
+        ? 'Exam'
+        : ([...PRIMARY, ...SECONDARY].find((item) => item.route === active)?.label ?? 'Vocabulary');
 
   const sideLink = (item: NavItem) => {
     const current = item.route === section;

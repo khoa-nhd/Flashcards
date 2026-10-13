@@ -8,7 +8,8 @@ in on.
 | --- | --- |
 | **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
 | **Review** | Flashcards: flip, then answer Remember or Not remember. Narrow the queue (weakest, overdue, due today, recently added, one collection). Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. |
-| **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, and listening. Recorded for your statistics; never changes mastery or a review date. |
+| **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, and listening. Recorded for your statistics; never changes mastery or a review date. Holds the link to **Exam** practice. |
+| **Exam** | A test you build yourself: sections of questions (a way of asking, a length, an optional time limit each), one optional clock for the whole exam, free movement between the sections, and a report at the end that scores each section and names the missed words with a drill into Practice. Reached from Practice; recorded like practice, never changes mastery or a review date. |
 | **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
 | **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples and related words. |
 | **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
@@ -138,6 +139,19 @@ mastery, a review date or FSRS**. Listening uses the browser's own speech
 synthesis: no audio is stored or sent, and how it sounds, or whether a voice
 exists for the accent chosen, depends on the device. Where a browser cannot
 read text aloud the mode says so and stays off.
+
+**Exam practice** (`/exam`, reached from the Practice page) puts several
+sections together in one sitting: each section is one of the server-graded
+ways of asking, with its own number of questions and an optional minute
+limit, and there is one optional clock for the whole exam. Sections can be
+left and returned to at any moment — a section's own clock pauses while it
+is not open, the whole exam's clock never stops — and a section whose time
+runs out locks with its unanswered count. At the end a report scores each
+section, names every missed word with what was said and what was wanted,
+and links into Practice on exactly those words (`source=missed:…`, the
+first 30 at most). Every answer travels the same recorded path as practice;
+nothing here changes mastery or a review date either, and no preset exams
+are bundled — the sections are always the reader's own.
 
 ### Scheduling and FSRS
 

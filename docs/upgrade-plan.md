@@ -172,6 +172,22 @@ Three more owner-chosen improvements. No database, AI or dependency changes.
   block runs out the timer offers a 5-minute break on its own countdown, and
   the next block starts only on request. Nothing auto-starts or auto-ends.
 
+### Batch 3 of the 2026-10-13 roadmap (2026-10-13)
+
+**A3 — the exam mode.** A new `/exam` page (off the sidebar on purpose,
+reached from a card on the Practice page) where the reviewer builds their own
+test: sections, each a server-graded mode (recognition, typing, fill in the
+blank, listening) with its own number of questions and an optional per-section
+minute limit, plus one optional clock for the whole exam. Sections can be left
+and returned to while a section's own clock pauses and the overall clock never
+stops; a section whose time runs out locks with its unanswered count; the end
+report scores every section, lists the missed words with what was said and
+what was wanted, and drills them through a new `source=missed:<ids>` address
+in Practice (validated ids, capped at 30, same as the report). Every answer
+travels the existing recorded `POST /api/practice` path — mastery, review
+dates and FSRS untouched, as everywhere else. No preset exams are bundled;
+the AI-suggested exam plan stays deferred (owner decision, Đợt 5).
+
 ## 1. Audit: where the app stands
 
 ### Baseline (run on 2026-10-10)

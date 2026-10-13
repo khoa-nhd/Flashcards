@@ -17,6 +17,7 @@ import { BankPage } from './pages/BankPage.js';
 import { CalendarPage } from './pages/CalendarPage.js';
 import { CollectionsPage } from './pages/CollectionsPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
+import { ExamPage } from './pages/ExamPage.js';
 import { ImportPage } from './pages/ImportPage.js';
 import { InsightsPage } from './pages/InsightsPage.js';
 import { PracticePage } from './pages/PracticePage.js';
@@ -32,6 +33,7 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   bank: { title: 'Vocabulary bank', render: () => <BankPage /> },
   calendar: { title: 'Calendar', render: () => <CalendarPage /> },
   practice: { title: 'Practice', render: () => <PracticePage /> },
+  exam: { title: 'Exam', render: () => <ExamPage /> },
   collections: { title: 'Collections', render: () => <CollectionsPage /> },
   weak: { title: 'Weak words', render: () => <WeakWordsPage /> },
   insights: { title: 'Insights', render: () => <InsightsPage /> },

@@ -12,6 +12,7 @@ export const ROUTES = {
   bank: '/bank',
   calendar: '/calendar',
   practice: '/practice',
+  exam: '/exam',
   collections: '/collections',
   weak: '/weak',
   insights: '/insights',
