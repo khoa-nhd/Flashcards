@@ -50,9 +50,10 @@ order.
 | 9 | `20261018090000_weak_confidence.sql` | `last_confidence` on the `card_review_stats` function (the confidence of the card's latest standing answer). | "Critical misconception" in Weak words. |
 | 10 | `20261019090000_writing_mode.sql` | `submitted_answer` up to 6000 characters; `writing` as a history mode; `ai_feedback`, `model_answer` on `review_logs`; `record_practice` reads the two new keys. | The Writing Challenge and its coach note. |
 | 11 | `20261020090000_root_derived.sql` | `root_id` on `vocabulary` (a word points at the root it was formed from; self-reference refused, one index) and `update_vocabulary` manages it with the root checked to be the caller's own word. | The word-family panel: the family timeline and the AI family builder. |
+| 12 | `20261021090000_speaking_mode.sql` | `review_logs_mode_check` accepts `speaking` alongside the other practice modes. | Speaking practice: the transcript the browser wrote down is recorded under its own name. |
 
 There are no database credentials in the project, so the owner runs each file
-in the Supabase SQL Editor. Nothing in versions 2 to 11 alters or removes
+in the Supabase SQL Editor. Nothing in versions 2 to 12 alters or removes
 existing rows.
 
 If the hosting project is linked to Supabase through Vercel's integration,

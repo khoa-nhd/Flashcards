@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { type PracticeResponse, type VocabularyEntry } from '../../shared/api.js';
+import { type AiExamPlanResponse } from '../../shared/ai.js';
 import {
+  EXAM_MODES,
   STUDY_MODE_LABELS,
   buildChoices,
   ineligibility,
@@ -21,9 +23,6 @@ import { count } from '../lib/format.js';
 import { newRequestId } from '../lib/request-id.js';
 import { ROUTES, buildHref, openWord } from '../lib/router.js';
 import { speechAvailable } from '../lib/speech.js';
-
-/** The kinds of question an exam section can be built from: each one the server judges. */
-const EXAM_MODES: readonly StudyMode[] = ['recognition', 'typing', 'cloze', 'listening'];
 
 const COUNT_MIN = 1;
 const COUNT_MAX = 50;
@@ -120,6 +119,11 @@ export function ExamPage() {
   const [specs, setSpecs] = useState<Spec[]>([{ id: 's1', mode: 'recognition', count: 10, minutes: null }]);
   const [overallMinutes, setOverallMinutes] = useState<number | null>(null);
   const [run, setRun] = useState<ExamRun | null>(null);
+  // The AI's suggested structure: a draft with its reason, accepted by pressing
+  // "Use this plan" — it never replaces the sections on its own.
+  const [plan, setPlan] = useState<AiExamPlanResponse | null>(null);
+  const [planning, setPlanning] = useState(false);
+  const [planError, setPlanError] = useState<string | null>(null);
 
   const pool = useMemo(() => state.entries.map(toPracticeWord), [state.entries]);
 
@@ -136,6 +140,42 @@ export function ExamPage() {
   const silentListening = specs.some((spec) => spec.mode === 'listening') && !canSpeak;
   const startable =
     specs.length > 0 && specs.every((spec) => spec.count >= 1 && (usableFor.get(spec.mode) ?? 0) > 0) && !silentListening;
+
+  /** The words a plan is drawn over: the 30 weakest in this pool, weakest first. */
+  const planWordIds = () =>
+    [...state.entries]
+      .sort((a, b) => (a.mastery ?? 0) - (b.mastery ?? 0) || a.word.localeCompare(b.word))
+      .slice(0, 30)
+      .map((entry) => entry.id);
+
+  const suggestPlan = async () => {
+    const words = planWordIds();
+    if (words.length === 0) return;
+    setPlanning(true);
+    setPlanError(null);
+    try {
+      setPlan(await api.examPlan({ words }));
+    } catch (cause) {
+      setPlanError(cause instanceof ApiError ? cause.message : 'Could not ask for a plan.');
+    } finally {
+      setPlanning(false);
+    }
+  };
+
+  /** The draft becomes the sections; the reader can still change every field by hand. */
+  const applyPlan = (draft: AiExamPlanResponse) => {
+    setSpecs(
+      draft.sections.map((section) => ({
+        id: newRequestId(),
+        mode: section.mode,
+        count: section.count,
+        minutes: section.minutes,
+      })),
+    );
+    setOverallMinutes(null);
+    setPlan(null);
+    setPlanError(null);
+  };
 
   const start = () => {
     if (!startable) return;
@@ -655,6 +695,53 @@ export function ExamPage() {
                 >
                   Add a section
                 </button>
+              </div>
+
+              <div className="flex flex-col gap-2 border-t border-line pt-4">
+                <h3 className="text-sm font-medium">Not sure where to start? Let the AI suggest a structure.</h3>
+                <div>
+                  <button
+                    type="button"
+                    className={BUTTON_SECONDARY}
+                    disabled={planning || state.entries.length === 0}
+                    onClick={() => void suggestPlan()}
+                  >
+                    {planning ? 'Asking the model…' : 'Suggest a plan (AI)'}
+                  </button>
+                </div>
+                <p className={HELP}>
+                  Drawn over your 30 weakest words. The result is only a draft with its reason: use it, change any field
+                  by hand, then start when the sections read right.
+                </p>
+                {plan !== null && (
+                  <div className="flex flex-col gap-2 rounded-2xl border border-line p-3">
+                    <p className="text-sm font-medium">{plan.reason}</p>
+                    <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
+                      {plan.sections.map((section, index) => (
+                        <li key={`${section.mode}-${index}`} className="flex flex-wrap items-baseline justify-between gap-2">
+                          <span>{STUDY_MODE_LABELS[section.mode]}</span>
+                          <span className="text-muted">
+                            {count(section.count, 'question')}
+                            {section.minutes === null ? ', no clock' : ` · ${count(section.minutes, 'minute')}`}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    <div className="flex flex-wrap gap-2">
+                      <button type="button" className={BUTTON_PRIMARY} onClick={() => applyPlan(plan)}>
+                        Use this plan
+                      </button>
+                      <button type="button" className={BUTTON_SECONDARY} onClick={() => setPlan(null)}>
+                        Discard
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {planError !== null && (
+                  <p role="alert" className="rounded-xl bg-bad-soft px-3 py-2 text-sm text-bad-ink">
+                    {planError}
+                  </p>
+                )}
               </div>
 
               <div className="flex flex-col gap-1.5">

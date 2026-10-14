@@ -9,6 +9,7 @@
 import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { App } from '../../src/App.js';
+import { ApiError } from '../../src/lib/api-client.js';
 import { createFakeApi, entry, type FakeApiOptions } from '../helpers/fake-api.js';
 import { pageId } from '../helpers/fixtures.js';
 
@@ -147,5 +148,41 @@ describe('the drill from the report', () => {
         .some((node) => /2\s+of\s+2\s+words\s+can\s+be\s+used\s+for\s+typing\./.test(node.textContent ?? '')),
     ).toBe(true);
     expect(screen.getByText('Words you missed in an exam')).toBeInTheDocument();
+  });
+});
+
+describe('asking the AI for a structure', () => {
+  it('shows the draft with its reason, and only replaces the sections when asked', async () => {
+    const fake = await open('/exam', { entries: [entry(1), entry(2), entry(3)] });
+    fake.api.examPlan.mockResolvedValueOnce({
+      sections: [
+        { mode: 'typing', count: 6, minutes: 10 },
+        { mode: 'recognition', count: 8, minutes: null },
+      ],
+      reason: 'Produce the words first, then recognise them.',
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Suggest a plan (AI)' }));
+    expect(await screen.findByText('Produce the words first, then recognise them.')).toBeInTheDocument();
+    // The plan is drawn over every word in the pool, weakest first.
+    expect(fake.api.examPlan).toHaveBeenCalledWith({ words: [pageId(1), pageId(2), pageId(3)] });
+    // The default section stands until the draft is accepted.
+    expect(screen.getByLabelText('Section 1: how')).toHaveValue('recognition');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Use this plan' }));
+    expect(screen.getByLabelText('Section 1: how')).toHaveValue('typing');
+    expect(screen.getByLabelText('Section 1: questions')).toHaveValue(6);
+    expect(screen.getByLabelText('Section 1: minutes (optional)')).toHaveValue(10);
+    expect(screen.getByLabelText('Section 2: how')).toHaveValue('recognition');
+    expect(screen.queryByText('Produce the words first, then recognise them.')).not.toBeInTheDocument();
+  });
+
+  it('carries a failure through to the card without touching the sections', async () => {
+    const fake = await open('/exam', { entries: [entry(1), entry(2)] });
+    fake.api.examPlan.mockRejectedValueOnce(new ApiError('not_supported', 'No model is configured here.', 409));
+    fireEvent.click(await screen.findByRole('button', { name: 'Suggest a plan (AI)' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('No model is configured here.');
+    expect(screen.getByLabelText('Section 1: how')).toHaveValue('recognition');
+    expect(screen.getByRole('button', { name: 'Start the exam' })).toBeInTheDocument();
   });
 });

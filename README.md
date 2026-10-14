@@ -8,8 +8,8 @@ in on.
 | --- | --- |
 | **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
 | **Review** | Flashcards: flip, then answer Remember or Not remember. Narrow the queue (weakest, overdue, due today, recently added, one collection). Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. |
-| **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, and listening. Recorded for your statistics; never changes mastery or a review date. Holds the link to **Exam** practice. |
-| **Exam** | A test you build yourself: sections of questions (a way of asking, a length, an optional time limit each), one optional clock for the whole exam, free movement between the sections, and a report at the end that scores each section and names the missed words with a drill into Practice. Reached from Practice; recorded like practice, never changes mastery or a review date. |
+| **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, listening, speaking and writing. Recorded for your statistics; never changes mastery or a review date. Holds the link to **Exam** practice. |
+| **Exam** | A test you build yourself: sections of questions (a way of asking, a length, an optional time limit each), one optional clock for the whole exam, free movement between the sections, and a report at the end that scores each section and names the missed words with a drill into Practice. Where a model is configured, it can suggest a structure over your weakest words — as a draft you accept, change or discard. Reached from Practice; recorded like practice, never changes mastery or a review date. |
 | **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
 | **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples, related words and — from database version 11 — the word family it belongs to, with an AI draft builder and suggested example sentences. |
 | **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
@@ -124,6 +124,7 @@ why.
 | Typing | The meaning | Type the word | The server |
 | Fill in the blank | Your example with the word left out | Type the word | The server |
 | Listening | Nothing: the word is read aloud | Type what you hear | The server |
+| Speaking | The meaning | Say the word aloud; correct what the browser wrote down | The server |
 | Writing | The word, its meaning and example | Write a sentence using the word | The server |
 
 **The Writing Challenge** judges only whether your sentence uses the word
@@ -138,7 +139,10 @@ Practice is recorded and reported one mode at a time, and **never changes
 mastery, a review date or FSRS**. Listening uses the browser's own speech
 synthesis: no audio is stored or sent, and how it sounds, or whether a voice
 exists for the accent chosen, depends on the device. Where a browser cannot
-read text aloud the mode says so and stays off.
+read text aloud the mode says so and stays off. Speaking works the same way
+in reverse: the browser's own speech recognition writes down what it heard,
+the transcript stays yours to correct before it is checked, no audio leaves
+the device, and where a browser cannot listen the mode says so and stays off.
 
 **Exam practice** (`/exam`, reached from the Practice page) puts several
 sections together in one sitting: each section is one of the server-graded
@@ -149,7 +153,12 @@ is not open, the whole exam's clock never stops — and a section whose time
 runs out locks with its unanswered count. At the end a report scores each
 section, names every missed word with what was said and what was wanted,
 and links into Practice on exactly those words (`source=missed:…`, the
-first 30 at most). Every answer travels the same recorded path as practice;
+first 30 at most). Where a model is configured, **Suggest a plan (AI)**
+draws a structure over the 30 weakest words in the pool — which kinds of
+question, how many each, an optional clock per section, one line of reason —
+as a draft: it never replaces the sections until you press *Use this plan*,
+every field stays editable by hand, and a failure only means building the
+sections yourself. Every answer travels the same recorded path as practice;
 nothing here changes mastery or a review date either, and no preset exams
 are bundled — the sections are always the reader's own.
 
@@ -211,6 +220,7 @@ in the Supabase dashboard (SQL Editor → paste the file → Run):
 | `20261018090000_weak_confidence.sql` | 9 | The "critical misconception" reason in Weak words (the confidence of a card's latest answer). |
 | `20261019090000_writing_mode.sql` | 10 | The Writing Challenge: long written answers and the coach's note beside them. |
 | `20261020090000_root_derived.sql` | 11 | The word family of a word: which root it was formed from, the family timeline and the AI family builder. |
+| `20261021090000_speaking_mode.sql` | 12 | Speaking as a practice mode: the transcript the browser wrote down is recorded under its own name. |
 
 Each file only adds things; none changes or removes existing data. The app
 checks the database version and keeps working on an older one, with the newer
@@ -247,7 +257,7 @@ Copy `.env.example` to `.env` and fill in:
 | `DATA_MODE` | Optional. `supabase` or `mock`. Empty means Supabase in a deployment or when `SUPABASE_URL` is set, sample data otherwise. |
 | `REVIEW_TIMEZONE` | Optional. The zone a new account starts with if its browser reports none. |
 | `REVIEW_WRITES_ENABLED` | Optional. Exactly `false` freezes all changes; anything else leaves saving on. |
-| `AI_API_KEY` | Optional. Enables Smart Reader, the Writing Challenge coach, the word-family builder and suggested example sentences. Without it all four are off and say so. The key stays on the server. |
+| `AI_API_KEY` | Optional. Enables Smart Reader, the Writing Challenge coach, the word-family builder, suggested example sentences and the exam-plan suggestion. Without it all five are off and say so. The key stays on the server. |
 | `AI_BASE_URL` | Optional. An OpenAI-compatible endpoint. Defaults to Google Gemini's. |
 | `AI_MODEL` | Optional. Model name. Defaults to `gemini-2.5-flash`. |
 | `AI_TIMEOUT_MS` | Optional. Milliseconds to wait, 1000–28000. Defaults to `20000`. |
@@ -397,8 +407,8 @@ links work.
    Keep the detected **Vite** preset and the default build settings.
 2. Add the environment variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. Add
    `AI_API_KEY` too if you want Smart Reader, the Writing Challenge coach,
-   the word-family builder and suggested example sentences; without it those
-   features are off and the app says so.
+   the word-family builder, suggested example sentences and the exam-plan
+   suggestion; without it those features are off and the app says so.
 3. Deploy, then open `/api/health` and confirm `"ok": true` and
    `"mode": "supabase"`.
 4. In Supabase, set **Authentication → URL Configuration → Site URL** to the
@@ -506,6 +516,7 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | `POST /api/ai/extract` | `{ text, word }` → the sentence your word sits in (always taken from your own text), plus a suggested definition and meaning. Smart Reader only; refused (`409`) where no model is configured, rate-limited per account (`429`), and frozen with the rest of saving. Every failure leaves the form working by hand. See [docs/ai-features.md](ai-features.md). |
 | `POST /api/ai/word-family` | `{ word, meaning?, definition? }` → the words formed from one root, each with a short gloss and one marked the root. A draft to review; saving it is ordinary create + `PATCH` with `rootId` (needs database version 11). Same `409`/`429`/frozen behaviour as above. |
 | `POST /api/ai/examples` | `{ word, meaning?, definition?, example?, collocations[] }` → suggested sentences, each naming the collocation it shows or `null`. Drafts only: saving a checked sentence is the ordinary examples path. Same `409`/`429`/frozen behaviour as above. |
+| `POST /api/ai/exam-plan` | `{ words: uuid[] }` (1–30 of your own) → `{ sections: [{ mode, count, minutes }], reason }`, a suggested exam structure over those words, each word judged for eligibility on the server. Draft only: the builder fills its section form on *Use this plan* and nothing starts. Words outside your vocabulary are refused (`400`); same `409`/`429`/frozen behaviour as above. |
 
 ## Development
 
@@ -551,6 +562,10 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 - Listening depends entirely on the browser's speech synthesis. It was checked
   for what the app asks the browser to say, in tests and in one desktop
   browser; nobody has judged what it sounds like across devices.
+- Speaking depends entirely on the browser's own speech recognition. The app
+  only reads the transcript it hands back (and lets you correct it before
+  checking); how well it hears you, and whether it is offered at all, is the
+  browser's and the device's doing, not something this app has measured.
 - Excel import reads `.xlsx` only (not the older `.xls`), and only the first
   sheet.
 - Further examples are for reference: the flashcard and fill in the blank use

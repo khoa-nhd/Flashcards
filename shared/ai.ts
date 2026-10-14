@@ -5,6 +5,7 @@
  * trusted until it matches one of these schemas.
  */
 import { z } from 'zod';
+import { EXAM_MODES } from './study-modes.js';
 
 /** A pasted reading is capped well below the server's body limit; the word is one phrase. */
 export const AI_LIMITS = { passage: 40_000, word: 200, field: 600 } as const;
@@ -91,3 +92,31 @@ export const aiExamplesResponseSchema = z.object({
 });
 
 export type AiExamplesResponse = z.infer<typeof aiExamplesResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// A suggested structure for an exam
+// ---------------------------------------------------------------------------
+
+export const aiExamPlanRequestSchema = z.strictObject({
+  /** The words to plan around, as ids; the builder sends the words it will draw from. */
+  words: z.array(z.uuid()).min(1).max(30),
+});
+
+export type AiExamPlanRequest = z.infer<typeof aiExamPlanRequestSchema>;
+
+export const aiExamPlanSectionSchema = z.object({
+  mode: z.enum(EXAM_MODES),
+  /** How many questions, within the builder's own limits. */
+  count: z.number().int().min(1).max(50),
+  /** Minutes for the section's own clock; null means counted by questions only. */
+  minutes: z.number().int().min(1).max(120).nullable(),
+});
+
+export const aiExamPlanResponseSchema = z.object({
+  /** At most the number of sections the builder itself allows. */
+  sections: z.array(aiExamPlanSectionSchema).min(1).max(6),
+  /** One line on why this shape, shown above the draft so the choice is explained. */
+  reason: z.string().max(300),
+});
+
+export type AiExamPlanResponse = z.infer<typeof aiExamPlanResponseSchema>;

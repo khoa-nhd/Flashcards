@@ -12,8 +12,15 @@
  * mode, with a reason that says what to add.
  */
 
-export const STUDY_MODES = ['recognition', 'recall', 'typing', 'cloze', 'listening', 'writing'] as const;
+export const STUDY_MODES = ['recognition', 'recall', 'typing', 'cloze', 'listening', 'speaking', 'writing'] as const;
 export type StudyMode = (typeof STUDY_MODES)[number];
+
+/**
+ * The modes an exam section may use: the four that ask nothing of the device.
+ * Speaking needs a microphone and a quiet room, which a timed exam cannot
+ * promise, so it stays a practice mode.
+ */
+export const EXAM_MODES = ['recognition', 'typing', 'cloze', 'listening'] as const satisfies readonly StudyMode[];
 
 export const STUDY_MODE_LABELS: Record<StudyMode, string> = {
   recognition: 'Recognition',
@@ -21,6 +28,7 @@ export const STUDY_MODE_LABELS: Record<StudyMode, string> = {
   typing: 'Typing',
   cloze: 'Fill in the blank',
   listening: 'Listening',
+  speaking: 'Speaking',
   writing: 'Writing Challenge',
 };
 
@@ -30,6 +38,7 @@ export const STUDY_MODE_SUMMARY: Record<StudyMode, string> = {
   typing: 'See the meaning, type the word.',
   cloze: 'See your example sentence with the word left out, type the word.',
   listening: 'Hear the word read aloud by your browser, type what you hear.',
+  speaking: 'See the meaning, say the word aloud; your browser writes down what it heard.',
   writing: 'Write a sentence using this word.',
 };
 
@@ -283,6 +292,7 @@ export const ANSWER_KIND: Record<StudyMode, PracticeAnswer['kind']> = {
   typing: 'typed',
   cloze: 'typed',
   listening: 'typed',
+  speaking: 'typed',
   writing: 'typed',
 };
 
@@ -346,7 +356,9 @@ export function judge(mode: StudyMode, word: PracticeWord, answer: PracticeAnswe
     const typed = checkTyped(answer.text, word.word);
     return { correct: typed !== 'incorrect', grading: 'auto', typed, submitted, expected: cloze.answer };
   }
-  // Typing and listening: the word itself, by the same spelling rules. Only the prompt differs.
+  // Typing, listening and speaking: the word itself, by the same spelling rules.
+  // Only the prompt differs — for speaking the text is the transcript of what
+  // the browser heard, which is the answer exactly as a typed one would be.
   const typed = checkTyped(answer.text, word.word);
   return { correct: typed !== 'incorrect', grading: 'auto', typed, submitted, expected: tidy(word.word) };
 }

@@ -520,6 +520,13 @@ export function createFakeApi({
         uses: collocation,
       })),
     })),
+    examPlan: vi.fn<AppApi['examPlan']>(async (request) => ({
+      sections: [
+        { mode: 'recognition', count: Math.min(10, request.words.length), minutes: null },
+        { mode: 'typing', count: Math.min(8, request.words.length), minutes: 10 },
+      ],
+      reason: 'A short mixed exam over the words you asked for.',
+    })),
   } satisfies AppApi;
 
   return { api, saves, store };

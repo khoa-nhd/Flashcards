@@ -33,8 +33,9 @@ import { createTokenBucket } from './ai/rate-limit.js';
 import { AI_RATE, SmartReader, aiErrorToHttp } from './ai/smart-reader.js';
 import { WORD_FAMILY_RATE, WordFamily } from './ai/word-family.js';
 import { EXAMPLES_RATE, Examples } from './ai/examples.js';
+import { EXAM_PLAN_RATE, ExamPlan } from './ai/exam-plan.js';
 import type { AnalyticsService } from './analytics-service.js';
-import { aiExtractRequestSchema, aiWordFamilyRequestSchema, aiExamplesRequestSchema } from '../shared/ai.js';
+import { aiExtractRequestSchema, aiWordFamilyRequestSchema, aiExamplesRequestSchema, aiExamPlanRequestSchema } from '../shared/ai.js';
 import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
 import type { ExportService } from './export-service.js';
@@ -136,6 +137,7 @@ export function createApp({
   const reader = new SmartReader({ adapter: aiAdapter, limiter: createTokenBucket(AI_RATE) });
   const familyBuilder = new WordFamily({ adapter: aiAdapter, limiter: createTokenBucket(WORD_FAMILY_RATE) });
   const exampleSuggester = new Examples({ adapter: aiAdapter, limiter: createTokenBucket(EXAMPLES_RATE) });
+  const examPlanner = new ExamPlan({ adapter: aiAdapter, limiter: createTokenBucket(EXAM_PLAN_RATE) });
 
   const requireService = (c: Context<AppEnv>): ReviewService => {
     const { review } = c.get('scope');
@@ -518,6 +520,39 @@ export function createApp({
     const accountKey = c.get('scope').session?.account.id ?? 'sample';
     try {
       return c.json(await exampleSuggester.suggest(accountKey, request));
+    } catch (error) {
+      if (error instanceof AiError) {
+        const http = aiErrorToHttp(error);
+        throw new HttpError(http.status, http.code, http.message);
+      }
+      throw error;
+    }
+  });
+
+  // ---- A suggested structure for an exam ----
+
+  app.post('/api/ai/exam-plan', async (c) => {
+    // The plan is only ever a draft the reader accepts in the builder, but
+    // drawing it up costs quota, so a frozen account is refused here too.
+    if (!config.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
+    const request = await parseBody(c, aiExamPlanRequestSchema);
+    const accountKey = c.get('scope').session?.account.id ?? 'sample';
+    // The words are resolved behind row-level security: ids the caller does
+    // not own simply are not found, and only this resolved set ever leaves.
+    const { entries } = await requireVocabulary(c).list();
+    const byId = new Map(entries.map((entry) => [entry.id, entry]));
+    const words = request.words.flatMap((id) => byId.get(id) ?? []);
+    if (words.length === 0) {
+      throw new HttpError(400, 'invalid_request', 'None of those words are in your vocabulary.');
+    }
+    try {
+      return c.json(await examPlanner.suggest(accountKey, words));
     } catch (error) {
       if (error instanceof AiError) {
         const http = aiErrorToHttp(error);

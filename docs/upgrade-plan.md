@@ -186,7 +186,7 @@ what was wanted, and drills them through a new `source=missed:<ids>` address
 in Practice (validated ids, capped at 30, same as the report). Every answer
 travels the existing recorded `POST /api/practice` path — mastery, review
 dates and FSRS untouched, as everywhere else. No preset exams are bundled;
-the AI-suggested exam plan stays deferred (owner decision, Đợt 5).
+the AI-suggested exam plan was deferred here and is built in Batch 5 below.
 
 ### Batch 4 of the 2026-10-13 roadmap (2026-10-14)
 
@@ -210,6 +210,47 @@ SmartReader contract end to end: named failures, per-account buckets,
 drafts only, refused while saving is frozen. `docs/word-family-design.md`
 holds the design; applying v9–v11 to live Supabase stays the owner's
 step, and the whole panel stays hidden until the version is found.
+
+### Batch 5 of the 2026-10-13 roadmap (2026-10-14)
+
+**Speaking the word aloud, and an AI exam plan.**
+
+- **Speaking is the seventh practice mode.** You see the meaning and say the
+  word; the browser's own speech recognition (hand-rolled wrapper, no
+  dependency, no audio recorded or sent by this app) writes down what it
+  heard into a transcript you can correct *before* checking — recognition
+  mishears, and the speaker knows what they said. The transcript is judged
+  exactly as typing judges it (the same catch-all in `judge()`), so the
+  server needs no change; it is recorded under its own name
+  `review_mode = 'speaking'` and reported on its own analytics line.
+  Database version 12 (`20261021090000_speaking_mode.sql`) widens
+  `review_logs_mode_check` the same way version 10 widened it for writing —
+  no function changes, no stored value touched. Where a browser has no
+  speech recognition the mode says so and stays off (like listening), and
+  the practice invariants hold exactly as in every other mode.
+- **Speaking is practice-only, not an exam kind.** `EXAM_MODES` is now
+  shared (`shared/study-modes.ts`) and still lists recognition, typing,
+  cloze and listening: a microphone needs a quiet room, and a timed exam is
+  the wrong place to ask for one.
+- **`POST /api/ai/exam-plan`** takes 1–30 of the caller's own word ids
+  (resolved behind row-level security — an id outside the account simply
+  does not resolve) and replies with `{ sections, reason }`: a suggested
+  structure over the 30 weakest words in the pool. Eligibility per mode is
+  computed on the server with the same `ineligibility()` the builder uses,
+  so the model is told only which words can take which kind of question —
+  never history, never another account. Sections naming a mode no word can
+  take are dropped, counts are clamped into the builder's own limits (4
+  sections, 30 questions, counts 1–50, clocks 1–120), and a reply left with
+  nothing usable is an `ai_invalid` failure like any other bad output.
+- **The plan is only ever a draft.** Exam's "Suggest a plan (AI)" button
+  shows the sections with the reason; nothing changes until *Use this plan*
+  fills the section form (every field still editable by hand), *Discard*
+  clears it, and starting the exam stays the reader's own press. Same
+  read-only guard, named failures and a per-account bucket of 5/minute as
+  the other AI routes; a failure only means building the sections yourself.
+  Applying v12 to live Supabase joins v9–v11 as the owner's step — until it
+  runs, a speaking answer is refused by the old check with the answer
+  simply not recorded, exactly as writing behaved before version 10.
 
 ## 1. Audit: where the app stands
 

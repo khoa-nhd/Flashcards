@@ -182,6 +182,27 @@ describe('an answer in each mode', () => {
     expect(analytics.practice.modes).toEqual([{ mode: 'listening', answers: 2, correct: 1, accuracy: null }]);
   });
 
+  it('speaking is judged like typing, and kept under its own name', async () => {
+    const app = on(TODAY);
+    // Speaking asks from the meaning, so the word needs one — unlike listening.
+    const asked = await addWord(app, alice, { word: 'lucid', meaning: 'sáng suốt', mastery: 3, reviewDate: TODAY });
+    // What the browser wrote down is the answer, exactly as if it had been typed.
+    const said = (text: string) => practised(app, alice, { pageId: asked.id, mode: 'speaking', answer: { kind: 'typed', text } });
+
+    expect(await said('Lucid')).toEqual({ outcome: 'recorded', correct: true, typed: 'exact', expected: 'lucid' });
+    expect(await said('loosid')).toMatchObject({ correct: false, typed: 'incorrect', expected: 'lucid' });
+    expect(await rows()).toEqual([
+      { kind: 'practice', review_mode: 'speaking', action: 'remember', answer_correct: true, grading: 'auto', submitted_answer: 'Lucid' },
+      { kind: 'practice', review_mode: 'speaking', action: 'not_remember', answer_correct: false, grading: 'auto', submitted_answer: 'loosid' },
+    ]);
+    // Practice, like every other mode: the word's schedule has not moved.
+    expect(await entryOf(app, alice, asked.id)).toMatchObject({ mastery: 3, reviewDate: TODAY });
+
+    // And it is reported on its own line, never folded into typing.
+    const analytics = analyticsResponseSchema.parse(await (await call(app, alice, '/api/analytics')).json());
+    expect(analytics.practice.modes).toEqual([{ mode: 'speaking', answers: 2, correct: 1, accuracy: null }]);
+  });
+
   it('does not believe the browser about whether a typed answer was right', async () => {
     const app = on(TODAY);
     const { candid } = await library(app);
@@ -401,6 +422,7 @@ describe('what is refused', () => {
     ['the flashcard mode, which is a review', { mode: 'flashcard', answer: { kind: 'self', correct: true } }],
     ['a mode that does not exist', { mode: 'singing', answer: { kind: 'self', correct: true } }],
     ['a self-graded answer in listening', { mode: 'listening', answer: { kind: 'self', correct: true } }],
+    ['a choice in speaking', { mode: 'speaking', answer: { kind: 'choice', selectedId: '00000000-0000-4000-8000-000000000001' } }],
     ['no answer', { mode: 'recall' }],
     ['a mastery to store', { mode: 'recall', answer: { kind: 'self', correct: true }, mastery: 10 }],
     ['a review date to store', { mode: 'recall', answer: { kind: 'self', correct: true }, expected: { mastery: 3, nextReview: null } }],

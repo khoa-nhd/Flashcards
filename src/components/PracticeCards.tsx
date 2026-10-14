@@ -11,6 +11,7 @@ import {
 import { ListenPrompt } from './ListenPrompt.js';
 import { SpeakButton } from './SpeakButton.js';
 import { Spinner } from './Spinner.js';
+import { listenOnce } from '../lib/speech.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT } from './ui.js';
 
 export interface PracticeCardProps {
@@ -195,6 +196,8 @@ function Recall({ word, result, checking, onAnswer, speechLang = 'en-US' }: Prac
 
 function Typed({ mode, word, result, given, checking, onAnswer, speechLang = 'en-US' }: PracticeCardProps) {
   const [text, setText] = useState('');
+  const [listening, setListening] = useState(false);
+  const [listenError, setListenError] = useState<string | null>(null);
   const answered = result !== null;
   const cloze = mode === 'cloze' ? buildCloze(word) : null;
   const submitted = given?.kind === 'typed' ? given.text : text;
@@ -203,6 +206,27 @@ function Typed({ mode, word, result, given, checking, onAnswer, speechLang = 'en
     event.preventDefault();
     if (answered || checking || text.trim() === '') return;
     onAnswer({ kind: 'typed', text });
+  };
+
+  // Speaking: the browser writes down what it heard, and the field is left
+  // editable — recognition mishears sometimes, and the speaker knows what
+  // they said. What is checked is the text, exactly as if it had been typed.
+  const speak = async () => {
+    setListening(true);
+    setListenError(null);
+    try {
+      setText(await listenOnce(speechLang));
+    } catch (cause) {
+      setListenError(
+        cause instanceof Error && cause.message === 'not_allowed'
+          ? 'The browser was not allowed to use the microphone. Allow it for this page, then try again.'
+          : cause instanceof Error && cause.message === 'no_speech'
+            ? 'Nothing was heard. Try again, a little closer to the microphone.'
+            : 'This browser cannot listen for speech.',
+      );
+    } finally {
+      setListening(false);
+    }
   };
 
   return (
@@ -229,6 +253,28 @@ function Typed({ mode, word, result, given, checking, onAnswer, speechLang = 'en
           {answerText(word) !== null && <p className="mt-3 text-sm text-muted">{answerText(word)?.text}</p>}
         </div>
       )}
+      {mode === 'speaking' && !answered && (
+        <div className="flex flex-col items-center gap-2">
+          <button
+            type="button"
+            className={BUTTON_SECONDARY}
+            disabled={checking || listening}
+            onClick={() => void speak()}
+          >
+            {listening ? 'Listening…' : 'Speak the word'}
+          </button>
+          {listening && (
+            <p role="status" className="text-sm text-muted">
+              Listening… say the word now.
+            </p>
+          )}
+          {listenError !== null && (
+            <p role="alert" className="text-sm text-bad-ink">
+              {listenError}
+            </p>
+          )}
+        </div>
+      )}
       <form onSubmit={submit} className="flex flex-col gap-2 sm:flex-row">
         <label className="sr-only" htmlFor="practice-answer">
           Your answer
@@ -245,7 +291,7 @@ function Typed({ mode, word, result, given, checking, onAnswer, speechLang = 'en
           autoCorrect="off"
           spellCheck={false}
           maxLength={500}
-          placeholder="Type the word"
+          placeholder={mode === 'speaking' ? 'What the browser heard — edit it if it misheard' : 'Type the word'}
           onChange={(event) => setText(event.target.value)}
         />
         {!answered && (

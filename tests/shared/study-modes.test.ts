@@ -470,3 +470,32 @@ describe('the writing challenge', () => {
     expect(judged.submitted).toHaveLength(sentence.length);
   });
 });
+
+describe('speaking the word aloud', () => {
+  it('is graded exactly as typing: the transcript is the answer', () => {
+    expect(judge('speaking', word(1), { kind: 'typed', text: ' word1 ' })).toMatchObject({
+      correct: true,
+      grading: 'auto',
+      typed: 'exact',
+      submitted: 'word1',
+      expected: 'word1',
+    });
+    expect(judge('speaking', word(1), { kind: 'typed', text: 'word2' })).toMatchObject({ correct: false, typed: 'incorrect' });
+  });
+
+  it('accepts nothing but a typed transcript, whatever else is sent', () => {
+    expect(judge('speaking', word(1), { kind: 'choice', selectedId: word(1).id })).toBeNull();
+    expect(judge('speaking', word(1), { kind: 'self', correct: true })).toBeNull();
+  });
+
+  it('needs a meaning to be asked from, and no example', () => {
+    expect(ineligibility('speaking', word(1), POOL)).toBeNull();
+    expect(ineligibility('speaking', word(1, { meaning: null, definition: null }), POOL)).toBe('no_meaning');
+  });
+
+  it('is one of the modes a session can be built from', () => {
+    expect(STUDY_MODES).toContain('speaking');
+    const { words } = selectForPractice('speaking', POOL, POOL, 3, seeded(7));
+    expect(words).toHaveLength(3);
+  });
+});

@@ -52,12 +52,15 @@ import {
   aiExtractResponseSchema,
   aiWordFamilyResponseSchema,
   aiExamplesResponseSchema,
+  aiExamPlanResponseSchema,
   type AiExtractRequest,
   type AiExtractResponse,
   type AiWordFamilyRequest,
   type AiWordFamilyResponse,
   type AiExamplesRequest,
   type AiExamplesResponse,
+  type AiExamPlanRequest,
+  type AiExamPlanResponse,
 } from '../../shared/ai.js';
 import { EXPORT_FORMAT, type AccountExport } from '../../shared/export-format.js';
 import type { ImportItem } from '../../shared/import.js';
@@ -182,6 +185,14 @@ export interface AiApi {
    * examples path after it has been read; nothing is stored by asking.
    */
   suggestExamples(request: AiExamplesRequest): Promise<AiExamplesResponse>;
+
+  /**
+   * A suggested structure for an exam: sections, counts, clocks and one line
+   * of reason. A draft for the builder — "Use this plan" fills the section
+   * form, the reader can edit every row, and starting the exam stays their
+   * press. A failure only means the sections are chosen by hand.
+   */
+  examPlan(request: AiExamPlanRequest): Promise<AiExamPlanResponse>;
 }
 
 export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi & AiApi;
@@ -484,6 +495,14 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         body,
         timeoutMs: TIMEOUTS.actionMs,
         timeoutMessage: 'The AI suggestion took too long. Write the examples by hand.',
+      }),
+
+    examPlan: (body) =>
+      call('/api/ai/exam-plan', aiExamPlanResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'The AI suggestion took too long. Build the sections by hand.',
       }),
 
     fetchPlan: () =>

@@ -6,7 +6,7 @@
  */
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { VocabularyEntry } from '../../shared/api.js';
 import { App } from '../../src/App.js';
 import { ApiError } from '../../src/lib/api-client.js';
@@ -62,7 +62,7 @@ describe('the Practice page', () => {
     expect(await main().findByText(/it never changes mastery or review dates/)).toBeInTheDocument();
   });
 
-  it('offers the six modes, each with what it asks for', async () => {
+  it('offers the seven modes, each with what it asks for', async () => {
     await open('/practice');
     await main().findByRole('heading', { name: 'Start a practice session' });
     expect(main().getAllByRole('radio').map((radio) => radio.closest('label')?.textContent)).toEqual([
@@ -71,6 +71,7 @@ describe('the Practice page', () => {
       'TypingSee the meaning, type the word.',
       'Fill in the blankSee your example sentence with the word left out, type the word.',
       'ListeningHear the word read aloud by your browser, type what you hear.',
+      'SpeakingSee the meaning, say the word aloud; your browser writes down what it heard.',
       'Writing ChallengeWrite a sentence using this word.',
     ]);
     expect(main().getByRole('radio', { name: /Recognition/ })).toBeChecked();
@@ -545,5 +546,57 @@ describe('practice in Insights', () => {
     await open('/insights');
     await screen.findByText(/No saved reviews in the last 90 days/);
     expect(within(screen.getByRole('region', { name: 'Review activity' })).queryByText(/practice/i)).not.toBeInTheDocument();
+  });
+});
+
+/** A stand-in for the browser's own recognition: hears one phrase and writes it down. */
+function stubRecognition() {
+  class FakeRecognition {
+    lang = '';
+    interimResults = false;
+    maxAlternatives = 1;
+    onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null = null;
+    onerror: ((event: { error: string }) => void) | null = null;
+    onend: (() => void) | null = null;
+    start() {
+      const heard = promptedWord().word;
+      queueMicrotask(() => this.onresult?.({ results: [[{ transcript: heard }]] }));
+    }
+    stop() {}
+  }
+  window.SpeechRecognition = FakeRecognition;
+}
+
+describe('speaking the word aloud', () => {
+  afterEach(() => {
+    delete window.SpeechRecognition;
+    delete window.webkitSpeechRecognition;
+  });
+
+  it('listens, writes down what it heard, and checks it like anything typed', async () => {
+    stubRecognition();
+    const { user, api } = await open('/practice');
+    await main().findByRole('heading', { name: 'Start a practice session' });
+    await user.click(main().getByRole('radio', { name: /Speaking/ }));
+    // The same accent choice as listening, and the same promise about the recording.
+    expect(main().getByText(/you can correct the text before checking it/)).toBeInTheDocument();
+    await start(user);
+
+    await user.click(await main().findByRole('button', { name: 'Speak the word' }));
+    const answer = await main().findByLabelText('Your answer');
+    await waitFor(() => expect(answer).toHaveValue(promptedWord().word));
+    // What the browser heard stays editable before it is checked: recognition
+    // mishears sometimes, and the speaker knows what they said.
+    const said = promptedWord().word;
+    await user.click(main().getByRole('button', { name: 'Check' }));
+    expect(sent(api)).toMatchObject({ mode: 'speaking', answer: { kind: 'typed', text: said } });
+    expect(await main().findByRole('button', { name: 'Next' })).toBeInTheDocument();
+  });
+
+  it('says plainly when the browser cannot listen, and will not start', async () => {
+    const { user } = await open('/practice');
+    await user.click(main().getByRole('radio', { name: /Speaking/ }));
+    expect(main().getByText(/cannot listen for speech/)).toBeInTheDocument();
+    expect(main().getByRole('button', { name: 'Start' })).toBeDisabled();
   });
 });

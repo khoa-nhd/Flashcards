@@ -30,7 +30,7 @@ import { ApiError } from '../lib/api-client.js';
 import { count } from '../lib/format.js';
 import { newRequestId } from '../lib/request-id.js';
 import { ROUTES, buildHref, openWord, useLocation } from '../lib/router.js';
-import { SPEECH_LANGUAGES, speechAvailable, type SpeechLanguage } from '../lib/speech.js';
+import { SPEECH_LANGUAGES, recognitionAvailable, speechAvailable, type SpeechLanguage } from '../lib/speech.js';
 
 const SOURCES = ['due', 'weak', 'recent', 'all'] as const;
 /** One of the built-in sets, one collection, or the words missed in an exam. */
@@ -111,8 +111,10 @@ export function PracticePage() {
   const focusMode = useFocusMode();
   const state = useVocabulary();
   const { query } = useLocation();
-  // Listening needs the browser to be able to read text aloud. Asked once: it does not change while the page is open.
+  // Listening needs the browser to be able to read text aloud; speaking needs one that can
+  // listen. Both asked once: neither changes while the page is open.
   const [canSpeak] = useState(speechAvailable);
+  const [canHear] = useState(recognitionAvailable);
   const weak = useRemote(api.fetchWeakWords, 'Could not load your weak words.');
 
   const [mode, setMode] = useState<StudyMode>(() => (isMode(query.get('mode')) ? (query.get('mode') as StudyMode) : 'recognition'));
@@ -159,7 +161,7 @@ export function PracticePage() {
     return { ready, reasons: [...reasons] };
   }, [candidates, mode, pool]);
 
-  const silent = mode === 'listening' && !canSpeak;
+  const silent = (mode === 'listening' && !canSpeak) || (mode === 'speaking' && !canHear);
 
   const start = () => {
     if (silent) return;
@@ -399,6 +401,38 @@ export function PracticePage() {
                 ) : (
                   <p role="alert" className="rounded-xl border border-line px-4 py-3 text-sm">
                     This browser cannot read text aloud, so Listening is not available here. The other ways to practise
+                    work as usual.
+                  </p>
+                ))}
+
+              {mode === 'speaking' &&
+                (canHear ? (
+                  <div className="flex flex-col gap-1.5 sm:max-w-xs">
+                    <label htmlFor="practice-accent" className="text-sm font-medium">
+                      Accent
+                    </label>
+                    <select
+                      id="practice-accent"
+                      className={INPUT}
+                      value={speechLang}
+                      aria-describedby="practice-accent-help"
+                      onChange={(event) => preferences.update({ speechLang: event.target.value as SpeechLanguage })}
+                    >
+                      {SPEECH_LANGUAGES.map(([code, label]) => (
+                        <option key={code} value={code}>
+                          {label}
+                        </option>
+                      ))}
+                    </select>
+                    <p id="practice-accent-help" className={HELP}>
+                      Your browser listens through its own speech recognition and writes down what it heard; you can
+                      correct the text before checking it. Nothing is recorded or stored by this app, and how well it
+                      understands you depends on your device.
+                    </p>
+                  </div>
+                ) : (
+                  <p role="alert" className="rounded-xl border border-line px-4 py-3 text-sm">
+                    This browser cannot listen for speech, so Speaking is not available here. The other ways to practise
                     work as usual.
                   </p>
                 ))}
