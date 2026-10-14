@@ -388,12 +388,7 @@ export class ReviewService {
     const { repository } = this.options;
     if (!repository.capabilities.practiceHistory) return [];
     const sinceDate = since ?? null;
-    const rows = await repository.practiceHistory(sinceDate);
-    // Convert repository's PracticeHistoryRow (mode: string) to shared/api PracticeHistoryRow (mode: StudyMode)
-    return rows.map((r) => ({
-      ...r,
-      mode: r.mode as PracticeHistoryRow['mode'],
-    }));
+    return repository.practiceHistory(sinceDate);
   }
 
   /**
