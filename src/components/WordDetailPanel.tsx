@@ -9,6 +9,8 @@ import { ConfirmDialog } from './ConfirmDialog.js';
 import { Field, describedBy } from './Field.js';
 import { Icon } from './Icon.js';
 import { PracticeMastery } from './PracticeMastery.js';
+import { TrueMasteryDetail } from './TrueMasteryDetail.js';
+import type { PracticeAnswer } from '../../shared/true-mastery.js';
 import { Spinner } from './Spinner.js';
 import { WordExtras } from './WordExtras.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT, TEXTAREA } from './ui.js';
@@ -93,6 +95,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [practiceHistory, setPracticeHistory] = useState<PracticeAnswer[]>([]);
+
   const closeButton = useRef<HTMLButtonElement>(null);
   const editing = draft !== null;
 
@@ -117,6 +121,30 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
       current = false;
     };
   }, [api, entryId, vocabulary]);
+
+  // Fetch practice history for True Mastery detail
+  useEffect(() => {
+    if (!entry || !meta?.today) return;
+    let current = true;
+    api
+      .fetchPracticeHistory(null)
+      .then((response) => {
+        if (!current) return;
+        if (response.available) {
+          // Filter to only this word's history
+          const wordHistory = response.answers.filter((a) => a.vocabularyId === entryId);
+          setPracticeHistory(wordHistory);
+        } else {
+          setPracticeHistory([]);
+        }
+      })
+      .catch(() => {
+        if (current) setPracticeHistory([]);
+      });
+    return () => {
+      current = false;
+    };
+  }, [api, entryId, entry, meta?.today]);
 
   // Keep keyboard focus inside the panel when it opens, and give it back afterwards.
   useEffect(() => {
@@ -332,6 +360,12 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
               )}
 
               <PracticeMastery wordId={entry.id} />
+              {entry !== null && (
+                <TrueMasteryDetail
+                  answers={practiceHistory}
+                  today={meta?.today ?? null}
+                />
+              )}
 
               <WordExtras entry={entry} canWrite={canWrite} />
             </div>

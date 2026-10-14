@@ -102,6 +102,18 @@ describe('navigation', () => {
     expect(screen.getByRole('link', { name: 'Go to the dashboard' })).toHaveAttribute('href', '/');
   });
 
+  it('scrolls in the main area, which contains its positioned descendants', async () => {
+    // The app shell keeps its own scroll container, not the document. `relative`
+    // is what makes that container the containing block for absolutely positioned
+    // children such as the `.sr-only` text; without it they resolve against the
+    // viewport, escape the container's clipping, and add phantom document height
+    // (a second scrollbar that drags the fixed shell with it).
+    await open('/');
+    const main = screen.getByRole('main');
+    expect(main).toHaveClass('overflow-y-auto');
+    expect(main).toHaveClass('relative');
+  });
+
   it('reports a refused request as a failure; there is no shared password to ask for', async () => {
     window.history.replaceState(null, '', '/bank');
     const { api } = createFakeApi({ entries: WORDS });

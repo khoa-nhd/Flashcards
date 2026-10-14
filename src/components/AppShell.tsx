@@ -2,6 +2,7 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { ROUTES, type RouteKey } from '../lib/router.js';
 import { Icon, type IconName } from './Icon.js';
 import { Link } from './Link.js';
+import { SyncStatus } from './SyncStatus.js';
 
 interface NavItem {
   route: RouteKey;
@@ -76,7 +77,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
   };
 
   return (
-    <div className="flex h-dvh">
+    <div className="flex h-screen">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface/50 p-3 md:flex">
         <div className="flex items-center gap-2 px-3 pb-4 pt-2">
           <span className="font-serif text-lg font-semibold tracking-tight">Vocabulary</span>
@@ -84,7 +85,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
             <span className="rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn-ink">{badge}</span>
           )}
         </div>
-        <nav aria-label="Main" className="flex flex-1 flex-col gap-1">
+        <nav aria-label="Main" className="flex flex-1 flex-col gap-1 overflow-y-auto">
           {PRIMARY.map(sideLink)}
           <div className="my-2 border-t border-line" />
           {SECONDARY.map(sideLink)}
@@ -103,6 +104,9 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
             </button>
           </div>
         )}
+        <div className="mt-auto pt-3 border-t border-line px-3">
+          <SyncStatus />
+        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -116,6 +120,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
             )}
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
+            <SyncStatus />
             {SECONDARY.map((item) => (
               <Link
                 key={item.route}
@@ -132,7 +137,16 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           </div>
         </header>
 
-        <main ref={main} className="min-h-0 flex-1 overflow-y-auto">
+        {/*
+          The main content area owns vertical scrolling. It uses `min-h-0` to allow
+          shrinking below its content size, `flex-1` to fill available space, and
+          `overflow-y-auto` to scroll when content overflows. The `relative` class
+          creates a containing block for absolutely positioned descendants (like
+          the `.sr-only` live region) so they stay clipped within the scroll area.
+          Fixed-position overlays (WordDetailPanel, ConfirmDialog) are unaffected
+          because they are positioned relative to the viewport, not this container.
+        */}
+        <main ref={main} className="relative min-h-0 flex-1 overflow-y-auto">
           {children}
         </main>
 

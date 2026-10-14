@@ -5,11 +5,12 @@ import type { Confidence } from '../../shared/api.js';
 import { useSettings } from '../app-context.js';
 import { ANSWER_KEY_SETS, useReviewShortcuts } from '../hooks/useReviewShortcuts.js';
 import type { SessionController } from '../lib/session-controller.js';
-import { canUndo, currentCard, type SessionState } from '../lib/session-machine.js';
+import { canUndo, currentCard, isSaving, saveIssue, type SessionState } from '../lib/session-machine.js';
 import { ConfidencePrompt } from './ConfidencePrompt.js';
 import { Flashcard } from './Flashcard.js';
 import { ReviewControls } from './ReviewControls.js';
 import { ReviewProgress } from './ReviewProgress.js';
+import { SaveIssuePanel } from './SaveIssuePanel.js';
 import { SkippedNotice } from './SkippedNotice.js';
 
 export interface ReviewScreenProps {
@@ -27,21 +28,20 @@ const ACTION_TEXT: Record<ReviewAction, string> = {
   not_remember: 'Not remember',
 };
 
-const PANEL_BUTTON =
-  'h-11 cursor-pointer rounded-xl border px-4 text-sm font-semibold transition active:scale-[0.98]';
-
 export function ReviewScreen({ state, session, onReload, onHelp, paused = false }: ReviewScreenProps) {
   const { askConfidence, answerKeys } = useSettings();
   const card = currentCard(state);
   const cardId = card?.id ?? null;
-  const { status, error } = state;
-  // `saving` and `error` are only ever reached from a flipped card.
-  const flipped = status === 'flipped' || status === 'saving' || status === 'error';
+  const { status } = state;
+  const saving = isSaving(state);
+  const issue = saveIssue(state);
+  const flipped = status === 'flipped';
+  // An answer is only accepted on a flipped card, with nothing else in flight.
+  const canGrade = flipped && !saving && issue === null;
 
   const [hintVisible, setHintVisible] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const flipButton = useRef<HTMLButtonElement>(null);
-  const errorAction = useRef<HTMLButtonElement>(null);
 
   const showFlipHint = useCallback(() => {
     setHintVisible(true);
@@ -93,16 +93,13 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
   // Keep keyboard focus somewhere useful: a control that was just clicked may
   // have gone inert or been replaced, which would otherwise strand key presses.
   useEffect(() => {
-    if (status === 'error') errorAction.current?.focus({ preventScroll: true });
-  }, [status]);
-  useEffect(() => {
     if (cardId !== null) flipButton.current?.focus({ preventScroll: true });
   }, [cardId]);
   useEffect(() => {
-    if (status === 'flipped' && document.activeElement === document.body) {
+    if (flipped && document.activeElement === document.body) {
       flipButton.current?.focus({ preventScroll: true });
     }
-  }, [status]);
+  }, [flipped]);
 
   if (card === null) return null;
 
@@ -110,45 +107,50 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
   const total = state.cards.length;
   const undoable = state.lastSaved;
   const undoWord = undoable === null ? null : (state.cards[undoable.index]?.word ?? null);
+  const issueWord = state.failed === null ? null : (state.cards[state.failed.index]?.word ?? null);
   const extraKeys = ANSWER_KEY_SETS[answerKeys];
 
   return (
     <div className="mx-auto flex h-full w-full max-w-xl flex-col gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
       <ReviewProgress done={done} total={total} />
 
-      {(undoable !== null || state.undoError !== null) && (
-        <div className="flex min-h-8 items-center justify-between gap-3 text-sm">
-          <p role={state.undoError === null ? undefined : 'alert'} className="min-w-0 flex-1 text-bad-ink">
-            {state.undoError ?? ''}
-          </p>
-          {undoable !== null && (
-            <button
-              type="button"
-              onClick={undo}
-              disabled={!canUndo(state)}
-              aria-label={`Undo “${ACTION_TEXT[undoable.action]}”${undoWord === null ? '' : ` for ${undoWord}`}`}
-              className="h-8 shrink-0 cursor-pointer rounded-full border border-line px-3 font-medium text-muted transition hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {state.undoing ? 'Undoing…' : `Undo${undoWord === null ? '' : `: ${undoWord}`}`}
-            </button>
-          )}
-        </div>
+      <div className="flex min-h-8 items-center justify-between gap-3 text-sm">
+        <p role="status" className="min-w-0 flex-1 truncate text-muted">
+          {saving ? 'Saving…' : hintVisible ? 'Flip the card before answering.' : ''}
+        </p>
+        {undoable !== null && (
+          <button
+            type="button"
+            onClick={undo}
+            disabled={!canUndo(state)}
+            aria-label={`Undo “${ACTION_TEXT[undoable.action]}”${undoWord === null ? '' : ` for ${undoWord}`}`}
+            className="h-8 shrink-0 cursor-pointer rounded-full border border-line px-3 font-medium text-muted transition hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {state.undoing ? 'Undoing…' : `Undo${undoWord === null ? '' : `: ${undoWord}`}`}
+          </button>
+        )}
+      </div>
+
+      {state.undoError !== null && (
+        <p role="alert" className="text-sm text-bad-ink">
+          {state.undoError}
+        </p>
       )}
 
       <p className="sr-only" aria-live="polite">
         Card {done + 1} of {total}: {card.word}. {flipped ? 'Answer shown.' : ''}
       </p>
 
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden py-2">
+      <div className="flex min-h-0 flex-1 flex-col py-2">
         <div className="my-auto">
           <Flashcard
             key={card.id}
             card={card}
             today={state.meta?.today ?? null}
             flipped={flipped}
-            canGrade={status === 'flipped'}
-            locked={status === 'saving' || status === 'error'}
-            pendingAction={state.pendingAction}
+            canGrade={canGrade}
+            locked={issue !== null}
+            pendingAction={null}
             onFlip={flip}
             onGrade={grade}
             onBlockedGrade={showFlipHint}
@@ -157,65 +159,20 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
         </div>
       </div>
 
-      <p role="status" className="h-5 text-center text-sm font-medium text-muted">
-        {hintVisible ? 'Flip the card before answering.' : ''}
-      </p>
-
       {askingConfidence && <ConfidencePrompt onRate={rate} />}
 
-      {status === 'error' && error !== null ? (
-        <div role="alert" className="rounded-2xl border border-bad/40 bg-bad-soft p-4 text-bad-ink">
-          <p className="font-semibold">
-            {error.kind === 'conflict' ? 'This card changed on another device' : 'Your answer was not confirmed'}
-          </p>
-          <p className="mt-1 text-sm">{error.message}</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            {error.kind === 'save' ? (
-              <>
-                <button
-                  ref={errorAction}
-                  type="button"
-                  className={`${PANEL_BUTTON} border-bad bg-bad text-white dark:text-paper`}
-                  onClick={() => session.retrySave()}
-                >
-                  Retry{state.pendingAction ? ` “${ACTION_TEXT[state.pendingAction]}”` : ''}
-                </button>
-                <button
-                  type="button"
-                  className={`${PANEL_BUTTON} border-bad/40`}
-                  onClick={() => session.cancelSave()}
-                >
-                  Back to card
-                </button>
-              </>
-            ) : (
-              <>
-                <button
-                  ref={errorAction}
-                  type="button"
-                  className={`${PANEL_BUTTON} border-bad bg-bad text-white dark:text-paper`}
-                  onClick={onReload}
-                >
-                  Reload queue
-                </button>
-                <button
-                  type="button"
-                  className={`${PANEL_BUTTON} border-bad/40`}
-                  onClick={() => session.skipCard()}
-                >
-                  Skip this card
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      ) : (
-        <ReviewControls
-          enabled={status === 'flipped'}
-          savingAction={status === 'saving' ? state.pendingAction : null}
-          onGrade={grade}
-          onBlocked={showFlipHint}
+      {issue !== null ? (
+        <SaveIssuePanel
+          kind={issue.kind}
+          message={issue.message}
+          word={issueWord}
+          onRetry={() => session.retrySave()}
+          onDiscard={() => session.cancelSave()}
+          onReload={onReload}
+          onSkip={() => session.skipCard()}
         />
+      ) : (
+        <ReviewControls enabled={flipped && !saving} saving={saving} onGrade={grade} onBlocked={showFlipHint} />
       )}
 
       <div
