@@ -34,6 +34,9 @@ export interface TrueMasteryConfig {
   modeWeights: Record<string, number>;
   /** Session cap: max effective evidence from one session */
   sessionMaxEffectiveEvidence: number;
+  /** Weight multiplier for self-graded (recall) answers vs auto-graded.
+   * Self-graded answers are less reliable evidence, so we discount them. */
+  recallSelfGradeWeightMultiplier: number;
 }
 
 export const DEFAULT_TRUE_MASTERY_CONFIG: TrueMasteryConfig = {
@@ -54,11 +57,16 @@ export const DEFAULT_TRUE_MASTERY_CONFIG: TrueMasteryConfig = {
     listening: 0.10,
   },
   sessionMaxEffectiveEvidence: 3,
+  /** Self-graded recall answers are discounted to 50% weight vs auto-graded modes */
+  recallSelfGradeWeightMultiplier: 0.5,
 };
 
 /** One practice answer with full detail */
 export interface PracticeAnswer {
   vocabularyId: string;
+  /** Unique request ID from the practice attempt (for deduplication).
+   * Optional for backward compatibility with older schema versions. */
+  requestId?: string;
   mode: string;
   correct: boolean;
   grading: 'self' | 'auto';
@@ -239,13 +247,20 @@ function computeMode(
   today: IsoDate,
   cfg: TrueMasteryConfig
 ): ModeComputation {
-  const weight = cfg.modeWeights[mode] ?? 0;
+  const baseWeight = cfg.modeWeights[mode] ?? 0;
 
-  // Filter out future dates and sort by reviewedAt for session detection
+  // Filter out future dates and invalid events, sort by reviewedAt for session detection
+  // A valid event must have: requestId, reviewedOn, reviewedAt, mode, correct, grading
   const validAnswers = answers
     .filter((a) => {
       const d = daysBetween(a.reviewedOn, today);
-      return d >= 0;
+      return d >= 0
+        && a.requestId != null && a.requestId !== ''
+        && a.reviewedOn != null
+        && a.reviewedAt != null
+        && a.mode != null
+        && typeof a.correct === 'boolean'
+        && (a.grading === 'self' || a.grading === 'auto');
     })
     .sort((a, b) => a.reviewedAt.localeCompare(b.reviewedAt));
 
@@ -257,6 +272,7 @@ function computeMode(
   let incorrectAnswers = 0;
 
   // Session-based aggregation to prevent retry inflation
+  // Group by sessionId, then within each session deduplicate by requestId (keep last)
   const sessions = new Map<string, PracticeAnswer[]>();
   for (const a of validAnswers) {
     const sid = a.sessionId ?? `solo:${a.reviewedAt}`;
@@ -266,34 +282,55 @@ function computeMode(
   }
 
   for (const [, sessionAnswers] of sessions) {
-    // Within a session, take the last answer per word (or first, but be consistent)
-    // Here we use the last answer in the session
-    const last = sessionAnswers[sessionAnswers.length - 1];
-    if (!last) continue;
-    const y = last.correct ? 1 : 0;
-    if (y === 1) correctAnswers++;
-    else incorrectAnswers++;
-
-    const d = daysBetween(last.reviewedOn, today);
-    if (d < 0) continue; // Future date, ignore (should not happen due to pre-filter)
-    const r = Math.pow(2, -d / cfg.recencyHalfLifeDays);
-
-    weightedCorrect += r * y;
-    weightedIncorrect += r * (1 - y);
-    totalEffective += r;
-    if (lastAttemptedOn === null || last.reviewedOn > lastAttemptedOn) {
-      lastAttemptedOn = last.reviewedOn;
+    // Within a session, deduplicate by requestId (keep last answer for each unique requestId)
+    // For answers without requestId (older schema), fall back to reviewedAt as a key
+    const byRequestId = new Map<string, PracticeAnswer>();
+    for (const a of sessionAnswers) {
+      const key = a.requestId ?? `fallback:${a.reviewedAt}`;
+      byRequestId.set(key, a);
     }
-  }
+    const uniqueAnswers = Array.from(byRequestId.values());
 
-  // Cap effective evidence per session
-  const numSessions = sessions.size;
-  const sessionCap = cfg.sessionMaxEffectiveEvidence;
-  if (totalEffective > numSessions * sessionCap) {
-    const scale = (numSessions * sessionCap) / totalEffective;
-    weightedCorrect *= scale;
-    weightedIncorrect *= scale;
-    totalEffective = numSessions * sessionCap;
+    // Cap effective evidence per session at sessionMaxEffectiveEvidence
+    let sessionWeightedCorrect = 0;
+    let sessionWeightedIncorrect = 0;
+    let sessionTotalEffective = 0;
+
+    for (const a of uniqueAnswers) {
+      const y = a.correct ? 1 : 0;
+      if (y === 1) correctAnswers++;
+      else incorrectAnswers++;
+
+      const d = daysBetween(a.reviewedOn, today);
+      if (d < 0) continue; // Future date, ignore (should not happen due to pre-filter)
+      const r = Math.pow(2, -d / cfg.recencyHalfLifeDays);
+
+      // Apply recall self-grade weight multiplier for self-graded recall answers
+      const selfGradeMultiplier = (a.mode === 'recall' && a.grading === 'self')
+        ? cfg.recallSelfGradeWeightMultiplier
+        : 1;
+
+      sessionWeightedCorrect += r * y * selfGradeMultiplier;
+      sessionWeightedIncorrect += r * (1 - y) * selfGradeMultiplier;
+      sessionTotalEffective += r * selfGradeMultiplier;
+
+      if (lastAttemptedOn === null || a.reviewedOn > lastAttemptedOn) {
+        lastAttemptedOn = a.reviewedOn;
+      }
+    }
+
+    // Cap effective evidence per session
+    const sessionCap = cfg.sessionMaxEffectiveEvidence;
+    if (sessionTotalEffective > sessionCap) {
+      const scale = sessionCap / sessionTotalEffective;
+      sessionWeightedCorrect *= scale;
+      sessionWeightedIncorrect *= scale;
+      sessionTotalEffective = sessionCap;
+    }
+
+    weightedCorrect += sessionWeightedCorrect;
+    weightedIncorrect += sessionWeightedIncorrect;
+    totalEffective += sessionTotalEffective;
   }
 
   // Beta smoothing
@@ -303,6 +340,10 @@ function computeMode(
 
   // Confidence from effective evidence
   const confidence = totalEffective / (totalEffective + cfg.confidenceK);
+
+  // Apply recall self-grade multiplier to the mode's base weight
+  // This reflects that self-graded evidence is less reliable
+  const weight = baseWeight;
 
   return {
     mode,

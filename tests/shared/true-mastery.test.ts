@@ -21,6 +21,7 @@ function makeAnswer(overrides: Partial<PracticeAnswer> = {}): PracticeAnswer {
     durationMs: 3000,
     confidence: 2,
     sessionId: 'session-1',
+    requestId: 'req-1',
     ...overrides,
   };
 }
