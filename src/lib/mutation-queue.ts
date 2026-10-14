@@ -328,57 +328,6 @@ export class MutationQueue {
     this.syncTimer = setTimeout(() => void this.processQueue(), delayMs);
   }
 
-  /** Synchronously process the queue for tests. */
-  private processQueueSync(): void {
-    if (this.syncInProgress) return;
-    this.syncInProgress = true;
-    // Process pending mutations from the in-memory array
-    const pending = this.pendingMutations.filter(
-      (m) => m.accountId === this.currentAccountId && (m.status === 'pending' || m.status === 'transient'),
-    );
-    if (pending.length === 0) {
-      this.syncInProgress = false;
-      return;
-    }
-
-    for (const mutation of pending) {
-      if (mutation.accountId !== this.currentAccountId) continue;
-      const handler = this.handlers.get(mutation.kind);
-      if (!handler) {
-        console.warn(`No handler registered for mutation kind: ${mutation.kind}`);
-        continue;
-      }
-      handler(mutation.payload)
-        .then((response) => {
-          mutation.status = 'synced';
-          mutation.lastError = null;
-          mutation.serverResponse = response;
-          this.notify();
-        })
-        .catch((error) => {
-          const transient = isTransientError(error);
-          const permanent = isPermanentError(error);
-          const nextAttempt = mutation.attempt + 1;
-
-          if (transient && nextAttempt < MAX_ATTEMPTS) {
-            mutation.status = 'transient';
-            mutation.lastError = error instanceof Error ? error.message : String(error);
-            mutation.attempt = nextAttempt;
-          } else if (permanent || nextAttempt >= MAX_ATTEMPTS) {
-            mutation.status = 'permanent';
-            mutation.lastError = error instanceof Error ? error.message : String(error);
-            mutation.attempt = nextAttempt;
-          } else {
-            mutation.status = 'transient';
-            mutation.lastError = error instanceof Error ? error.message : String(error);
-            mutation.attempt = nextAttempt;
-          }
-          this.notify();
-        });
-    }
-    this.syncInProgress = false;
-  }
-
   /** Register a handler for a mutation kind. */
   registerHandler<P>(kind: MutationKind, handler: MutationHandler<P>): void {
     this.handlers.set(kind, handler as MutationHandler<unknown>);

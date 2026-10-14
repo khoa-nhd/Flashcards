@@ -19,6 +19,7 @@ import {
   type StudyMode,
 } from '../../shared/study-modes.js';
 import { useApp, useLibrary, useSettings, useVocabulary, useMutationQueue } from '../app-context.js';
+import type { PracticeResponse } from '../../shared/api.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { PracticeCard, Verdict, type PracticeVerdict } from '../components/PracticeCards.js';
@@ -33,7 +34,7 @@ import { startTiming } from '../lib/perf.js';
 import { newRequestId } from '../lib/request-id.js';
 import { ROUTES, buildHref, openWord, useLocation } from '../lib/router.js';
 import { SPEECH_LANGUAGES, speechAvailable, type SpeechLanguage } from '../lib/speech.js';
-import { enqueuePracticeAnswer, getGlobalTestMode, type PracticeAnswerMutation } from '../lib/mutation-queue.js';
+import { enqueuePracticeAnswer, getGlobalTestMode, type PracticeAnswerMutation, type MutationQueue } from '../lib/mutation-queue.js';
 
 const SOURCES = ['due', 'weak', 'recent', 'all'] as const;
 /** One of the built-in sets, or one collection. */
@@ -251,7 +252,7 @@ export function PracticePage() {
 
     if (!inTestMode) {
       // Enqueue for background persistence - UI already updated optimistically
-      await enqueuePracticeAnswer(mutationQueue, {
+      const mutationId = await enqueuePracticeAnswer(mutationQueue, {
         pageId: word.id,
         mode: current.mode,
         answer: given,
@@ -259,27 +260,12 @@ export function PracticePage() {
         sessionId: current.sessionId,
         durationMs,
       });
-    }
 
-    // The mutation queue handles retries. We still want to update the UI
-    // with the server's confirmed verdict (modeMastery, outcome) when it arrives.
-    // We'll poll the queue for the mutation result, but to keep things simple
-    // and avoid polling, we can also fire off a direct request that only updates
-    // the UI with the confirmed data (not the critical path).
-    // For now, we rely on the queue's eventual consistency. The UI shows
-    // 'pending' until the server confirms.
-    //
-    // A more sophisticated approach would listen to queue updates, but this
-    // keeps the critical path fast and simple.
-    try {
-      const result = await api.submitPractice({
-        pageId: word.id,
-        mode: current.mode,
-        answer: given,
-        requestId,
-        sessionId: current.sessionId,
-        durationMs,
-      });
+      // Wait for the mutation to complete (synced or permanent failure)
+      // The mutation queue handler calls api.submitPractice and stores the response
+      const result = await waitForMutationResult(mutationQueue, mutationId, ticket);
+      if (result === null) return; // Ticket expired (user moved to next question)
+
       rememberOutcome(current.index, { word, correct: result.correct, recorded: result.outcome !== 'dry_run' });
       if (asked.current !== ticket) return;
       setRun((latest) =>
@@ -297,18 +283,76 @@ export function PracticePage() {
               },
             },
       );
-    } catch (cause) {
-      // Network error - the mutation queue will retry in background.
-      // Keep the local verdict but mark as not yet recorded.
-      const shown = outcomes.current.get(current.index);
-      rememberOutcome(current.index, { word, correct: shown?.correct ?? false, recorded: false });
-      if (asked.current !== ticket) return;
-      setRun((latest) =>
-        latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
-          ? latest
-          : { ...latest, error: cause instanceof ApiError ? cause.message : 'Could not check that answer.' },
-      );
+    } else {
+      // Test mode: direct API call for compatibility
+      try {
+        const result = await api.submitPractice({
+          pageId: word.id,
+          mode: current.mode,
+          answer: given,
+          requestId,
+          sessionId: current.sessionId,
+          durationMs,
+        });
+        rememberOutcome(current.index, { word, correct: result.correct, recorded: result.outcome !== 'dry_run' });
+        if (asked.current !== ticket) return;
+        setRun((latest) =>
+          latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
+            ? latest
+            : {
+                ...latest,
+                error: null,
+                verdict: {
+                  correct: result.correct,
+                  typed: result.typed,
+                  expected: result.expected,
+                  modeMastery: result.modeMastery,
+                  outcome: result.outcome,
+                },
+              },
+        );
+      } catch (cause) {
+        const shown = outcomes.current.get(current.index);
+        rememberOutcome(current.index, { word, correct: shown?.correct ?? false, recorded: false });
+        if (asked.current !== ticket) return;
+        setRun((latest) =>
+          latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
+            ? latest
+            : { ...latest, error: cause instanceof ApiError ? cause.message : 'Could not check that answer.' },
+        );
+      }
     }
+  };
+
+  /** Polls the mutation queue until the mutation reaches a terminal state. */
+  const waitForMutationResult = async (
+    queue: MutationQueue,
+    mutationId: string,
+    ticket: string,
+    timeoutMs = 30000,
+  ): Promise<PracticeResponse | null> => {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      if (asked.current !== ticket) return null; // User moved on
+      const mutations = await queue.getAll();
+      const mutation = mutations.find((m) => m.id === mutationId);
+      if (!mutation) {
+        // Mutation not found (shouldn't happen), wait a bit
+        await new Promise((r) => setTimeout(r, 100));
+        continue;
+      }
+      if (mutation.status === 'synced' && mutation.serverResponse) {
+        return mutation.serverResponse as PracticeResponse;
+      }
+      if (mutation.status === 'permanent') {
+        // Surface permanent error
+        throw new ApiError('permanent_failure', mutation.lastError ?? 'Practice answer was not saved.', 0);
+      }
+      // Still pending/transient/syncing - wait and poll again
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    // Timeout - treat as transient error (queue will retry in background)
+    throw new ApiError('timeout', 'No confirmation arrived in time. The answer may still be saved.', 0);
   };
 
   /** Repeats the answer that failed, with the same request id, so one that did arrive is not recorded twice. */

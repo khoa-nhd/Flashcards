@@ -1,5 +1,13 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
-import { MutationQueue, setGlobalTestMode, type ReviewActionMutation, type ReviewUndoMutation } from '../../src/lib/mutation-queue.js';
+import { MutationQueue, setGlobalTestMode, type ReviewActionMutation, type ReviewUndoMutation, type Mutation } from '../../src/lib/mutation-queue.js';
+
+// Type guards for test mutations
+function isReviewActionMutation(m: Mutation): m is ReviewActionMutation {
+  return m.kind === 'review_action';
+}
+function isReviewUndoMutation(m: Mutation): m is ReviewUndoMutation {
+  return m.kind === 'review_undo';
+}
 
 describe('MutationQueue', () => {
   let queue: MutationQueue;
@@ -37,8 +45,10 @@ describe('MutationQueue', () => {
 
       const mutations = await queue.getAll();
       expect(mutations).toHaveLength(1);
-      expect(mutations[0].accountId).toBe('user-123');
-      expect(mutations[0].id).toBe(mutationId);
+      const mutation = mutations[0]!;
+      expect(isReviewActionMutation(mutation)).toBe(true);
+      expect(mutation.accountId).toBe('user-123');
+      expect(mutation.id).toBe(mutationId);
     });
 
     it('throws when enqueueing without account ID set', async () => {
@@ -93,15 +103,19 @@ describe('MutationQueue', () => {
       // Get mutations for user-2
       const user2Mutations = await queue.getAll();
       expect(user2Mutations).toHaveLength(1);
-      expect(user2Mutations[0].accountId).toBe('user-2');
-      expect(user2Mutations[0].payload.pageId).toBe('card-2');
+      const user2Mutation = user2Mutations[0]!;
+      expect(isReviewActionMutation(user2Mutation)).toBe(true);
+      expect(user2Mutation.accountId).toBe('user-2');
+      expect((user2Mutation.payload as ReviewActionMutation['payload']).pageId).toBe('card-2');
 
       // Switch back to user-1
       queue.setAccountId('user-1');
       const user1Mutations = await queue.getAll();
       expect(user1Mutations).toHaveLength(1);
-      expect(user1Mutations[0].accountId).toBe('user-1');
-      expect(user1Mutations[0].payload.pageId).toBe('card-1');
+      const user1Mutation = user1Mutations[0]!;
+      expect(isReviewActionMutation(user1Mutation)).toBe(true);
+      expect(user1Mutation.accountId).toBe('user-1');
+      expect((user1Mutation.payload as ReviewActionMutation['payload']).pageId).toBe('card-1');
     });
 
     it('clearAccount only clears current account mutations', async () => {
@@ -170,8 +184,10 @@ describe('MutationQueue', () => {
 
       const mutations = await queue.getAll();
       expect(mutations).toHaveLength(1);
-      expect(mutations[0].accountId).toBe('test-user');
-      expect(mutations[0].kind).toBe('review_action');
+      const mutation = mutations[0]!;
+      expect(isReviewActionMutation(mutation)).toBe(true);
+      expect(mutation.accountId).toBe('test-user');
+      expect(mutation.kind).toBe('review_action');
     });
 
     it('review_undo mutation gets correct account ID', async () => {
@@ -188,8 +204,10 @@ describe('MutationQueue', () => {
 
       const mutations = await queue.getAll();
       expect(mutations).toHaveLength(1);
-      expect(mutations[0].accountId).toBe('test-user');
-      expect(mutations[0].kind).toBe('review_undo');
+      const mutation = mutations[0]!;
+      expect(isReviewUndoMutation(mutation)).toBe(true);
+      expect(mutation.accountId).toBe('test-user');
+      expect(mutation.kind).toBe('review_undo');
     });
   });
 
@@ -228,9 +246,11 @@ describe('MutationQueue', () => {
 
       const mutations = await queue.getAll();
       expect(mutations).toHaveLength(1);
-      expect(mutations[0].status).toBe('synced');
-      expect(mutations[0].id).toBe(mutationId);
-      expect(mutations[0].attempt).toBe(1);
+      const mutation = mutations[0]!;
+      expect(isReviewActionMutation(mutation)).toBe(true);
+      expect(mutation.status).toBe('synced');
+      expect(mutation.id).toBe(mutationId);
+      expect(mutation.attempt).toBe(1);
     });
 
     it('preserves mutation ID when handler fails (transient error)', async () => {
@@ -255,9 +275,11 @@ describe('MutationQueue', () => {
       const mutations = await queue.getAll();
       // In test mode, the error is caught and status becomes transient
       // Attempt is 2: first attempt (incremented before handler) + retry increment in catch
-      expect(mutations[0].status).toBe('transient');
-      expect(mutations[0].id).toBe(mutationId);
-      expect(mutations[0].attempt).toBe(2);
+      const mutation = mutations[0]!;
+      expect(isReviewActionMutation(mutation)).toBe(true);
+      expect(mutation.status).toBe('transient');
+      expect(mutation.id).toBe(mutationId);
+      expect(mutation.attempt).toBe(2);
     });
   });
 
@@ -282,8 +304,11 @@ describe('MutationQueue', () => {
       });
 
       const mutations = await queue.getAll();
-      expect(mutations[0].status).toBe('permanent');
-      expect(mutations[0].lastError).toContain('unauthorized');
+      expect(mutations).toHaveLength(1);
+      const mutation = mutations[0]!;
+      expect(isReviewActionMutation(mutation)).toBe(true);
+      expect(mutation.status).toBe('permanent');
+      expect(mutation.lastError).toContain('unauthorized');
     });
 
     it('does not retry permanent failures when retry is called', async () => {
@@ -306,7 +331,10 @@ describe('MutationQueue', () => {
       });
 
       const mutations = await queue.getAll();
-      expect(mutations[0].status).toBe('permanent');
+      expect(mutations).toHaveLength(1);
+      const mutation = mutations[0]!;
+      expect(isReviewActionMutation(mutation)).toBe(true);
+      expect(mutation.status).toBe('permanent');
       
       // Try to retry - should not call handler again for permanent errors
       await queue.retry(mutationId);
@@ -319,7 +347,7 @@ describe('MutationQueue', () => {
     it('maintains FIFO order for same account', async () => {
       queue.setAccountId('test-user');
       
-      const order: number[] = [];
+      const order: string[] = [];
       const handler = vi.fn().mockImplementation(async (payload: ReviewActionMutation['payload']) => {
         order.push(payload.pageId);
         return { success: true };
