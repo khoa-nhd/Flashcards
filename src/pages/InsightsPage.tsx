@@ -11,11 +11,12 @@ import { BarChart } from '../components/BarChart.js';
 import { formatDate } from '../components/badges.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
-import { ReviewActivityDetail } from '../components/ReviewActivity.js';
+import { ReviewActivityDetail, useReviewActivity } from '../components/ReviewActivity.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
-import { CARD, PAGE, SECTION_TITLE } from '../components/ui.js';
+import { CARD, PAGE, SECTION_TITLE, HELP } from '../components/ui.js';
 import { MISSING_LABELS, missingFields } from '../lib/bank-query.js';
 import { ROUTES, buildHref } from '../lib/router.js';
+import { STUDY_MODE_LABELS } from '../../shared/study-modes.js';
 
 const RANGES: Record<Granularity, { periods: number; label: string; title: string; category: string }> = {
   day: { periods: 30, label: 'Day', title: 'Words added per day, last 30 days', category: 'Day' },
@@ -57,6 +58,7 @@ export function InsightsPage() {
         {summary !== null && today !== null && (
           <div className={`flex flex-col gap-6 ${state.refreshing ? 'opacity-70' : ''}`}>
             <ReviewActivityDetail />
+            <PracticeStatistics />
 
             <div className="flex items-center gap-2" role="group" aria-label="Group additions by">
               <span className="text-sm text-muted">Additions by</span>
@@ -230,6 +232,109 @@ export function InsightsPage() {
           </div>
         )}
       </VocabularyGate>
+    </div>
+  );
+}
+
+function PracticeStatistics() {
+  const activity = useReviewActivity();
+  const { data, status } = activity;
+
+  if (status !== 'ready' || !data?.practice?.available) return null;
+
+  const { modes, today } = data.practice;
+  // Don't render if no practice data - the ReviewActivityDetail already shows the empty state with a link
+  if (modes.length === 0) return null;
+
+  const totalAnswers = modes.reduce((sum, m) => sum + m.answers, 0);
+  const totalCorrect = modes.reduce((sum, m) => sum + m.correct, 0);
+  const overallAccuracy = totalAnswers > 0 ? totalCorrect / totalAnswers : 0;
+
+  return (
+    <section className={`${CARD} p-5`} aria-label="Practice statistics">
+      <h2 className={SECTION_TITLE}>Practice statistics</h2>
+
+      <div className="mt-4 grid gap-4 sm:grid-cols-3">
+        <StatCard label="Total answers (30 days)" value={totalAnswers} />
+        <StatCard label="Correct answers" value={totalCorrect} />
+        <StatCard
+          label="Overall accuracy"
+          value={totalAnswers >= data.minSample ? `${Math.round(overallAccuracy * 100)}%` : '—'}
+          hint={
+            totalAnswers >= data.minSample
+              ? `${totalCorrect} of ${totalAnswers}`
+              : `Need ${data.minSample} answers for a percentage`
+          }
+        />
+      </div>
+
+      <p className="mt-2 text-sm">
+        Today: <span className="tabular-nums font-medium">{today.correct}</span> of {today.answers} practice{' '}
+        {today.answers === 1 ? 'answer' : 'answers'} correct.
+      </p>
+
+      {modes.length > 0 && (
+        <div className="mt-4">
+          <h3 className="text-sm font-medium text-muted uppercase tracking-[0.12em]">By mode, last 30 days</h3>
+          <div className="mt-2 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="text-left text-xs text-muted">
+                <tr>
+                  <th scope="col" className="py-1 font-medium">Mode</th>
+                  <th scope="col" className="py-1 text-right font-medium">Answers</th>
+                  <th scope="col" className="py-1 text-right font-medium">Correct</th>
+                  <th scope="col" className="py-1 text-right font-medium">Accuracy</th>
+                  <th scope="col" className="py-1 text-right font-medium">Share of total</th>
+                </tr>
+              </thead>
+              <tbody className="tabular-nums">
+                {modes.map((mode) => {
+                  const modeAccuracy = mode.answers >= data.minSample ? mode.correct / mode.answers : null;
+                  return (
+                    <tr key={mode.mode} className="border-t border-line">
+                      <th scope="row" className="py-1.5 text-left font-normal">
+                        {STUDY_MODE_LABELS[mode.mode as keyof typeof STUDY_MODE_LABELS] ?? mode.mode}
+                      </th>
+                      <td className="py-1.5 text-right">{mode.answers}</td>
+                      <td className="py-1.5 text-right">{mode.correct}</td>
+                      <td className="py-1.5 text-right">
+                        {modeAccuracy === null ? '—' : `${Math.round(modeAccuracy * 100)}%`}
+                      </td>
+                      <td className="py-1.5 text-right text-muted">
+                        {totalAnswers > 0 ? `${Math.round((mode.answers / totalAnswers) * 100)}%` : '—'}
+                      </td>
+                    </tr>
+                  );
+                })}
+                <tr className="border-t border-line font-semibold">
+                  <th scope="row" className="py-1.5 text-left">Total</th>
+                  <td className="py-1.5 text-right">{totalAnswers}</td>
+                  <td className="py-1.5 text-right">{totalCorrect}</td>
+                  <td className="py-1.5 text-right">
+                    {totalAnswers >= data.minSample ? `${Math.round(overallAccuracy * 100)}%` : '—'}
+                  </td>
+                  <td className="py-1.5 text-right text-muted">100%</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      <p className="mt-3 text-xs text-muted">
+        Practice is recorded separately from scheduled reviews and never changes mastery or review dates.
+        Recall is self-graded; the other modes are checked automatically.
+      </p>
+    </section>
+  );
+}
+
+function StatCard({ label, value, hint }: { label: string; value: string | number; hint?: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-line bg-surface p-4">
+      <p className="text-xs text-muted">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tabular-nums">{value}</p>
+      {hint && <p className="mt-1 text-xs text-muted">{hint}</p>}
     </div>
   );
 }
