@@ -791,7 +791,7 @@ function PracticeStatsTable({
 
       <p className="mt-3 text-xs text-muted">
         Shows correct / total answers per mode. Click a word to open its details.
-        Practice mastery (capped at 10 per mode) is shown in the word detail panel.
+        Practice mastery (capped at 3 per mode) is shown in the word detail panel.
       </p>
     </section>
   );

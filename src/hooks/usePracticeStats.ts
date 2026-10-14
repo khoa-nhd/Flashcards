@@ -2,15 +2,15 @@ import { useMemo, useState, useEffect, useCallback } from 'react';
 import type { IsoDate } from '../../shared/dates.js';
 import {
   type PracticeAnswer,
-  type PracticeHistoryResponse,
 } from '../../shared/true-mastery.js';
+import { practiceMasteryOf } from '../../shared/study-modes.js';
 import { useApp, useVocabulary } from '../app-context.js';
 
 export interface PracticeModeStats {
   mode: string;
   correct: number;
   total: number;
-  mastery: number; // correct, capped at max (10)
+  mastery: number; // correct answers, capped at 3 per mode (practiceMasteryOf)
 }
 
 export interface WordPracticeStats {
@@ -103,7 +103,7 @@ export function usePracticeStats(): UsePracticeStatsReturn {
           mode,
           correct,
           total,
-          mastery: correct, // We'll cap at 10 for display if needed
+          mastery: practiceMasteryOf(correct),
         });
         totalCorrect += correct;
         totalAnswers += total;
