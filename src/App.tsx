@@ -20,6 +20,7 @@ import { DashboardPage } from './pages/DashboardPage.js';
 import { ExamPage } from './pages/ExamPage.js';
 import { ImportPage } from './pages/ImportPage.js';
 import { InsightsPage } from './pages/InsightsPage.js';
+import { MapPage } from './pages/MapPage.js';
 import { PracticePage } from './pages/PracticePage.js';
 import { ReviewPage } from './pages/ReviewPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
@@ -35,6 +36,7 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   practice: { title: 'Practice', render: () => <PracticePage /> },
   exam: { title: 'Exam', render: () => <ExamPage /> },
   collections: { title: 'Collections', render: () => <CollectionsPage /> },
+  map: { title: 'Topic map', render: () => <MapPage /> },
   weak: { title: 'Weak words', render: () => <WeakWordsPage /> },
   insights: { title: 'Insights', render: () => <InsightsPage /> },
   settings: { title: 'Settings', render: () => <SettingsPage /> },

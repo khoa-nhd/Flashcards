@@ -13,6 +13,7 @@ in on.
 | **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
 | **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples, related words and — from database version 11 — the word family it belongs to, with an AI draft builder and suggested example sentences. |
 | **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
+| **Topic map** | The whole vocabulary drawn three ways on one page: your collections as islands of words, the word families under their root, and the saved relations as a network. Read-only — every word in a drawing opens its panel. |
 | **Calendar** | A month at a glance: words by the day they were added, or saved reviews by the day you did them. |
 | **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of just those that are due, or practice with all of them. |
 | **Insights** | Reviews per day, accuracy and time per card week by week, accuracy and retention by period, confidence calibration, practice by mode, additions over time, share mastered, busiest days, incomplete entries. |
@@ -341,6 +342,27 @@ email if your project asks for it.
   Settings → **Export everything** downloads the whole account: words, both
   schedules, the full review history, collections, examples, links and
   settings. See [docs/import-and-export.md](docs/import-and-export.md).
+
+## Topic map
+
+The whole vocabulary drawn three ways on one page (Practice's neighbours in
+the menu), switched between with the buttons at the top. Everything is placed
+by plain arithmetic — no AI, no external service — and every drawing is
+repeated in words for a screen reader; past a fixed cap it says how much it
+left out instead of drawing a crowd. **Nothing here writes**: every word in a
+picture opens its panel, exactly as in the bank.
+
+- **Collections**: each collection is an island of its words, and the words in
+  no collection gather under one plain island of their own — the map accounts
+  for all of the vocabulary, not only the organised part.
+- **Word families**: every stored family, with the root as the island's
+  pressable title and its derived words inside; a word that other words were
+  formed from shows accented as a sub-root, and words with no family are
+  counted, not drawn. Needs database version 11 — until the store keeps
+  `rootId`, the page says so instead of drawing.
+- **Relations**: the saved links as a network — every related word a box on a
+  grid, every link a curve between the two — with the totals by kind beneath
+  (synonyms, antonyms, word families, collocations, and so on).
 
 ## Importing a list
 

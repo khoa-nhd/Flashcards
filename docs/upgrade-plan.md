@@ -252,6 +252,47 @@ step, and the whole panel stays hidden until the version is found.
   runs, a speaking answer is refused by the old check with the answer
   simply not recorded, exactly as writing behaved before version 10.
 
+### Batch 6 of the 2026-10-13 roadmap (2026-10-14)
+
+**The topic map: three drawings of the same vocabulary.** One page (`/map`,
+"Topic map" in the menu next to Collections) with a segmented switcher over
+three views — all read-only, all placed with plain arithmetic rather than a
+force simulation, no new dependency, no AI, and **no migration**:
+
+- **Collections as islands.** Each collection is an island of its words
+  wrapped in rows, and every word in no collection gathers under one plain
+  "No collection" island — so the picture accounts for the whole vocabulary,
+  not only the organised part. A word in several collections appears in each.
+- **Word families lifted out of the panel.** Every stored family as an island
+  whose title *is* the root (pressable, opening that word) with its derived
+  words inside; a word that other words were formed from shows accented as a
+  sub-root, a lone word is counted rather than drawn, and a family whose root
+  was trashed still draws under "A removed root" instead of vanishing.
+  Shown only where the `roots` capability (version 11) is on; otherwise the
+  page says the store needs its latest update, the way the panel does.
+- **Relations as a network.** Every word in a saved relation as a box on a
+  deterministic alphabetical grid, each relation a curve between its two
+  ends, and the totals by kind underneath — arithmetic over the grid, so the
+  same links always make the same picture.
+
+Shared caps keep the drawings legible (12 islands, 12 words per island, 60
+linked words) and past them a visible line says how much was left out, with
+the whole content repeated in words in an `sr-only` summary — the picture
+never carries information the words do not. The two library-backed views
+carry the same loading, failure and too-old states as Collections (including
+"kept once the database has its latest update" with a link to Settings);
+families render their own unavailable note where `rootId` does not exist yet.
+Entry points: a new `Topic map` item in the secondary navigation (desktop
+sidebar and the phone top bar; the five-item bottom bar is unchanged), the
+route `/map`, document title "Topic map".
+
+`tests/client/topic-map.test.tsx` covers both island drawings and their
+counts, the screen-reader summary, opening a word — and a root from its
+island title — into the word panel, the twelve-word cap with its "+8 more"
+line, the relations network and its per-kind totals, the empty, too-old and
+failed-load states, the family capability on and off, the no-family and
+no-words states, and the navigation entry with its document title.
+
 ## 1. Audit: where the app stands
 
 ### Baseline (run on 2026-10-10)

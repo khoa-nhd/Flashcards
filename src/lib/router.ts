@@ -14,6 +14,7 @@ export const ROUTES = {
   practice: '/practice',
   exam: '/exam',
   collections: '/collections',
+  map: '/map',
   weak: '/weak',
   insights: '/insights',
   settings: '/settings',

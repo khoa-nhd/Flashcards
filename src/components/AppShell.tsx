@@ -38,6 +38,7 @@ const PRIMARY: NavItem[] = [
 const SECONDARY: NavItem[] = [
   { route: 'practice', label: 'Practice', short: 'Practice', icon: 'practice' },
   { route: 'collections', label: 'Collections', short: 'Collections', icon: 'collections' },
+  { route: 'map', label: 'Topic map', short: 'Map', icon: 'map' },
   { route: 'weak', label: 'Weak words', short: 'Weak', icon: 'weak' },
   { route: 'insights', label: 'Insights', short: 'Insights', icon: 'insights' },
   { route: 'settings', label: 'Settings', short: 'Settings', icon: 'settings' },
