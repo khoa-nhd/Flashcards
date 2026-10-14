@@ -1,10 +1,21 @@
 # Offline mode: a design note
 
-**Status: not built.** The app needs a connection for everything. With no
-connection the queue cannot load, and an answer that cannot be sent stays on
-screen with *Try again* until it can. Nothing is kept on the device between
-visits except display preferences. This note is what building offline review
-would take; none of it exists.
+**Status: the first two steps of the order of work below are built
+(2026-10-14); the rest is not.** Every review answer now carries the instant
+it was given (`answeredAt`), and the server lands a late answer on its own
+day — within limits it enforces: refused when more than five minutes ahead
+of its own clock, or more than two days old. An answer whose fate is
+unknown (no connection, a timeout, a server that could not answer) is kept
+in a page-open outbox instead of blocking the reviewer, counted in a strip
+visible the whole time ("1 answer waiting to be saved"), and sent again with
+the same request id whenever the connection returns, the next answer saves,
+or *Try now* is pressed; a definitive refusal leaves the outbox and is
+reported with the word it was for. A 4xx to a fresh answer still keeps the
+card on screen with *Try again*: there is nothing to retry that would fare
+better. Loading a queue, adding, editing, importing and practice still need
+a connection, and nothing is kept on the device between visits except
+display preferences — the outbox lives only as long as the page. What
+remains is steps 3 and 4 below.
 
 ## What "offline" would have to mean
 
@@ -49,9 +60,17 @@ any, **and the moment it was answered** (instant and the reviewer's calendar
 day). Entries are sent oldest first, one at a time. An entry leaves the outbox
 only when the server has confirmed it or definitively refused it.
 
+*(Built: entries live in memory, only as long as the page — per-account
+storage is step 3. They are retried when the connection returns, when the
+next answer saves, or on *Try now*; no background timer runs.)*
+
 A card answered offline leaves the local queue, as it does online. It is not
 offered again on that device until the outbox has drained and the queue has
 been reloaded.
+
+*(Built: the queue is not reloaded for it. The state guard on every answer
+means that if the word does come round again, the second answer is refused
+as stale and reported, never applied twice.)*
 
 ### 3. The answer's own date
 
@@ -73,8 +92,9 @@ So the request needs an optional `answeredAt`, and the server has to:
   FSRS calculation;
 - still check that the word was due on that day.
 
-That changes `ReviewService.submitAction`, `record_review` and their tests.
-The rules themselves (`shared/review-logic.ts`) do not change: they already
+That changes `ReviewService.submitAction` and its tests. `record_review`
+needed nothing: it already takes the recorded day inside its event. The
+rules themselves (`shared/review-logic.ts`) do not change: they already
 take the day as an argument.
 
 ### 4. Idempotent synchronisation
@@ -88,7 +108,7 @@ request id every time it is tried. The outcomes, all of which exist today:
 | `409` with the current state | The word changed since the card was loaded | Removed, and listed for the reviewer (see 5) |
 | `404` | The word is gone | Removed, and listed |
 | `401` | The session has expired | Kept; syncing stops until sign-in |
-| Network error, timeout, `5xx` | Unknown | Kept; tried again later, with growing waits |
+| Network error, timeout, `5xx` | Unknown | Kept; tried again later (see 2: when the connection returns, when the next answer saves, or on *Try now*) |
 
 A `dry_run` reply (saving switched off on the server) must not be treated as
 saved: the entry is removed and the reviewer is told nothing was recorded.
@@ -154,10 +174,14 @@ after the page has loaded.
 
 ## Order of work
 
-1. `answeredAt` on the server, with its limits and tests. Useful on its own:
-   it also fixes the answer that is given at 23:59 and arrives at 00:01.
+1. `answeredAt` on the server, with its limits and tests. **Done
+   (2026-10-14)** — refused when more than five minutes ahead of the
+   server's clock or more than two days old. Useful on its own: it also
+   fixes the answer that is given at 23:59 and arrives at 00:01.
 2. The outbox, with the pending count, for answers that fail to send while the
    page is open. No local queue yet. This is the smallest honest step.
+   **Done (2026-10-14)** — in memory, retried when the connection returns,
+   when the next answer saves, or on *Try now*.
 3. The local queue and per-account storage, behind a setting.
 4. The service worker.
 
@@ -167,6 +191,8 @@ Each step is usable without the next.
 
 - Is keeping vocabulary on the device acceptable, and on which devices?
 - How old may an offline answer be and still be applied? A day is safe. A week
-  starts to stretch what "reviewed on Monday" means for a schedule.
+  starts to stretch what "reviewed on Monday" means for a schedule. **Built
+  with two days** (`ANSWERED_AT_MAX_AGE_MS` in `server/review-service.ts`) —
+  one number to move if the owner decides otherwise.
 - Is losing pending answers when browser data is cleared acceptable, given the
   warning?

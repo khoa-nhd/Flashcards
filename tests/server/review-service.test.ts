@@ -129,6 +129,71 @@ describe('submitAction', () => {
     expect(repository.updates).toEqual([{ pageId: pageId(1), changes: { nextReview: '2026-10-10' } }]);
   });
 
+  it('lands an answer that waited for a connection on the day it was given, not the day it arrived', async () => {
+    const { repository, service } = start();
+    const result = await service.submitAction({
+      pageId: pageId(1),
+      action: 'remember',
+      expected: shown,
+      // Noon on the day before TODAY in the account's time zone.
+      answeredAt: '2026-10-08T05:00:00Z',
+    });
+    // Mastery 3 is worth four days — counted from the answered day, not from the server's clock.
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 4, nextReview: '2026-10-12' } });
+    expect(repository.updates).toEqual([{ pageId: pageId(1), changes: { mastery: 4, nextReview: '2026-10-12' } }]);
+  });
+
+  it('still checks that the word was due on the day the answer was given', async () => {
+    const { repository, service } = setup([record(1, { mastery: 3, nextReview: '2026-10-09' })]);
+    // Due on the server's own day, but the answer says it was given the day before.
+    await expect(
+      service.submitAction({
+        pageId: pageId(1),
+        action: 'remember',
+        expected: { mastery: 3, nextReview: '2026-10-09' },
+        answeredAt: '2026-10-08T05:00:00Z',
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'conflict' });
+    expect(repository.updates).toEqual([]);
+  });
+
+  it('tolerates a browser clock a few minutes ahead', async () => {
+    const { service } = start();
+    const result = await service.submitAction({
+      pageId: pageId(1),
+      action: 'remember',
+      expected: shown,
+      answeredAt: '2026-10-09T05:02:00Z',
+    });
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 4, nextReview: '2026-10-13' } });
+  });
+
+  it('refuses an answer that claims to be from the future, rather than schedule from a wrong clock', async () => {
+    const { repository, service } = start();
+    await expect(
+      service.submitAction({
+        pageId: pageId(1),
+        action: 'remember',
+        expected: shown,
+        answeredAt: '2026-10-09T06:00:00Z',
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+    expect(repository.updates).toEqual([]);
+  });
+
+  it('refuses an answer more than two days old, which is too late to schedule a word from', async () => {
+    const { repository, service } = start();
+    await expect(
+      service.submitAction({
+        pageId: pageId(1),
+        action: 'remember',
+        expected: shown,
+        answeredAt: '2026-10-05T05:00:00Z',
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'invalid_request' });
+    expect(repository.updates).toEqual([]);
+  });
+
   it('computes the update from the stored record, never from browser-supplied values', async () => {
     const { repository, service } = start();
     // A tampered "expected" can only make the request fail; it is never written.

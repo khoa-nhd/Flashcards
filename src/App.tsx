@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { pageIdSchema, type AppConfigResponse } from '../shared/api.js';
-import { AppProvider, createAppServices, useApp, useSettings, type AccountControls } from './app-context.js';
+import { AppProvider, createAppServices, useApp, useOutbox, useSettings, type AccountControls } from './app-context.js';
 import { AppShell } from './components/AppShell.js';
 import { AuthScreen } from './components/AuthScreen.js';
 import { Link } from './components/Link.js';
@@ -222,10 +222,11 @@ function Workspace({ api, settings, account }: { api: AppApi; settings?: Setting
 }
 
 function Root() {
-  const { vocabulary, account } = useApp();
+  const { vocabulary, account, outbox } = useApp();
   const location = useLocation();
   const route = matchRoute(location.pathname);
   const vocab = useSyncExternalStore(vocabulary.subscribe, vocabulary.getState);
+  const outboxState = useOutbox();
   const { reduceMotion } = useSettings();
 
   useEffect(() => {
@@ -244,7 +245,19 @@ function Root() {
 
   return (
     <>
-      <AppShell active={route} reviewCount={reviewCount} badge={badge} account={account}>
+      <AppShell
+        active={route}
+        reviewCount={reviewCount}
+        badge={badge}
+        account={account}
+        pending={{
+          count: outboxState.entries.length,
+          refused: outboxState.refused,
+          waitingForSignIn: outboxState.waitingForSignIn,
+          tryNow: () => void outbox.flush(),
+          dismissRefused: outbox.dismissRefused,
+        }}
+      >
         {route === null ? (
           <div className="mx-auto flex h-full max-w-md flex-col items-center justify-center gap-4 px-6 text-center">
             <h1 className="font-serif text-3xl font-semibold">Page not found</h1>

@@ -293,6 +293,50 @@ line, the relations network and its per-kind totals, the empty, too-old and
 failed-load states, the family capability on and off, the no-family and
 no-words states, and the navigation entry with its document title.
 
+### Batch 7 of the 2026-10-13 roadmap (2026-10-14)
+
+**Offline steps 1 and 2: the answer's own date, and an outbox for what the
+server never confirmed** (`docs/offline-mode-design.md`, whose status now
+says what exists). No migration: `record_review` already takes the recorded
+day inside its event, so only the service that builds that event changed.
+
+- **`answeredAt` on every review answer.** The browser stamps the instant it
+  grades a card and sends it; the server lands the result, the recorded day
+  and the FSRS calculation on *that* day instead of its own — so an answer
+  given at 23:59 and saved at 00:01 counts for the day it was given, and an
+  answer that waited for a connection is scheduled from the day it was
+  given. Within limits the server enforces (both refused with `400` and
+  nothing written, never clamped): more than five minutes ahead of its clock
+  is a wrong clock, more than two days old is a schedule nobody means. The
+  word still has to have been due on the answered day, and the state guard
+  against a stale write is unchanged. Practice answers are untouched (the
+  server's day, as before).
+- **The outbox** (`src/lib/outbox.ts`). An answer whose fate is unknown — no
+  connection, a timeout, a 5xx, a reply the app cannot read — no longer
+  blocks the reviewer: it is kept with its request id (so a repeat is
+  recorded once, never twice) and the sitting continues. While anything
+  waits, a strip above the page says so in words ("1 answer waiting to be
+  saved") with *Try now*; entries are retried when the connection returns,
+  when the next answer saves, or on *Try now* — no background timer runs. A
+  definitive refusal (4xx) leaves the outbox and is reported with the word
+  it was for, with *Dismiss*; a `dry_run` reply is reported as "nothing was
+  recorded", never counted as saved; a `401` stops the sending until
+  sign-in, keeping every entry. The completion screen separates the two,
+  naming the answers of that sitting still waiting beside the server's
+  saved totals. The outbox lives only as long as the page — per-account
+  storage is step 3 of the design, not built.
+
+A 4xx to a fresh answer keeps the card on screen with *Try again*, exactly
+as before: with a final "no" from the server there is nothing to retry that
+would fare better. The review-failure tests in
+`tests/client/review-ui.test.tsx` now use such a final refusal for that
+behaviour; the unknown-failure path is `tests/client/offline-outbox.test.tsx`
+(both the store and the sitting: the card leaves the queue, the strip, the
+completion line, a refusal by word, `dry_run`, `401`, and the same request
+id on every repeat), and `tests/server/review-service.test.ts` covers the
+answered day, the due check against it, the two limits and the tolerated
+clock.
+
 ## 1. Audit: where the app stands
 
 ### Baseline (run on 2026-10-10)

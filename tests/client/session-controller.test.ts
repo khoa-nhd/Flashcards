@@ -109,6 +109,8 @@ describe('answering', () => {
       expected: { mastery: 3, nextReview: card(1).nextReview },
       requestId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
       durationMs: expect.any(Number),
+      // The instant the answer was given, so a save that waits still lands on its own day.
+      answeredAt: expect.any(String),
       sessionId: session.sessionId(),
     });
   });
@@ -119,7 +121,15 @@ describe('answering', () => {
     session.flip();
     session.grade('remember');
     const sent = api.submitAction.mock.calls[0]?.[0] ?? {};
-    expect(Object.keys(sent).sort()).toEqual(['action', 'durationMs', 'expected', 'pageId', 'requestId', 'sessionId']);
+    expect(Object.keys(sent).sort()).toEqual([
+      'action',
+      'answeredAt',
+      'durationMs',
+      'expected',
+      'pageId',
+      'requestId',
+      'sessionId',
+    ]);
   });
 
   it('stays on the card until the server confirms, then shows the next front', async () => {

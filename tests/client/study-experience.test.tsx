@@ -346,7 +346,11 @@ describe('rating confidence before the answer', () => {
     await screen.findByTestId('flashcard');
     press('1');
     press('ArrowRight');
-    await act(async () => saves[0]?.reject(new ApiError('network', 'Could not reach the server.')));
+    // A final refusal from the server (a 4xx) keeps the card for a retry; an
+    // unknown failure is kept in the outbox instead (offline-outbox.test.tsx).
+    await act(async () =>
+      saves[0]?.reject(new ApiError('read_only', 'Saving is switched off, so nothing was recorded.', 409)),
+    );
     await user.click(screen.getByRole('button', { name: /Retry/ }));
     expect(api.submitAction).toHaveBeenCalledTimes(2);
     const [first, second] = api.submitAction.mock.calls.map(([request]) => request);

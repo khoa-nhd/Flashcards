@@ -160,6 +160,16 @@ export const reviewActionRequestSchema = z.strictObject({
    * said while guessing (low) is rated Hard so the next check comes sooner.
    */
   confidence: confidenceSchema.optional(),
+  /**
+   * When the answer was given, as the browser saw it. Optional: without it
+   * the server uses its own clock, as it always did. With it, an answer that
+   * could not be sent at once (a lost connection, an offline sitting) still
+   * lands on the day it was given — the day the result, the recorded review
+   * and the FSRS calculation use. The server refuses it rather than guessing
+   * when it is too far from its own clock: ahead is a wrong clock, far
+   * behind is a schedule nobody means to set.
+   */
+  answeredAt: z.iso.datetime({ offset: true }).optional(),
 });
 
 export const reviewActionResponseSchema = z.object({

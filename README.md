@@ -28,7 +28,7 @@ Reference documents:
 - [docs/import-and-export.md](docs/import-and-export.md) — importing a list, the export format, and backup and recovery.
 - [docs/ai-features.md](docs/ai-features.md) — what the AI features send, how to configure one, and how they fail safe.
 - [docs/upgrade-plan.md](docs/upgrade-plan.md) — the plan for turning this into a fuller learning system, and how far it has got.
-- [docs/offline-mode-design.md](docs/offline-mode-design.md) — what offline review would take. Not built.
+- [docs/offline-mode-design.md](docs/offline-mode-design.md) — the plan for offline review. Its first two steps are built (an answer's own date, and a page-open outbox); the rest is not.
 
 ## Try it with sample data
 
@@ -413,8 +413,12 @@ Sign in with the same account on each device. The data is the same everywhere.
 - If you answer the same card on two devices, the first answer is saved. The
   second device is told the card changed on another device and offers to skip
   it. Nothing is counted twice.
-- There is no offline mode. An answer given without a connection stays on
-  screen with a Retry. What building one would take is written up in
+- There is no offline mode yet, but a lost connection no longer stops a
+  sitting: an answer the server never confirms is kept, counted in a strip
+  ("1 answer waiting to be saved") and sent again — with the same request id,
+  so it is saved once and never twice — when the connection returns, when
+  the next answer saves, or on *Try now*. It lives only as long as the page;
+  what the rest of offline would take is written up in
   [docs/offline-mode-design.md](docs/offline-mode-design.md).
 
 ## Deploying
@@ -555,7 +559,9 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 
 ## Limitations
 
-- Sync is refresh-based, not real-time, and there is no offline mode.
+- Sync is refresh-based, not real-time, and there is no offline mode — only
+  the page-open outbox for answers that could not be sent (see
+  docs/offline-mode-design.md).
 - The whole vocabulary is loaded at once and searched in the browser. That is
   comfortable into the low thousands of words; beyond that it would need
   server-side search.

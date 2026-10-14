@@ -196,6 +196,8 @@ describe('answering with the keyboard', () => {
       expected: { mastery: 3, nextReview: TODAY },
       requestId: expect.any(String),
       durationMs: expect.any(Number),
+      // The instant the answer was given, so a late save still lands on this day.
+      answeredAt: expect.any(String),
       sessionId: expect.any(String),
     });
   });
@@ -532,14 +534,17 @@ describe('saving', () => {
 });
 
 describe('when saving fails', () => {
+  // A failure with a final answer from the server (a 4xx) keeps the card on screen: there is
+  // nothing to retry that would fare better. An answer whose fate is unknown — no connection,
+  // a timeout — is kept in the outbox and the sitting continues; that is offline-outbox.test.tsx.
   it('stays on the card and explains what happened', async () => {
     const { saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('network', 'Could not reach the server. Check your connection.'));
+    await fail(saves[0], new ApiError('read_only', 'Saving is switched off, so nothing was recorded.', 409));
 
     expect(screen.getByRole('alert')).toHaveTextContent('Your answer was not confirmed');
-    expect(screen.getByRole('alert')).toHaveTextContent('Could not reach the server. Check your connection.');
+    expect(screen.getByRole('alert')).toHaveTextContent('Saving is switched off, so nothing was recorded.');
     showsCard(1, 'word-1');
     expect(screen.getByLabelText('Card 1 of 3')).toHaveTextContent('1 / 3');
     expect(isFlipped()).toBe(true);
@@ -549,7 +554,7 @@ describe('when saving fails', () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('network', 'offline'));
+    await fail(saves[0], new ApiError('read_only', 'Saving is switched off, so nothing was recorded.', 409));
     press('ArrowRight');
     press('ArrowLeft');
     swipe(200);
@@ -562,7 +567,7 @@ describe('when saving fails', () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('timeout', 'No confirmation arrived in time.'));
+    await fail(saves[0], new ApiError('read_only', 'Saving is switched off, so nothing was recorded.', 409));
 
     const retry = screen.getByRole('button', { name: 'Retry “Remember”' });
     expect(retry).toHaveFocus();
@@ -580,7 +585,7 @@ describe('when saving fails', () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('network', 'offline'));
+    await fail(saves[0], new ApiError('read_only', 'Saving is switched off, so nothing was recorded.', 409));
     fireEvent.click(screen.getByRole('button', { name: 'Back to card' }));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
     press('ArrowLeft');

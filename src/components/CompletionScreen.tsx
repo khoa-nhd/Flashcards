@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { DayPlanResponse, SessionSummary } from '../../shared/api.js';
-import { useApp } from '../app-context.js';
-import { formatDuration } from '../lib/format.js';
+import { useApp, useOutbox } from '../app-context.js';
+import { count, formatDuration } from '../lib/format.js';
 import { FOCUS_TEXT, type FocusText } from '../lib/review-focus.js';
 import { ROUTES } from '../lib/router.js';
 import { canUndo, type SessionState } from '../lib/session-machine.js';
@@ -21,6 +21,10 @@ type Loaded = { for: string; summary: SessionSummary | null };
 
 export function CompletionScreen({ state, sessionId, onReload, onUndo }: CompletionScreenProps) {
   const { api } = useApp();
+  const outboxState = useOutbox();
+  // The numbers below come from the server, so they count only saved answers;
+  // this sits beside them and counts the ones of this sitting still waiting.
+  const waiting = outboxState.entries.filter((entry) => entry.request.sessionId === sessionId).length;
   const { meta, tally } = state;
   const total = state.cards.length;
   const preview = meta !== null && !meta.writesEnabled;
@@ -167,6 +171,12 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo }: Complet
       )}
 
       {summary !== null && <p className="-mt-3 text-xs text-muted">These are the answers that were saved.</p>}
+
+      {waiting > 0 && (
+        <p role="status" className="-mt-3 text-sm font-medium text-warn-ink">
+          {count(waiting, 'answer')} from this sitting {waiting === 1 ? 'is' : 'are'} still waiting to be saved.
+        </p>
+      )}
 
       {goal !== null && hasGoal(goal) && (
         <div className="w-full rounded-2xl border border-line px-4 py-3 text-left">

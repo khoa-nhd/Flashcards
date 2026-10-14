@@ -430,7 +430,10 @@ describe('reviewing only the weakest words', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    await act(async () => saves[0]?.reject(unreachable()));
+    // A final refusal from the server (a 4xx): there is nothing to retry that
+    // would fare better, so the answer waits on this card. An unknown failure
+    // goes to the outbox instead — offline-outbox.test.tsx.
+    await act(async () => saves[0]?.reject(new ApiError('read_only', 'Saving is switched off, so nothing was recorded.', 409)));
     expect(screen.getByText('Your answer was not confirmed')).toBeInTheDocument();
 
     await user.click(nav().getByRole('link', { name: /^Review/ }));

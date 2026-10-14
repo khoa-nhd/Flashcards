@@ -7,6 +7,7 @@
 import type { Confidence, ReviewFocus } from '../../shared/api.js';
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { ApiError, type ReviewApi } from './api-client.js';
+import { isFinalRefusal, type OutboxStore } from './outbox.js';
 import { newRequestId } from './request-id.js';
 import {
   currentCard,
@@ -56,6 +57,13 @@ export function createSessionController(
   api: Pick<ReviewApi, 'fetchQueue' | 'submitAction' | 'undoAction'>,
   /** Called once an answer is confirmed as saved, so other views know their data has changed. */
   onSaved: () => void = () => {},
+  /**
+   * Where an answer whose fate is unknown (no connection, a timeout, a server
+   * that could not answer) is kept for sending again, instead of blocking the
+   * reviewer. Given it, such an answer is queued and the sitting continues;
+   * without it, the old behaviour stands: the card waits with *Try again*.
+   */
+  outbox?: OutboxStore,
 ): SessionController {
   let state = initialSessionState;
   let loadSequence = 0;
@@ -67,7 +75,7 @@ export function createSessionController(
   /** When the card on screen appeared, to record how long it took to answer. */
   let shown: { id: string; at: number } | null = null;
   /** Identifies the answer being saved. A retry repeats it, so one answer is recorded once. */
-  let answer: { requestId: string; durationMs: number } | null = null;
+  let answer: { requestId: string; durationMs: number; answeredAt: string } | null = null;
   /** Identifies the Undo of one answer. Pressing Undo again after a failure repeats it. */
   let undoRequest: { of: string; requestId: string } | null = null;
   const listeners = new Set<() => void>();
@@ -88,23 +96,34 @@ export function createSessionController(
     const action = state.pendingAction;
     if (state.status !== 'saving' || card === null || action === null || answer === null) return;
     const { requestId } = answer;
+    const body = {
+      pageId: card.id,
+      action,
+      expected: { mastery: card.mastery, nextReview: card.nextReview },
+      requestId,
+      durationMs: answer.durationMs,
+      answeredAt: answer.answeredAt,
+      sessionId,
+      ...(state.confidence === null ? {} : { confidence: state.confidence }),
+    };
     try {
-      const response = await api.submitAction({
-        pageId: card.id,
-        action,
-        expected: { mastery: card.mastery, nextReview: card.nextReview },
-        requestId,
-        durationMs: answer.durationMs,
-        sessionId,
-        ...(state.confidence === null ? {} : { confidence: state.confidence }),
-      });
+      const response = await api.submitAction(body);
       // Only an answer that was really stored, in a store that can take it back, is offered for Undo.
       const undoable = response.outcome !== 'dry_run' && state.meta?.capabilities.undo === true;
       dispatch({ type: 'SAVE_SUCCEEDED', requestId: undoable ? requestId : undefined });
       onSaved();
+      // Anything still waiting from an earlier lost connection goes with the next good round.
+      void outbox?.flush();
     } catch (error) {
       if (error instanceof ApiError && error.code === 'conflict') {
         dispatch({ type: 'SAVE_CONFLICT', message: error.message });
+      } else if (outbox !== undefined && !isFinalRefusal(error)) {
+        // The server never gave a verdict: the answer is kept, to be sent again
+        // with the same request id (so it can be recorded once, never twice) —
+        // and the reviewer carries on with the next card rather than being stuck
+        // on this one with an error that may not even be true.
+        outbox.enqueue({ requestId, word: card.word, request: body });
+        dispatch({ type: 'SAVE_SUCCEEDED' });
       } else {
         dispatch({ type: 'SAVE_FAILED', message: messageOf(error) });
       }
@@ -170,7 +189,13 @@ export function createSessionController(
     grade(action) {
       const elapsed = shown === null ? 0 : Date.now() - shown.at;
       if (!dispatch({ type: 'GRADE', action })) return false;
-      answer = { requestId: newRequestId(), durationMs: Math.min(Math.max(Math.round(elapsed), 0), MAX_DURATION_MS) };
+      // The instant the answer is given, kept with it: an answer that cannot be
+      // sent at once still belongs to this day, not to the day it arrives.
+      answer = {
+        requestId: newRequestId(),
+        durationMs: Math.min(Math.max(Math.round(elapsed), 0), MAX_DURATION_MS),
+        answeredAt: new Date().toISOString(),
+      };
       void save();
       return true;
     },

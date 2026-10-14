@@ -8,6 +8,7 @@ import { createContext, useContext, useEffect, useSyncExternalStore } from 'reac
 import type { ReviewFocus } from '../shared/api.js';
 import type { AppApi } from './lib/api-client.js';
 import { createLibraryStore, type LibraryState, type LibraryStore } from './lib/library-store.js';
+import { createOutbox, type OutboxState, type OutboxStore } from './lib/outbox.js';
 import { createSessionController, type SessionController } from './lib/session-controller.js';
 import { createSettingsStore, type Settings, type SettingsStore } from './lib/settings.js';
 import { createToastStore, type ToastStore } from './lib/toasts.js';
@@ -36,6 +37,8 @@ export interface AppServices {
   ensureReviewSession(focus?: ReviewFocus | null, collection?: string | null): void;
   /** Collections, further examples and relationships between words. */
   library: LibraryStore;
+  /** Answers still waiting to be saved because the server never confirmed them. */
+  outbox: OutboxStore;
 }
 
 /**
@@ -49,8 +52,10 @@ export function createAppServices(
   account: AccountControls | null = null,
 ): AppServices {
   const vocabulary = createVocabularyStore(api);
+  // Answers the server never confirmed wait here instead of blocking the reviewer.
+  const outbox = createOutbox(api);
   // A saved answer changes mastery and dates, so the other pages must re-read.
-  const session = createSessionController(api, () => vocabulary.markStale());
+  const session = createSessionController(api, () => vocabulary.markStale(), outbox);
   let reviewStarted = false;
   const library = createLibraryStore(api);
   const ensureReviewSession = (focus: ReviewFocus | null = null, collection: string | null = null) => {
@@ -67,7 +72,7 @@ export function createAppServices(
       void session.load({ focus, collection });
     }
   };
-  return { api, session, vocabulary, settings, toasts: createToastStore(), account, ensureReviewSession, library };
+  return { api, session, vocabulary, settings, toasts: createToastStore(), account, ensureReviewSession, library, outbox };
 }
 
 const AppContext = createContext<AppServices | null>(null);
@@ -98,6 +103,12 @@ export function useVocabulary(): VocabularyState {
     };
   }, [vocabulary]);
   return state;
+}
+
+/** Answers still waiting to be saved. Reads only; the outbox retries on its own. */
+export function useOutbox(): OutboxState {
+  const { outbox } = useApp();
+  return useSyncExternalStore(outbox.subscribe, outbox.getState);
 }
 
 /** The account's collections, examples and relationships, loading them on first use. */

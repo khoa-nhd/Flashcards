@@ -53,6 +53,16 @@ import { MASTERY_ONLY, type SchedulerStore } from './scheduler-store.js';
 import type { FsrsWrite, VocabularyRepository } from './vocabulary-repository.js';
 import type { WritingCoach } from './ai/writing-coach.js';
 
+/**
+ * How far an answer may claim to be from this server's own clock, and how old
+ * it may still be applied. Beyond either, the answer is refused and shown to
+ * the reviewer rather than guessed at (docs/offline-mode-design.md): a clock
+ * ahead of the server is wrong, and an answer days behind would schedule a
+ * word from a day nobody means.
+ */
+const ANSWERED_AT_FUTURE_TOLERANCE_MS = 5 * 60_000;
+const ANSWERED_AT_MAX_AGE_MS = 48 * 60 * 60_000;
+
 export interface ReviewServiceOptions {
   repository: VocabularyRepository;
   rules: ReviewRules;
@@ -126,6 +136,33 @@ export class ReviewService {
 
   private today(): IsoDate {
     return calendarDateInTimeZone(this.now(), this.options.timeZone);
+  }
+
+  /**
+   * The instant the browser says the answer was given, or `null` where it did
+   * not say and this server's own clock stands. Refused (`400`) rather than
+   * clamped when it is too far from that clock: applying such an answer would
+   * schedule a word for a day the reviewer never answered it.
+   */
+  private answeredInstant(answeredAt: string | undefined): Date | null {
+    if (answeredAt === undefined) return null;
+    const instant = Date.parse(answeredAt);
+    const drift = instant - this.now().getTime();
+    if (drift > ANSWERED_AT_FUTURE_TOLERANCE_MS) {
+      throw new HttpError(
+        400,
+        'invalid_request',
+        "That answer says it was given in the future, so nothing was saved. Check this device's clock and answer again.",
+      );
+    }
+    if (-drift > ANSWERED_AT_MAX_AGE_MS) {
+      throw new HttpError(
+        400,
+        'invalid_request',
+        'That answer is more than two days old, so nothing was saved: it is too late to schedule a word from it.',
+      );
+    }
+    return new Date(instant);
   }
 
   private async writesEnabled(): Promise<boolean> {
@@ -216,7 +253,10 @@ export class ReviewService {
     const { action, expected } = request;
     const requestId = request.requestId ?? randomUUID();
     const { repository, rules } = this.options;
-    const today = this.today();
+    // The day the answer was given, when the browser says: an answer that waited
+    // for a connection still lands on its own day, not the day it arrived.
+    const answered = this.answeredInstant(request.answeredAt);
+    const today = answered === null ? this.today() : calendarDateInTimeZone(answered, this.options.timeZone);
 
     const record = await repository.getRecord(pageId);
     if (record === null) {
@@ -267,7 +307,7 @@ export class ReviewService {
     if (next === null || !(await this.writesEnabled())) return { outcome: 'dry_run', state: next };
 
     // The confidence only reaches FSRS: what the mastery schedule writes never depends on it.
-    const fsrs = this.fsrsFor(record, action, request.confidence ?? null);
+    const fsrs = this.fsrsFor(record, action, request.confidence ?? null, answered ?? this.now());
     // Beside the mastery schedule a failed FSRS calculation costs nothing. In charge, saving
     // without it would leave the word exactly where it was, so the answer is refused instead.
     if (scheduler === 'fsrs' && fsrs === null) {
@@ -414,10 +454,17 @@ export class ReviewService {
 
   /**
    * What FSRS makes of this answer, computed beside the mastery schedule.
-   * A failure is logged and reported as `null`; what that means for the answer
+   * `at` is the instant the answer was given (the browser's, when it said):
+   * FSRS is told the review happened then, not when the answer arrived. A
+   * failure is logged and reported as `null`; what that means for the answer
    * is the caller's decision.
    */
-  private fsrsFor(record: VocabularyRecord, action: ReviewAction, confidence: Confidence | null): FsrsWrite | null {
+  private fsrsFor(
+    record: VocabularyRecord,
+    action: ReviewAction,
+    confidence: Confidence | null,
+    at: Date,
+  ): FsrsWrite | null {
     const { fsrs } = this.options;
     if (fsrs == null || !this.fsrsRunning()) return null;
     try {
@@ -431,7 +478,7 @@ export class ReviewService {
         rating,
         engine: FSRS_ENGINE,
         before,
-        after: fsrsReview(before?.state ?? null, rating, this.now(), fsrs.settings),
+        after: fsrsReview(before?.state ?? null, rating, at, fsrs.settings),
       };
     } catch (error) {
       console.error('FSRS calculation failed:', error instanceof Error ? error.message : 'unknown error');

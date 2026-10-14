@@ -1,4 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { Refusal } from '../lib/outbox.js';
+import { count } from '../lib/format.js';
 import { ROUTES, type RouteKey } from '../lib/router.js';
 import { Icon, type IconName } from './Icon.js';
 import { Link } from './Link.js';
@@ -53,10 +55,18 @@ export interface AppShellProps {
   badge: string | null;
   /** The signed-in account, where the app has accounts. */
   account?: { email: string | null; signOut(): Promise<void> } | null;
+  /** Answers still waiting to be saved. Shown as one strip above the page while there are any. */
+  pending?: {
+    count: number;
+    refused: Refusal[];
+    waitingForSignIn: boolean;
+    tryNow(): void;
+    dismissRefused(): void;
+  } | null;
   children: ReactNode;
 }
 
-export function AppShell({ active, reviewCount, badge, account = null, children }: AppShellProps) {
+export function AppShell({ active, reviewCount, badge, account = null, pending = null, children }: AppShellProps) {
   const main = useRef<HTMLElement>(null);
   const [focusOn, setFocusOn] = useState(false);
   const focus = useMemo<FocusMode>(
@@ -167,6 +177,41 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
               ))}
             </div>
           </header>
+
+          {/* Answers the server never confirmed: kept, counted and never hidden while there are any. */}
+          {pending !== null && (pending.count > 0 || pending.refused.length > 0) && (
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-line bg-warn-soft px-4 py-2 text-xs text-warn-ink">
+              {pending.count > 0 && (
+                <>
+                  <span role="status">
+                    {count(pending.count, 'answer')} waiting to be saved
+                    {pending.waitingForSignIn ? ' — sign in again to send them' : ''}.
+                  </span>
+                  <button
+                    type="button"
+                    className="cursor-pointer font-semibold underline underline-offset-2"
+                    onClick={pending.tryNow}
+                  >
+                    Try now
+                  </button>
+                </>
+              )}
+              {pending.refused.length > 0 && (
+                <>
+                  <span role="alert" className="min-w-0 flex-1">
+                    {pending.refused.map((item) => `“${item.word}” was not saved: ${item.reason}`).join(' ')}
+                  </span>
+                  <button
+                    type="button"
+                    className="cursor-pointer font-semibold underline underline-offset-2"
+                    onClick={pending.dismissRefused}
+                  >
+                    Dismiss
+                  </button>
+                </>
+              )}
+            </div>
+          )}
 
           <main ref={main} className="min-h-0 flex-1 overflow-y-auto">
             {children}
