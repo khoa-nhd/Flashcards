@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates } from '../../shared/dates.js';
 import { additionsByPeriod, computeSummary, masteryDistribution } from '../../shared/metrics.js';
-import { useApp, useSettings, useVocabulary } from '../app-context.js';
+import { useApp, useSettings, useVocabulary, useTrueMastery } from '../app-context.js';
 import { BarChart } from '../components/BarChart.js';
 import { MasteryPill, StatusBadge, formatDate } from '../components/badges.js';
 import { GoalProgress, hasGoal, useDayPlan } from '../components/GoalStatus.js';
@@ -36,6 +36,7 @@ export function DashboardPage() {
   const settings = useSettings();
   const activity = useReviewActivity();
   const plan = useDayPlan();
+  const { trueMasteryMap } = useTrueMastery();
   const { entries, meta } = state;
   const today = meta?.today ?? null;
 
@@ -47,6 +48,26 @@ export function DashboardPage() {
   );
   const recent = useMemo(() => recentAdditions(entries), [entries]);
   const ready = useMemo(() => entries.filter((entry) => entry.reviewable).length, [entries]);
+
+  // True Mastery summary
+  const trueMasterySummary = useMemo(() => {
+    if (!today) return null;
+    const counts = { Excellent: 0, Strong: 0, Good: 0, Developing: 0, Weak: 0, New: 0, Insufficient: 0 };
+    let totalEvidence = 0;
+    let wordsWithEvidence = 0;
+    for (const entry of entries) {
+      const tm = trueMasteryMap.get(entry.id);
+      if (tm && tm.mastery !== null) {
+        const tier = tm.tier as keyof typeof counts;
+        counts[tier] = (counts[tier] ?? 0) + 1;
+        totalEvidence += tm.totalEffectiveEvidence;
+        wordsWithEvidence++;
+      } else {
+        counts.Insufficient++;
+      }
+    }
+    return { counts, totalEvidence, wordsWithEvidence };
+  }, [entries, trueMasteryMap, today]);
 
   return (
     <div className={PAGE}>
@@ -209,6 +230,67 @@ export function DashboardPage() {
                 />
               </div>
             </section>
+
+            {trueMasterySummary && (
+              <section className={`${CARD} p-5`} aria-label="True Mastery">
+                <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                  <h2 className={SECTION_TITLE}>True Mastery</h2>
+                  <span className="text-xs text-muted">
+                    Evidence-based estimate (0–100) from practice history. Separate from Review Mastery.
+                  </span>
+                </div>
+                <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <StatTile
+                    label="Excellent"
+                    value={trueMasterySummary.counts.Excellent ?? 0}
+                    emphasis="accent"
+                    hint="90–100"
+                  />
+                  <StatTile
+                    label="Strong"
+                    value={trueMasterySummary.counts.Strong ?? 0}
+                    emphasis="accent"
+                    hint="75–89"
+                  />
+                  <StatTile
+                    label="Good"
+                    value={trueMasterySummary.counts.Good ?? 0}
+                    emphasis="accent"
+                    hint="60–74"
+                  />
+                  <StatTile
+                    label="Developing"
+                    value={trueMasterySummary.counts.Developing ?? 0}
+                    hint="40–59"
+                  />
+                  <StatTile
+                    label="Weak"
+                    value={trueMasterySummary.counts.Weak ?? 0}
+                    emphasis="bad"
+                    hint="20–39"
+                  />
+                  <StatTile
+                    label="New"
+                    value={trueMasterySummary.counts.New ?? 0}
+                    hint="0–19"
+                  />
+                  <StatTile
+                    label="Insufficient data"
+                    value={trueMasterySummary.counts.Insufficient ?? 0}
+                    hint="Not enough practice evidence"
+                  />
+                </div>
+                {trueMasterySummary.wordsWithEvidence > 0 && (
+                  <p className="mt-3 text-sm text-muted">
+                    {trueMasterySummary.wordsWithEvidence} of {summary.total} words have practice evidence
+                    (avg {Math.round(trueMasterySummary.totalEvidence / trueMasterySummary.wordsWithEvidence)} effective evidence).
+                    <Link to={ROUTES.bank} className="ml-2 font-medium text-accent hover:underline">
+                      View in Bank
+                    </Link>
+                  </p>
+                )}
+              </section>
+            )}
 
             <div className="grid gap-6 lg:grid-cols-2">
               <section className={`${CARD} p-5`}>

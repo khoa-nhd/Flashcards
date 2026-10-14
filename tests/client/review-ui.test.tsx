@@ -405,20 +405,21 @@ describe('answering by swiping', () => {
 });
 
 describe('saving', () => {
-  it('shows the next card only after the save is confirmed', async () => {
+  it('shows the next card at once, marking the answer as still saving', async () => {
     const { saves } = await renderApp();
     press(' ');
     press('ArrowRight');
 
-    // Still on the first card, visibly saving.
-    showsCard(1, 'word-1');
-    expect(screen.getByText('Saving…')).toBeInTheDocument();
-    expect(screen.queryByText(/Card 2 of 3/)).not.toBeInTheDocument();
-
-    await settle(saves[0]);
+    // The next card is already up; the answer is visibly still on its way.
     showsCard(2, 'word-2');
     expect(screen.getByLabelText('Card 2 of 3')).toHaveTextContent('2 / 3');
     expect(screen.getByText('2 left')).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent('Saving…');
+    expect(answerButton('Remember')).toHaveAttribute('aria-busy', 'true');
+
+    await settle(saves[0]);
+    expect(screen.getByRole('status')).toHaveTextContent('');
+    expect(answerButton('Remember')).toHaveAttribute('aria-busy', 'false');
   });
 
   it('resets the next card to its front', async () => {
@@ -433,7 +434,7 @@ describe('saving', () => {
     expect(screen.getByRole('button', { name: 'Flip card to show the answer' })).toHaveFocus();
   });
 
-  it('cannot be flipped or answered again while saving', async () => {
+  it('does not submit again while an answer is still saving', async () => {
     const { api } = await renderApp();
     press(' ');
     const remember = answerButton('Remember');
@@ -441,10 +442,8 @@ describe('saving', () => {
     fireEvent.click(remember);
     fireEvent.click(remember); // a double click
     fireEvent.click(notRemember);
-    fireEvent.click(flashcard());
-    press(' ');
+    press('ArrowRight');
     expect(api.submitAction).toHaveBeenCalledTimes(1);
-    expect(isFlipped()).toBe(true);
     expect(remember).toHaveAttribute('aria-busy', 'true');
     expect(notRemember).toHaveAttribute('aria-disabled', 'true');
   });
@@ -528,17 +527,16 @@ describe('saving', () => {
 });
 
 describe('when saving fails', () => {
-  it('stays on the card and explains what happened', async () => {
+  it('says the answer was not saved and keeps it for a retry', async () => {
     const { saves } = await renderApp();
     press(' ');
     press('ArrowRight');
     await fail(saves[0], new ApiError('network', 'Could not reach the server. Check your connection.'));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('Your answer was not confirmed');
+    expect(screen.getByRole('alert')).toHaveTextContent('was not saved');
+    expect(screen.getByRole('alert')).toHaveTextContent('word-1');
     expect(screen.getByRole('alert')).toHaveTextContent('Could not reach the server. Check your connection.');
-    showsCard(1, 'word-1');
-    expect(screen.getByLabelText('Card 1 of 3')).toHaveTextContent('1 / 3');
-    expect(isFlipped()).toBe(true);
+    showsCard(2, 'word-2');
   });
 
   it('ignores answer shortcuts until the failure is dealt with', async () => {
@@ -551,34 +549,36 @@ describe('when saving fails', () => {
     swipe(200);
     press(' ');
     expect(api.submitAction).toHaveBeenCalledTimes(1);
-    expect(isFlipped()).toBe(true);
   });
 
-  it('retries the same answer and advances once it is confirmed', async () => {
+  it('retries the same answer and clears the alert once it is confirmed', async () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
     await fail(saves[0], new ApiError('timeout', 'No confirmation arrived in time.'));
 
-    const retry = screen.getByRole('button', { name: 'Retry “Remember”' });
+    const retry = screen.getByRole('button', { name: 'Retry' });
     expect(retry).toHaveFocus();
     fireEvent.click(retry);
     expect(api.submitAction).toHaveBeenCalledTimes(2);
     expect(api.submitAction.mock.calls[1]).toEqual(api.submitAction.mock.calls[0]);
-    showsCard(1, 'word-1');
+    showsCard(2, 'word-2');
 
     await settle(saves[1], { outcome: 'already_applied', state: { mastery: 4, nextReview: '2026-10-13' } });
     showsCard(2, 'word-2');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('can return to the card to choose again', async () => {
+  it('can discard a failed answer instead of retrying', async () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
     await fail(saves[0], new ApiError('network', 'offline'));
-    fireEvent.click(screen.getByRole('button', { name: 'Back to card' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Discard answer' }));
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    // The failed answer is not re-sent; the next card is a fresh one.
+    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    press(' ');
     press('ArrowLeft');
     expect(api.submitAction).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'not_remember' }));
   });
@@ -590,8 +590,8 @@ describe('when saving fails', () => {
     await fail(saves[0], new ApiError('conflict', 'This card was changed after it was loaded, so nothing was saved.', 409));
 
     const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent('This card changed on another device');
-    expect(alert).not.toHaveTextContent(/notion/i);
+    expect(alert).toHaveTextContent('could not be saved');
+    expect(alert).toHaveTextContent('the card changed on another device');
     expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
 
     // Skipping records nothing; the session simply moves on and says so at the end.

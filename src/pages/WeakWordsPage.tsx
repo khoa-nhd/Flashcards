@@ -9,8 +9,15 @@ import { Spinner } from '../components/Spinner.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, PAGE } from '../components/ui.js';
 import { useRemote } from '../hooks/useRemote.js';
 import { ROUTES, buildHref, openWord } from '../lib/router.js';
+import { useTrueMastery } from '../hooks/useTrueMastery.js';
 
 type Severity = WeakWordView['severity'];
+
+interface WeakWordWithTrueMastery extends WeakWordView {
+  trueMasteryTier?: string;
+  trueMasteryScore?: number;
+  trueMasteryCoverage?: string;
+}
 
 const SEVERITY_TEXT: Record<Severity, string> = { high: 'High', medium: 'Medium', low: 'Low' };
 const SEVERITY_TONE: Record<Severity, string> = {
@@ -31,16 +38,31 @@ function recentText(word: WeakWordView, windowDays: number): string {
 /** Words that need attention, weakest first, each with the reasons it is listed. */
 export function WeakWordsPage() {
   const { api } = useApp();
+  const { trueMasteryMap } = useTrueMastery();
   const weak = useRemote(api.fetchWeakWords, 'Could not load your weak words.');
   const [severity, setSeverity] = useState<Severity | null>(null);
 
   const words = useMemo(() => weak.data?.words ?? [], [weak.data]);
+  const trueMasteryWords = useMemo((): WeakWordWithTrueMastery[] => {
+    if (!trueMasteryMap) return words as WeakWordWithTrueMastery[];
+    return words.map(word => {
+      const tm = trueMasteryMap.get(word.id);
+      if (!tm || tm.mastery === null) return word as WeakWordWithTrueMastery;
+      return {
+        ...word,
+        trueMasteryTier: tm.tier,
+        trueMasteryScore: tm.mastery,
+        trueMasteryCoverage: tm.coverage,
+      };
+    });
+  }, [words, trueMasteryMap]);
+
   const counts = useMemo(() => {
     const totals: Record<Severity, number> = { high: 0, medium: 0, low: 0 };
     for (const word of words) totals[word.severity] += 1;
     return totals;
   }, [words]);
-  const shown = severity === null ? words : words.filter((word) => word.severity === severity);
+  const shown = severity === null ? trueMasteryWords : trueMasteryWords.filter((word) => word.severity === severity);
   const dueNow = words.filter((word) => word.reviewable).length;
 
   return (
@@ -146,6 +168,9 @@ export function WeakWordsPage() {
                 <ul className={`${CARD} m-0 flex list-none flex-col divide-y divide-line p-0`}>
                   {shown.map((word) => {
                     const [main, ...others] = word.reasons;
+                    const tm = 'trueMasteryTier' in word
+                      ? word as typeof word & { trueMasteryTier?: string; trueMasteryScore?: number; trueMasteryCoverage?: string }
+                      : word;
                     return (
                       <li key={word.id} className="flex flex-col gap-1.5 px-4 py-3">
                         <div className="flex flex-wrap items-center gap-2">
@@ -162,6 +187,25 @@ export function WeakWordsPage() {
                             {SEVERITY_TEXT[word.severity]}
                             <span className="sr-only"> priority</span>
                           </span>
+                          {tm.trueMasteryTier && (() => {
+                              const tier = tm.trueMasteryTier!;
+                              const tierColors: Record<string, string> = {
+                                Excellent: 'bg-good-soft text-good-ink',
+                                Strong: 'bg-accent-soft text-accent',
+                                Good: 'bg-accent-soft text-accent',
+                                Developing: 'bg-warn-soft text-warn-ink',
+                                Weak: 'bg-bad-soft text-bad-ink',
+                                New: 'bg-line/50 text-muted',
+                              };
+                              return (
+                                <span
+                                  className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${tierColors[tier]}`}
+                                  title={tm.trueMasteryCoverage ? `True Mastery: ${tm.trueMasteryScore} (${tm.trueMasteryCoverage})` : 'True Mastery'}
+                                >
+                                  {tier} ({tm.trueMasteryScore})
+                                </span>
+                              );
+                            })()}
                           <MasteryPill mastery={word.mastery} />
                           {word.reviewable && (
                             <span className="inline-flex whitespace-nowrap rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">

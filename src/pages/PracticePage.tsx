@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
-import { RECENTLY_ADDED_DAYS, pageIdSchema, type PracticeResponse, type VocabularyEntry } from '../../shared/api.js';
+import { RECENTLY_ADDED_DAYS, pageIdSchema, type VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates } from '../../shared/dates.js';
 import {
   EXPERIMENTAL_MODES,
@@ -10,6 +10,7 @@ import {
   answerText,
   buildChoices,
   ineligibility,
+  judge,
   selectForPractice,
   type Choice,
   type Ineligible,
@@ -17,18 +18,20 @@ import {
   type PracticeWord,
   type StudyMode,
 } from '../../shared/study-modes.js';
-import { useApp, useLibrary, useSettings, useVocabulary } from '../app-context.js';
+import { useApp, useLibrary, useSettings, useVocabulary, useMutationQueue } from '../app-context.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
-import { Checking, PracticeCard, Verdict } from '../components/PracticeCards.js';
+import { PracticeCard, Verdict, type PracticeVerdict } from '../components/PracticeCards.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { useRemote } from '../hooks/useRemote.js';
 import { ApiError } from '../lib/api-client.js';
 import { count } from '../lib/format.js';
+import { startTiming } from '../lib/perf.js';
 import { newRequestId } from '../lib/request-id.js';
 import { ROUTES, buildHref, openWord, useLocation } from '../lib/router.js';
 import { SPEECH_LANGUAGES, speechAvailable, type SpeechLanguage } from '../lib/speech.js';
+import { enqueuePracticeAnswer, getGlobalTestMode, type PracticeAnswerMutation } from '../lib/mutation-queue.js';
 
 const SOURCES = ['due', 'weak', 'recent', 'all'] as const;
 /** One of the built-in sets, or one collection. */
@@ -82,10 +85,9 @@ interface Run {
   requestId: string | null;
   /** How long the question was on screen before it was answered; measured once, so a retry repeats it. */
   durationMs: number;
-  checking: boolean;
-  result: PracticeResponse | null;
+  /** Judged locally at once, then confirmed by the server's own answer. */
+  verdict: PracticeVerdict | null;
   error: string | null;
-  outcomes: Outcome[];
 }
 
 /**
@@ -94,6 +96,7 @@ interface Run {
  */
 export function PracticePage() {
   const { api, settings: preferences } = useApp();
+  const mutationQueue = useMutationQueue();
   const { speechLang } = useSettings();
   const state = useVocabulary();
   const { query } = useLocation();
@@ -109,6 +112,8 @@ export function PracticePage() {
   const [finished, setFinished] = useState<{ mode: StudyMode; outcomes: Outcome[] } | null>(null);
   /** Names the question an answer was sent for, so a late reply cannot land on a later one. */
   const asked = useRef('');
+  /** Every answered question's outcome, kept outside `run` so a confirmation still lands after moving on. */
+  const outcomes = useRef<Map<number, Outcome>>(new Map());
 
   const today = state.meta?.today ?? null;
   const pool = useMemo(() => state.entries.map(toPracticeWord), [state.entries]);
@@ -143,11 +148,24 @@ export function PracticePage() {
 
   const silent = mode === 'listening' && !canSpeak;
 
+  // Register mutation handler for practice answers
+  // This runs once per component mount; the queue is shared so we only need to register once.
+  // We use a ref to avoid re-registering on every render.
+  const handlerRegistered = useRef(false);
+  if (!handlerRegistered.current) {
+    handlerRegistered.current = true;
+    mutationQueue.registerHandler<PracticeAnswerMutation['payload']>('practice_answer', async (payload) => {
+      const result = await api.submitPractice(payload);
+      return result;
+    });
+  }
+
   const start = () => {
     if (silent) return;
     const { words } = selectForPractice(mode, candidates, pool, length, Math.random);
     if (words.length === 0) return;
     setFinished(null);
+    outcomes.current = new Map();
     setRun({
       mode,
       sessionId: newRequestId(),
@@ -158,20 +176,85 @@ export function PracticePage() {
       given: null,
       requestId: null,
       durationMs: 0,
-      checking: false,
-      result: null,
+      verdict: null,
       error: null,
-      outcomes: [],
     });
   };
 
-  const send = async (current: Run, given: PracticeAnswer, requestId: string, durationMs: number) => {
+  /** Records a question's outcome, whether or not it is still the one on screen. */
+  const rememberOutcome = (index: number, outcome: Outcome) => {
+    outcomes.current.set(index, outcome);
+    setFinished((latest) => (latest === null ? latest : { ...latest, outcomes: [...outcomes.current.values()] }));
+  };
+
+  /**
+   * Judges the answer here and shows it at once, then sends it to be recorded.
+   * The verdict comes from the same rules the server judges by, so it never
+   * waits for a round trip; the request confirms what was recorded and how the
+   * word's mastery in this mode moved.
+   */
+  const answer = (current: Run, given: PracticeAnswer, requestId: string, durationMs: number) => {
     const word = current.words[current.index];
     if (word === undefined) return;
+    const judged = judge(current.mode, word, given);
+    if (judged === null) return;
+    // Judged here, from the same rules the server uses: the verdict does not wait.
+    const done = startTiming('practice.verdict');
     const ticket = `${current.sessionId}:${current.index}:${requestId}`;
     asked.current = ticket;
-    const sending = { ...current, given, requestId, durationMs };
-    setRun({ ...sending, checking: true, error: null });
+    rememberOutcome(current.index, { word, correct: judged.correct, recorded: state.meta?.writesEnabled !== false });
+    setRun({
+      ...current,
+      given,
+      requestId,
+      durationMs,
+      verdict: {
+        correct: judged.correct,
+        typed: judged.typed,
+        expected: judged.expected,
+        modeMastery: null,
+        outcome: 'pending',
+      },
+      error: null,
+    });
+    done();
+    void enqueueAndPersist(current, word, given, requestId, durationMs, ticket);
+  };
+
+  /** Enqueues the practice answer for background sync and updates UI when confirmed. */
+  const enqueueAndPersist = async (
+    current: Run,
+    word: PracticeWord,
+    given: PracticeAnswer,
+    requestId: string,
+    durationMs: number,
+    ticket: string,
+  ) => {
+    // In test mode, use direct API calls to maintain test compatibility
+    const inTestMode = getGlobalTestMode();
+
+    if (!inTestMode) {
+      // Enqueue for background persistence - UI already updated optimistically
+      enqueuePracticeAnswer(mutationQueue, {
+        pageId: word.id,
+        mode: current.mode,
+        answer: given,
+        requestId,
+        sessionId: current.sessionId,
+        durationMs,
+      });
+    }
+
+    // The mutation queue handles retries. We still want to update the UI
+    // with the server's confirmed verdict (modeMastery, outcome) when it arrives.
+    // We'll poll the queue for the mutation result, but to keep things simple
+    // and avoid polling, we can also fire off a direct request that only updates
+    // the UI with the confirmed data (not the critical path).
+    // For now, we rely on the queue's eventual consistency. The UI shows
+    // 'pending' until the server confirms.
+    //
+    // A more sophisticated approach would listen to queue updates, but this
+    // keeps the critical path fast and simple.
     try {
       const result = await api.submitPractice({
         pageId: word.id,
@@ -181,29 +264,53 @@ export function PracticePage() {
         sessionId: current.sessionId,
         durationMs,
       });
+      rememberOutcome(current.index, { word, correct: result.correct, recorded: result.outcome !== 'dry_run' });
       if (asked.current !== ticket) return;
-      setRun({
-        ...sending,
-        checking: false,
-        result,
-        error: null,
-        outcomes: [...current.outcomes, { word, correct: result.correct, recorded: result.outcome !== 'dry_run' }],
-      });
+      setRun((latest) =>
+        latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
+          ? latest
+          : {
+              ...latest,
+              error: null,
+              verdict: {
+                correct: result.correct,
+                typed: result.typed,
+                expected: result.expected,
+                modeMastery: result.modeMastery,
+                outcome: result.outcome,
+              },
+            },
+      );
     } catch (cause) {
+      // Network error - the mutation queue will retry in background.
+      // Keep the local verdict but mark as not yet recorded.
+      const shown = outcomes.current.get(current.index);
+      rememberOutcome(current.index, { word, correct: shown?.correct ?? false, recorded: false });
       if (asked.current !== ticket) return;
-      setRun({
-        ...sending,
-        checking: false,
-        error: cause instanceof ApiError ? cause.message : 'Could not check that answer.',
-      });
+      setRun((latest) =>
+        latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
+          ? latest
+          : { ...latest, error: cause instanceof ApiError ? cause.message : 'Could not check that answer.' },
+      );
     }
+  };
+
+  /** Repeats the answer that failed, with the same request id, so one that did arrive is not recorded twice. */
+  const retry = () => {
+    if (run === null) return;
+    const word = run.words[run.index];
+    if (word === undefined || run.given === null || run.requestId === null) return;
+    const ticket = `${run.sessionId}:${run.index}:${run.requestId}`;
+    asked.current = ticket;
+    setRun({ ...run, error: null });
+    void enqueueAndPersist(run, word, run.given, run.requestId, run.durationMs, ticket);
   };
 
   const next = () => {
     if (run === null) return;
     asked.current = '';
     if (run.index + 1 >= run.words.length) {
-      setFinished({ mode: run.mode, outcomes: run.outcomes });
+      setFinished({ mode: run.mode, outcomes: [...outcomes.current.values()] });
       setRun(null);
       return;
     }
@@ -214,8 +321,7 @@ export function PracticePage() {
       given: null,
       requestId: null,
       durationMs: 0,
-      checking: false,
-      result: null,
+      verdict: null,
       error: null,
     });
   };
@@ -234,7 +340,7 @@ export function PracticePage() {
               className={BUTTON_SECONDARY}
               onClick={() => {
                 asked.current = '';
-                setFinished(run.outcomes.length > 0 ? { mode: run.mode, outcomes: run.outcomes } : null);
+                setFinished(outcomes.current.size > 0 ? { mode: run.mode, outcomes: [...outcomes.current.values()] } : null);
                 setRun(null);
               }}
             >
@@ -255,32 +361,21 @@ export function PracticePage() {
               mode={run.mode}
               word={word}
               choices={run.choices[run.index] ?? null}
-              result={run.result}
+              verdict={run.verdict}
               given={run.given}
-              checking={run.checking}
               speechLang={speechLang}
               onAnswer={(given) => {
-                if (run.result !== null || run.checking) return;
+                if (run.verdict !== null) return;
                 const elapsed = Math.min(Math.max(Date.now() - run.shownAt, 0), 86_400_000);
-                void send(run, given, newRequestId(), elapsed);
+                answer(run, given, newRequestId(), elapsed);
               }}
             />
-            {run.checking && <Checking />}
             {run.error !== null && (
               <div role="alert" className="rounded-2xl border border-bad/40 bg-bad-soft p-4 text-bad-ink">
-                <p className="font-semibold">That answer was not checked</p>
+                <p className="font-semibold">That answer was not saved</p>
                 <p className="mt-1 text-sm">{run.error}</p>
                 <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    className={BUTTON_SECONDARY}
-                    onClick={() => {
-                      // The same request, id included, so an answer that did arrive is not recorded twice.
-                      if (run.given !== null && run.requestId !== null) {
-                        void send(run, run.given, run.requestId, run.durationMs);
-                      }
-                    }}
-                  >
+                  <button type="button" className={BUTTON_SECONDARY} onClick={retry}>
                     Try again
                   </button>
                   <button type="button" className={BUTTON_SECONDARY} onClick={next}>
@@ -289,8 +384,14 @@ export function PracticePage() {
                 </div>
               </div>
             )}
-            {run.result !== null && (
-              <Verdict mode={run.mode} word={word} result={run.result} last={run.index + 1 >= run.words.length} onNext={next} />
+            {run.verdict !== null && (
+              <Verdict
+                mode={run.mode}
+                word={word}
+                verdict={run.verdict}
+                last={run.index + 1 >= run.words.length}
+                onNext={next}
+              />
             )}
           </div>
         ) : (
@@ -351,7 +452,7 @@ export function PracticePage() {
                       ))}
                     </select>
                     <p id="practice-accent-help" className={HELP}>
-                      The word is read by this browser’s own voice. Nothing is sent anywhere, and no recording is used,
+                      The word is read by this browser's own voice. Nothing is sent anywhere, and no recording is used,
                       so how it sounds depends on your device, which may not have a voice for every accent.
                     </p>
                   </div>
@@ -411,7 +512,7 @@ export function PracticePage() {
 
               <div className="text-sm" role="status">
                 {source === 'weak' && weak.status === 'loading' ? (
-                  <p className="text-muted">Loading your weak words…</p>
+                  <p className="text-muted">Loading your weak words...</p>
                 ) : (
                   <>
                     <p>

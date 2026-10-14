@@ -36,25 +36,25 @@ const panelOf = async () => screen.findByRole('dialog', { name: /candid/ });
 const section = async () => (await within(await panelOf()).findByRole('heading', { name: 'Practice mastery' })).closest('section')!;
 
 describe('practice mastery in a word’s panel', () => {
-  it('shows every mode with its score out of ten, and reads nothing else', async () => {
-    const { api } = await open(`/bank?word=${pageId(1)}`, { practiceCorrect: { [pageId(1)]: { typing: 3, recall: 12 } } });
+  it('shows every mode with its score out of three, and reads nothing else', async () => {
+    const { api } = await open(`/bank?word=${pageId(1)}`, { practiceCorrect: { [pageId(1)]: { typing: 2, recall: 12 } } });
     const shown = await section();
     expect(api.fetchPracticeMastery).toHaveBeenCalledWith(pageId(1));
 
     const rows = within(shown).getAllByRole('listitem').map((item) => item.textContent);
-    expect(rows).toEqual(['Recognition0 / 10', 'Recall10 / 10', 'Typing3 / 10', 'Fill in the blank0 / 10', 'Listening0 / 10']);
+    expect(rows).toEqual(['Recognition0 / 3', 'Recall3 / 3', 'Typing2 / 3', 'Fill in the blank0 / 3', 'Listening0 / 3']);
     const typing = within(shown).getByRole('meter', { name: 'Typing practice mastery' });
-    expect(typing).toHaveAttribute('aria-valuenow', '3');
-    expect(typing).toHaveAttribute('aria-valuemax', '10');
-    expect(typing).toHaveAttribute('aria-valuetext', '3 of 10');
-    // Twelve correct answers are still ten: the score stops at its ceiling.
-    expect(within(shown).getByRole('meter', { name: 'Recall practice mastery' })).toHaveAttribute('aria-valuenow', '10');
+    expect(typing).toHaveAttribute('aria-valuenow', '2');
+    expect(typing).toHaveAttribute('aria-valuemax', '3');
+    expect(typing).toHaveAttribute('aria-valuetext', '2 of 3');
+    // Twelve correct answers are still three: the score stops at its ceiling.
+    expect(within(shown).getByRole('meter', { name: 'Recall practice mastery' })).toHaveAttribute('aria-valuenow', '3');
   });
 
   it('says what the score is, and that it is not the review mastery', async () => {
     await open(`/bank?word=${pageId(1)}`, { practiceCorrect: { [pageId(1)]: { typing: 3 } } });
     const shown = await section();
-    expect(shown).toHaveTextContent('One point for each correct practice answer in that mode, up to 10.');
+    expect(shown).toHaveTextContent('One point for each correct practice answer in that mode, up to 3.');
     expect(shown).toHaveTextContent('A wrong answer changes nothing.');
     expect(shown).toHaveTextContent('it never decides when the word is due, and reviewing does not change it');
     // Already practised, so there is no nudge to start.
@@ -108,19 +108,19 @@ describe('practice mastery after a practice answer', () => {
   const start = async (user: ReturnType<typeof userEvent.setup>) => user.click(await main().findByRole('button', { name: 'Start' }));
 
   it('says where the word now stands in that mode after a correct answer', async () => {
-    const { user } = await open('/practice?mode=typing&source=all', { practiceCorrect: { [pageId(1)]: { typing: 3 } } });
+    const { user } = await open('/practice?mode=typing&source=all', { practiceCorrect: { [pageId(1)]: { typing: 1 } } });
     await start(user);
     await user.type(await main().findByLabelText('Your answer'), 'candid{Enter}');
     const verdict = (await main().findByText('Correct.')).closest('[role="status"]')!;
-    expect(verdict).toHaveTextContent('Typing mastery for this word: 4 of 10.');
+    expect(verdict).toHaveTextContent('Typing mastery for this word: 2 of 3.');
   });
 
   it('shows the same number as before after a wrong answer', async () => {
-    const { user } = await open('/practice?mode=typing&source=all', { practiceCorrect: { [pageId(1)]: { typing: 3 } } });
+    const { user } = await open('/practice?mode=typing&source=all', { practiceCorrect: { [pageId(1)]: { typing: 2 } } });
     await start(user);
     await user.type(await main().findByLabelText('Your answer'), 'candit{Enter}');
     const verdict = (await main().findByText('Not quite.')).closest('[role="status"]')!;
-    expect(verdict).toHaveTextContent('Typing mastery for this word: 3 of 10.');
+    expect(verdict).toHaveTextContent('Typing mastery for this word: 2 of 3.');
   });
 
   it('names the mode that was practised, since each has a score of its own', async () => {
@@ -128,7 +128,7 @@ describe('practice mastery after a practice answer', () => {
     await start(user);
     await user.type(await main().findByLabelText('Your answer'), 'candid{Enter}');
     const verdict = (await main().findByText('Correct.')).closest('[role="status"]')!;
-    expect(verdict).toHaveTextContent('Fill in the blank mastery for this word: 1 of 10.');
+    expect(verdict).toHaveTextContent('Fill in the blank mastery for this word: 1 of 3.');
   });
 
   it('claims no score when the answer was judged but not recorded', async () => {

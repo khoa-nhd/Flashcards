@@ -9,22 +9,38 @@ import {
   type PracticeAnswer,
   type PracticeWord,
   type StudyMode,
+  type TypedResult,
 } from '../../shared/study-modes.js';
 import { ListenPrompt } from './ListenPrompt.js';
 import { Spinner } from './Spinner.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT } from './ui.js';
+
+/**
+ * What the card shows about an answer. It is built as soon as the answer is
+ * given, from the same rules the server judges by (the modes are deterministic
+ * or self-reported), so feedback never waits for a round trip. The server's
+ * answer then confirms it: `outcome` is `pending` until it does, and the
+ * recorded mastery is only known once it has.
+ */
+export interface PracticeVerdict {
+  correct: boolean;
+  typed: TypedResult | null;
+  expected: string;
+  /** `null` until the server confirms; then the recorded mastery for this word and mode. */
+  modeMastery: number | null;
+  /** `'pending'` while the answer is on its way; then what the server did with it. */
+  outcome: PracticeResponse['outcome'] | 'pending';
+}
 
 export interface PracticeCardProps {
   mode: StudyMode;
   word: PracticeWord;
   /** The choices for a recognition question, already drawn and shuffled. */
   choices: Choice[] | null;
-  /** The server's verdict, once it has answered. Until then the card is still being asked. */
-  result: PracticeResponse | null;
+  /** The verdict for this question; shown as soon as it is known, before it is saved. */
+  verdict: PracticeVerdict | null;
   /** The answer that was sent, kept so the card can show what was chosen. */
   given: PracticeAnswer | null;
-  /** The answer is on its way to the server. */
-  checking: boolean;
   onAnswer: (answer: PracticeAnswer) => void;
   /** The accent the word is read in, for listening. */
   speechLang?: string;
@@ -73,9 +89,9 @@ function MeaningPrompt({ word }: { word: PracticeWord }) {
   );
 }
 
-function Recognition({ word, choices, result, given, checking, onAnswer }: PracticeCardProps) {
+function Recognition({ word, choices, verdict, given, onAnswer }: PracticeCardProps) {
   const options = choices ?? [];
-  const answered = result !== null;
+  const answered = verdict !== null;
   const chosen = given?.kind === 'choice' ? given.selectedId : null;
   useKeys((key) => {
     const index = ['1', '2', '3', '4'].indexOf(key);
@@ -83,7 +99,7 @@ function Recognition({ word, choices, result, given, checking, onAnswer }: Pract
     if (option === undefined) return false;
     onAnswer({ kind: 'choice', selectedId: option.id });
     return true;
-  }, !answered && !checking);
+  }, !answered);
 
   return (
     <div className="flex flex-col gap-4">
@@ -100,7 +116,7 @@ function Recognition({ word, choices, result, given, checking, onAnswer }: Pract
             <button
               key={option.id}
               type="button"
-              disabled={answered || checking}
+              disabled={answered}
               aria-keyshortcuts={String(index + 1)}
               aria-pressed={option.id === chosen}
               onClick={() => onAnswer({ kind: 'choice', selectedId: option.id })}
@@ -126,9 +142,9 @@ function Recognition({ word, choices, result, given, checking, onAnswer }: Pract
   );
 }
 
-function Recall({ word, result, checking, onAnswer }: PracticeCardProps) {
+function Recall({ word, verdict, onAnswer }: PracticeCardProps) {
   const [shown, setShown] = useState(false);
-  const answered = result !== null;
+  const answered = verdict !== null;
   useKeys((key) => {
     if (!shown) {
       if (key !== ' ') return false;
@@ -139,7 +155,7 @@ function Recall({ word, result, checking, onAnswer }: PracticeCardProps) {
     else if (key === 'ArrowLeft') onAnswer({ kind: 'self', correct: false });
     else return false;
     return true;
-  }, !answered && !checking);
+  }, !answered);
 
   return (
     <div className="flex flex-col gap-4">
@@ -158,7 +174,6 @@ function Recall({ word, result, checking, onAnswer }: PracticeCardProps) {
             <div role="group" aria-label="Did you recall it?" className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                disabled={checking}
                 aria-keyshortcuts="ArrowLeft"
                 onClick={() => onAnswer({ kind: 'self', correct: false })}
                 className="flex h-14 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-bad/35 bg-bad-soft text-base font-semibold text-bad-ink hover:border-bad disabled:opacity-60"
@@ -170,7 +185,6 @@ function Recall({ word, result, checking, onAnswer }: PracticeCardProps) {
               </button>
               <button
                 type="button"
-                disabled={checking}
                 aria-keyshortcuts="ArrowRight"
                 onClick={() => onAnswer({ kind: 'self', correct: true })}
                 className="flex h-14 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-good/35 bg-good-soft text-base font-semibold text-good-ink hover:border-good disabled:opacity-60"
@@ -188,15 +202,15 @@ function Recall({ word, result, checking, onAnswer }: PracticeCardProps) {
   );
 }
 
-function Typed({ mode, word, result, given, checking, onAnswer, speechLang = 'en-US' }: PracticeCardProps) {
+function Typed({ mode, word, verdict, given, onAnswer, speechLang = 'en-US' }: PracticeCardProps) {
   const [text, setText] = useState('');
-  const answered = result !== null;
+  const answered = verdict !== null;
   const cloze = mode === 'cloze' ? buildCloze(word) : null;
   const submitted = given?.kind === 'typed' ? given.text : text;
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    if (answered || checking || text.trim() === '') return;
+    if (answered || text.trim() === '') return;
     onAnswer({ kind: 'typed', text });
   };
 
@@ -213,10 +227,10 @@ function Typed({ mode, word, result, given, checking, onAnswer, speechLang = 'en
             {cloze.before}
             <span
               className={`mx-1 inline-block min-w-16 border-b-2 px-1 font-semibold ${
-                answered ? (result.correct ? 'border-good text-good-ink' : 'border-bad text-bad-ink') : 'border-muted'
+                answered ? (verdict.correct ? 'border-good text-good-ink' : 'border-bad text-bad-ink') : 'border-muted'
               }`}
             >
-              {answered ? result.expected : <span className="sr-only">blank</span>}
+              {answered ? verdict.expected : <span className="sr-only">blank</span>}
               {!answered && <span aria-hidden="true">&nbsp;</span>}
             </span>
             {cloze.after}
@@ -233,7 +247,6 @@ function Typed({ mode, word, result, given, checking, onAnswer, speechLang = 'en
           className={`${INPUT} h-12 text-base`}
           value={answered ? submitted : text}
           readOnly={answered}
-          disabled={checking}
           autoFocus
           autoComplete="off"
           autoCapitalize="none"
@@ -244,7 +257,7 @@ function Typed({ mode, word, result, given, checking, onAnswer, speechLang = 'en
           onChange={(event) => setText(event.target.value)}
         />
         {!answered && (
-          <button type="submit" className={`${BUTTON_PRIMARY} h-12`} disabled={checking || text.trim() === ''}>
+          <button type="submit" className={`${BUTTON_PRIMARY} h-12`} disabled={text.trim() === ''}>
             Check
           </button>
         )}
@@ -269,30 +282,34 @@ const TYPED_TEXT = {
 export interface VerdictProps {
   mode: StudyMode;
   word: PracticeWord;
-  result: PracticeResponse;
+  verdict: PracticeVerdict;
   last: boolean;
   onNext: () => void;
 }
 
-/** What the server said about the answer, and the way on. Focus lands on the button so Enter continues. */
-export function Verdict({ mode, word, result, last, onNext }: VerdictProps) {
+/**
+ * What the answer was, and the way on. The verdict is shown from the local
+ * rules the moment the answer is given; a small line says whether the server
+ * has confirmed it yet. Focus lands on the button so Enter continues.
+ */
+export function Verdict({ mode, word, verdict, last, onNext }: VerdictProps) {
   const headline =
-    result.typed !== null
-      ? TYPED_TEXT[result.typed]
+    verdict.typed !== null
+      ? TYPED_TEXT[verdict.typed]
       : mode === 'recall'
-        ? result.correct
+        ? verdict.correct
           ? 'Marked as recalled.'
           : 'Marked as not recalled.'
-        : result.correct
+        : verdict.correct
           ? 'Correct.'
           : 'Not quite.';
   // For recognition the right choice is already marked above; elsewhere a miss shows the answer.
-  const answer = !result.correct && mode !== 'recognition' && mode !== 'recall' ? result.expected : null;
+  const answer = !verdict.correct && mode !== 'recognition' && mode !== 'recall' ? verdict.expected : null;
   return (
     <div
       role="status"
       className={`flex flex-wrap items-center justify-between gap-3 rounded-2xl border px-4 py-3 ${
-        result.correct ? 'border-good/40 bg-good-soft text-good-ink' : 'border-bad/40 bg-bad-soft text-bad-ink'
+        verdict.correct ? 'border-good/40 bg-good-soft text-good-ink' : 'border-bad/40 bg-bad-soft text-bad-ink'
       }`}
     >
       <div className="min-w-0">
@@ -303,12 +320,13 @@ export function Verdict({ mode, word, result, last, onNext }: VerdictProps) {
             {mode === 'cloze' && answer.toLowerCase() !== word.word.toLowerCase() ? ` (${word.word})` : ''}.
           </p>
         )}
-        {result.modeMastery !== null && (
+        {verdict.outcome !== 'pending' && verdict.modeMastery !== null && (
           <p className="mt-0.5 text-xs">
-            {STUDY_MODE_LABELS[mode]} mastery for this word: {result.modeMastery} of {PRACTICE_MASTERY_MAX}.
+            {STUDY_MODE_LABELS[mode]} mastery for this word: {verdict.modeMastery} of {PRACTICE_MASTERY_MAX}.
           </p>
         )}
-        {result.outcome === 'dry_run' && <p className="mt-0.5 text-xs">Not recorded.</p>}
+        {verdict.outcome === 'dry_run' && <p className="mt-0.5 text-xs">Not recorded.</p>}
+        {verdict.outcome === 'pending' && <p className="mt-0.5 text-xs">Saving…</p>}
       </div>
       <button type="button" autoFocus className={BUTTON_SECONDARY} onClick={onNext}>
         {last ? 'Finish' : 'Next'}

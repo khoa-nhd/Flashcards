@@ -431,10 +431,10 @@ describe('reviewing only the weakest words', () => {
     press(' ');
     press('ArrowRight');
     await act(async () => saves[0]?.reject(unreachable()));
-    expect(screen.getByText('Your answer was not confirmed')).toBeInTheDocument();
+    expect(screen.getByText(/was not saved/)).toBeInTheDocument();
 
     await user.click(nav().getByRole('link', { name: /^Review/ }));
-    expect(screen.getByText('Your answer was not confirmed')).toBeInTheDocument();
+    expect(screen.getByText(/was not saved/)).toBeInTheDocument();
     expect(api.fetchQueue).toHaveBeenCalledTimes(1);
   });
 

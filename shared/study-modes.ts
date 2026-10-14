@@ -38,8 +38,12 @@ export const STUDY_MODE_SUMMARY: Record<StudyMode, string> = {
  */
 export const EXPERIMENTAL_MODES: readonly StudyMode[] = ['listening'];
 
-/** The most a word's practice mastery in one mode can reach. The same ceiling as review mastery. */
-export const PRACTICE_MASTERY_MAX = 10;
+/**
+ * The most a word's practice mastery in one mode can reach. Lower than the
+ * review mastery ceiling: practice is a lighter signal, and a mode is finished
+ * after a few correct answers rather than a long run of them.
+ */
+export const PRACTICE_MASTERY_MAX = 3;
 
 /**
  * A word's practice mastery in one mode: one point for every correct practice

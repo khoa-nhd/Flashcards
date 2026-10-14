@@ -151,7 +151,7 @@ answer. `review_mode` is held to `flashcard`, `recognition`, `recall`,
   daily goal, weak words and calibration go on counting scheduled reviews only.
 - **Practice mastery is read from these rows, not stored.** A word's score in
   a mode is the number of its practice rows in that mode with
-  `answer_correct`, stopped at 10. There is no table or column for it, so no
+  `answer_correct`, stopped at 3. There is no table or column for it, so no
   migration, and nothing that could fall out of step with the history.
 
 - Unique on `(user_id, request_id)`: one answer is recorded once.

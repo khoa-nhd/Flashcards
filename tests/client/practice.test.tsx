@@ -389,16 +389,17 @@ describe('a practice session', () => {
 });
 
 describe('when an answer cannot be checked', () => {
-  it('says so, and repeats the very same request on Try again', async () => {
+  it('shows the verdict at once, and repeats the very same request on Try again', async () => {
     const { api, user } = await open('/practice?mode=typing');
     api.submitPractice.mockRejectedValueOnce(new ApiError('network', 'Could not reach the server.'));
     await start(user);
     const word = promptedWord();
     await user.type(main().getByLabelText('Your answer'), `${word.word}{Enter}`);
 
+    // Judged here at once; it is the save that failed.
+    expect(await main().findByRole('status')).toHaveTextContent('Correct.');
     const alert = await main().findByRole('alert');
     expect(alert).toHaveTextContent('Could not reach the server.');
-    expect(main().queryByRole('button', { name: /^(Next|Finish)$/ })).not.toBeInTheDocument();
 
     await user.click(within(alert).getByRole('button', { name: 'Try again' }));
     expect(await main().findByRole('status')).toHaveTextContent('Correct.');
@@ -406,7 +407,7 @@ describe('when an answer cannot be checked', () => {
     expect(sent(api, 1)).toEqual(sent(api, 0));
   });
 
-  it('lets the question be skipped, and does not count it', async () => {
+  it('lets the failed question be skipped, and reports it as not recorded', async () => {
     const { api, user } = await open('/practice?mode=typing');
     api.submitPractice.mockRejectedValueOnce(new ApiError('network', 'Could not reach the server.'));
     await start(user);
@@ -414,8 +415,10 @@ describe('when an answer cannot be checked', () => {
     await user.click(within(await main().findByRole('alert')).getByRole('button', { name: 'Skip this question' }));
     expect(main().getByText(/Question 2 of 4/)).toBeInTheDocument();
     await user.click(main().getByRole('button', { name: 'End practice' }));
-    // Nothing was confirmed, so there is nothing to summarise.
-    expect(main().queryByRole('region', { name: 'Practice summary' })).not.toBeInTheDocument();
+    // It was judged here, but never recorded: the summary says so rather than claiming it saved.
+    expect(await main().findByRole('region', { name: 'Practice summary' })).toHaveTextContent(
+      '1 answer was judged but not recorded',
+    );
   });
 });
 

@@ -134,7 +134,7 @@ of the app, so the database refuses anything that is not yours.
   history event's `scheduler` says which was in charge when it was saved.
 - Practice mastery is not a field of the export, because it is not stored: a
   word's score in a mode is the number of `reviewHistory` events for it with
-  `kind` `practice`, that `mode`, and `answerCorrect` true, stopped at 10.
+  `kind` `practice`, that `mode`, and `answerCorrect` true, stopped at 3.
 - The history is exactly as recorded: an undone answer appears as the answer
   and the `undo` that took it back. To get the answers that still stand, drop
   every `review` that an `undo` names in `undoesId`.

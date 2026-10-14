@@ -25,6 +25,7 @@ import { PRACTICE_MASTERY_MAX, STUDY_MODES, judge, practiceMasteryOf, type Study
 import { normalizeWord } from '../../shared/text.js';
 import { ApiError, type AppApi } from '../../src/lib/api-client.js';
 import { TIME_ZONE, TODAY, deferred, pageId, queueResponse, type Deferred } from './fixtures.js';
+import { MutationQueue, type ReviewActionMutation, type ReviewUndoMutation, type PracticeAnswerMutation } from '../../src/lib/mutation-queue.js';
 
 export function entry(n: number, overrides: Partial<VocabularyEntry> = {}): VocabularyEntry {
   return {
@@ -260,6 +261,40 @@ export function createFakeApi({
   };
   let nextId = 500;
 
+  // Create a mutation queue for tests
+  const mutationQueue = new MutationQueue();
+  mutationQueue.setAccountId('test-account');
+
+  // Register handlers for the mutation queue
+  mutationQueue.registerHandler<ReviewActionMutation['payload']>('review_action', async (payload) => {
+    // Call the mock to record the call for test assertions and return its promise
+    const apiPayload = {
+      ...payload,
+      confidence: payload.confidence ?? undefined,
+    };
+    return api.submitAction(apiPayload);
+  });
+
+  mutationQueue.registerHandler<ReviewUndoMutation['payload']>('review_undo', async () => ({
+    outcome: 'undone',
+    pageId: cards[0]?.id ?? pageId(1),
+    state: { mastery: 3, nextReview: TODAY },
+  }));
+
+  mutationQueue.registerHandler<PracticeAnswerMutation['payload']>('practice_answer', async (payload) => {
+    const found = store.find((item) => item.id === payload.pageId);
+    const judged = found === undefined ? null : judge(payload.mode, found, payload.answer);
+    if (judged === null) throw new ApiError('invalid_request', 'That answer does not fit this study mode.', 400);
+    const key = `${payload.pageId} ${payload.mode}`;
+    return {
+      outcome: 'recorded',
+      correct: judged.correct,
+      typed: judged.typed,
+      expected: judged.expected,
+      modeMastery: practiceMasteryOf((practiceCorrect.get(key) ?? 0) + (judged.correct ? 1 : 0)),
+    };
+  });
+
   const find = (id: string) => {
     const found = store.find((item) => item.id === id);
     if (!found) throw new ApiError('not_found', 'That word is not in the vocabulary database.', 404);
@@ -276,7 +311,7 @@ export function createFakeApi({
           : { id: wanted, name: library.collections.find((item) => item.id === wanted)?.name ?? 'Collection' };
       return queueResponse(cards, { focus: options?.focus ?? null, collection, ...queue });
     }),
-    submitAction: vi.fn<AppApi['submitAction']>(() => {
+    submitAction: vi.fn<AppApi['submitAction']>((_payload) => {
       const pending = deferred<ReviewActionResponse>();
       saves.push(pending);
       return pending.promise;
@@ -533,5 +568,28 @@ export function createFakeApi({
     }),
   } satisfies AppApi;
 
-  return { api, saves, store };
+  /** Flushes all pending mutations synchronously for tests. */
+  const flushMutations = async () => {
+    const all = await mutationQueue.getAll();
+    const pending = all.filter((m) => m.status === 'pending' || m.status === 'transient' || m.status === 'syncing');
+    for (const _mutation of pending) {
+      // Find and call the handler
+      // The handlers are registered globally, so we just need to trigger the queue processing
+      // For tests, we can just wait for the queue to process by calling the internal sync
+      // But since we're in a test, let's just wait for the mutation to be marked as synced
+      // The mutation queue processes asynchronously, so we need to wait
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    // Wait for all pending to become synced
+    let attempts = 0;
+    while (attempts < 100) {
+      const current = await mutationQueue.getAll();
+      const stillPending = current.some((m) => m.status === 'pending' || m.status === 'transient' || m.status === 'syncing');
+      if (!stillPending) break;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      attempts++;
+    }
+  };
+
+  return { api, saves, store, mutationQueue, flushMutations };
 }

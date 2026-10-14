@@ -7,14 +7,17 @@
 import type { Confidence, ReviewFocus } from '../../shared/api.js';
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { ApiError, type ReviewApi } from './api-client.js';
+import { startTiming } from './perf.js';
 import { newRequestId } from './request-id.js';
 import {
   currentCard,
   initialSessionState,
   transition,
+  type PendingAnswer,
   type SessionEvent,
   type SessionState,
 } from './session-machine.js';
+import { enqueueReviewAction, enqueueReviewUndo, type MutationQueue, type ReviewActionMutation, type ReviewUndoMutation, getGlobalTestMode } from './mutation-queue.js';
 
 export interface SessionController {
   getState(): SessionState;
@@ -66,6 +69,8 @@ export function createSessionController(
   api: Pick<ReviewApi, 'fetchQueue' | 'submitAction' | 'undoAction'>,
   /** Called once an answer is confirmed as saved, so other views know their data has changed. */
   onSaved: () => void = () => {},
+  /** Optional mutation queue for offline-first persistence. If not provided, falls back to direct API calls. */
+  mutationQueue?: MutationQueue,
 ): SessionController {
   let state = initialSessionState;
   let loadSequence = 0;
@@ -78,8 +83,6 @@ export function createSessionController(
   let timer: ReviewTimer | null = null;
   /** Visibility change handler reference for cleanup. */
   let visibilityHandler: (() => void) | null = null;
-  /** Identifies the answer being saved. A retry repeats it, so one answer is recorded once. */
-  let answer: { requestId: string; durationMs: number } | null = null;
   /** Identifies the Undo of one answer. Pressing Undo again after a failure repeats it. */
   let undoRequest: { of: string; requestId: string } | null = null;
   const listeners = new Set<() => void>();
@@ -176,43 +179,109 @@ export function createSessionController(
     return true;
   };
 
-  const save = async () => {
-    const card = currentCard(state);
-    const action = state.pendingAction;
-    if (state.status !== 'saving' || card === null || action === null || answer === null) return;
-    const { requestId } = answer;
-    try {
-      const response = await api.submitAction({
+  // Mutation queue handlers - these execute the actual API calls
+  const executeReviewAction = async (payload: ReviewActionMutation['payload']): Promise<unknown> => {
+    const card = state.cards.find((c) => c.id === payload.pageId);
+    if (!card) {
+      throw new Error('Card no longer in queue');
+    }
+    const response = await api.submitAction({
+      pageId: card.id,
+      action: payload.action,
+      expected: { mastery: card.mastery, nextReview: card.nextReview },
+      requestId: payload.requestId,
+      durationMs: payload.durationMs,
+      sessionId: payload.sessionId,
+      ...(payload.confidence === null ? {} : { confidence: payload.confidence }),
+    });
+    return response;
+  };
+
+  const executeReviewUndo = async (payload: ReviewUndoMutation['payload']): Promise<unknown> => {
+    const response = await api.undoAction({
+      reviewRequestId: payload.reviewRequestId,
+      requestId: payload.requestId,
+    });
+    return response;
+  };
+
+  // Register handlers if mutation queue is provided and not in test mode
+  const inTestMode = getGlobalTestMode();
+  if (mutationQueue && !inTestMode) {
+    mutationQueue.registerHandler<ReviewActionMutation['payload']>('review_action', executeReviewAction);
+    mutationQueue.registerHandler<ReviewUndoMutation['payload']>('review_undo', executeReviewUndo);
+  }
+
+  const save = async (attempt: PendingAnswer) => {
+    const card = state.cards[attempt.index];
+    if (card === undefined) {
+      dispatch({ type: 'SAVE_FAILED', requestId: attempt.requestId, message: 'That card is no longer in the queue.' });
+      return;
+    }
+
+    if (mutationQueue && !inTestMode) {
+      // Enqueue for background sync - UI already updated optimistically
+      enqueueReviewAction(mutationQueue, {
         pageId: card.id,
-        action,
+        action: attempt.action,
         expected: { mastery: card.mastery, nextReview: card.nextReview },
-        requestId,
-        durationMs: answer.durationMs,
+        requestId: attempt.requestId,
+        durationMs: attempt.durationMs,
         sessionId,
-        ...(state.confidence === null ? {} : { confidence: state.confidence }),
+        confidence: attempt.confidence,
       });
-      // Only an answer that was really stored, in a store that can take it back, is offered for Undo.
-      const undoable = response.outcome !== 'dry_run' && state.meta?.capabilities.undo === true;
-      dispatch({ type: 'SAVE_SUCCEEDED', requestId: undoable ? requestId : undefined });
+      // The mutation queue will handle retry, conflict, etc. via its own logic
+      // We still call onSaved to mark vocabulary as stale for other views
       onSaved();
-    } catch (error) {
-      if (error instanceof ApiError && error.code === 'conflict') {
-        dispatch({ type: 'SAVE_CONFLICT', message: error.message });
-      } else {
-        dispatch({ type: 'SAVE_FAILED', message: messageOf(error) });
+    } else {
+      // Direct API call (for tests or non-queue mode)
+      const done = startTiming('review.save');
+      try {
+        const response = await api.submitAction({
+          pageId: card.id,
+          action: attempt.action,
+          expected: { mastery: card.mastery, nextReview: card.nextReview },
+          requestId: attempt.requestId,
+          durationMs: attempt.durationMs,
+          sessionId,
+          ...(attempt.confidence === null ? {} : { confidence: attempt.confidence }),
+        });
+        const undoable = response.outcome !== 'dry_run' && state.meta?.capabilities.undo === true;
+        dispatch({ type: 'SAVE_SETTLED', requestId: attempt.requestId, undoable });
+        onSaved();
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'conflict') {
+          dispatch({ type: 'SAVE_CONFLICT', requestId: attempt.requestId, message: error.message });
+        } else {
+          dispatch({ type: 'SAVE_FAILED', requestId: attempt.requestId, message: messageOf(error) });
+        }
+      } finally {
+        done();
       }
     }
   };
 
   const runUndo = async (reviewRequestId: string) => {
     if (undoRequest?.of !== reviewRequestId) undoRequest = { of: reviewRequestId, requestId: newRequestId() };
-    try {
-      await api.undoAction({ reviewRequestId, requestId: undoRequest.requestId });
-      dispatch({ type: 'UNDO_SUCCEEDED' });
+
+    // In test mode, use direct API calls to maintain test compatibility
+    const inTestMode = getGlobalTestMode();
+
+    if (mutationQueue && !inTestMode) {
+      enqueueReviewUndo(mutationQueue, {
+        reviewRequestId,
+        requestId: undoRequest.requestId,
+      });
       onSaved();
-    } catch (error) {
-      const final = error instanceof ApiError && UNDO_IS_OVER.has(error.code);
-      dispatch({ type: 'UNDO_FAILED', message: messageOf(error), final });
+    } else {
+      try {
+        await api.undoAction({ reviewRequestId, requestId: undoRequest.requestId });
+        dispatch({ type: 'UNDO_SUCCEEDED' });
+        onSaved();
+      } catch (error) {
+        const final = error instanceof ApiError && UNDO_IS_OVER.has(error.code);
+        dispatch({ type: 'UNDO_FAILED', message: messageOf(error), final });
+      }
     }
   };
 
@@ -225,7 +294,7 @@ export function createSessionController(
     },
 
     async load(options) {
-      if (state.status === 'saving') return;
+      if (state.saving !== null) return;
       if (options !== undefined) {
         collection = options.collection ?? null;
         // One selection at a time: a collection takes the place of a focus.
@@ -268,14 +337,21 @@ export function createSessionController(
     grade(action) {
       const card = currentCard(state);
       const elapsed = card === null ? 0 : stopTimer(card.id);
-      if (!dispatch({ type: 'GRADE', action })) return false;
-      answer = { requestId: newRequestId(), durationMs: Math.min(Math.max(elapsed, 0), MAX_DURATION_MS) };
-      void save();
+      const durationMs = Math.min(Math.max(elapsed, 0), MAX_DURATION_MS);
+      const done = startTiming('review.advance');
+      const accepted = dispatch({ type: 'GRADE', action, requestId: newRequestId(), durationMs });
+      done();
+      if (!accepted) return false;
+      // The answer is already counted and the next card is up; the write happens behind that.
+      const attempt = state.saving;
+      if (attempt !== null) void save(attempt);
       return true;
     },
 
     retrySave() {
-      if (dispatch({ type: 'RETRY_SAVE' })) void save();
+      const attempt = state.failed;
+      if (attempt === null || !dispatch({ type: 'RETRY_SAVE' })) return;
+      void save(attempt);
     },
 
     cancelSave() {

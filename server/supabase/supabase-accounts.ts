@@ -25,6 +25,7 @@ import {
   LATEST_SCHEMA_VERSION,
   createSupabaseDatabase,
   createUserClient,
+  type StoredSettings,
   type VocabularyDatabase,
 } from './supabase-database.js';
 import { createSupabaseLibraryStore } from './supabase-library.js';
@@ -122,6 +123,33 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
     return knownVersion.value;
   };
 
+  // A session is opened for every request, and each one reads the account's
+  // settings row. That row changes only when the account itself changes it, so
+  // the read is remembered for a moment. Every write to it forgets the entry,
+  // so an owner's own change is seen at once, and another device's within the
+  // interval. The value is the database's own, not a default: nothing here
+  // invents a time zone or a goal.
+  const SETTINGS_TTL_MS = 30_000;
+  const SETTINGS_CACHE_MAX = 5_000;
+  const settingsCache = new Map<string, { value: StoredSettings; at: number }>();
+  const forgetSettings = (accountId: string) => {
+    settingsCache.delete(accountId);
+  };
+  const settingsOf = async (accountId: string, database: VocabularyDatabase): Promise<StoredSettings | null> => {
+    const at = (now ?? (() => new Date()))().getTime();
+    const cached = settingsCache.get(accountId);
+    if (cached !== undefined && at - cached.at < SETTINGS_TTL_MS) return cached.value;
+    const value = await database.getSettings();
+    // Bound the map: a long-running server should not grow it without limit.
+    if (settingsCache.size >= SETTINGS_CACHE_MAX && !settingsCache.has(accountId)) {
+      const oldest = settingsCache.keys().next().value;
+      if (oldest !== undefined) settingsCache.delete(oldest);
+    }
+    if (value !== null) settingsCache.set(accountId, { value, at });
+    else settingsCache.delete(accountId);
+    return value;
+  };
+
   return {
     async open(accessToken, hints) {
       const account = await verifier.verify(accessToken);
@@ -132,11 +160,17 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
       const schemaVersion = await schemaVersionOf(connect(accessToken));
       const database = connect(accessToken, schemaVersion);
 
-      const settings = await database.getSettings();
+      const settings = await settingsOf(account.id, database);
       let timeZone = settings?.timeZone ?? null;
       if (timeZone === null) {
         const hinted = hints.timeZone !== null && isValidTimeZone(hints.timeZone) ? hints.timeZone : null;
         timeZone = await database.ensureTimeZone(hinted ?? defaultTimeZone ?? FALLBACK_TIME_ZONE);
+        // A brand-new account now has a zone; remember it is set, so the next
+        // request reads it instead of writing it again.
+        settingsCache.set(account.id, {
+          value: { timeZone, fsrsRetention: null, dailyGoal: null, scheduler: null },
+          at: (now ?? (() => new Date()))().getTime(),
+        });
       }
       if (!isValidTimeZone(timeZone)) timeZone = FALLBACK_TIME_ZONE;
 
@@ -151,7 +185,10 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
       const goals =
         settings?.dailyGoal == null && schemaVersion < 5
           ? NO_GOAL_STORE
-          : createGoalStore(settings?.dailyGoal ?? NO_GOAL, (goal) => database.saveDailyGoal(goal));
+          : createGoalStore(settings?.dailyGoal ?? NO_GOAL, (goal) => {
+              forgetSettings(account.id);
+              return database.saveDailyGoal(goal);
+            });
       const library = new LibraryService({
         // Kept only where the database has the tables for it.
         store: schemaVersion >= 7 ? createSupabaseLibraryStore(database) : NO_LIBRARY_STORE,
@@ -162,7 +199,10 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
       // somewhere to put it. Anywhere else, and for every account that has not chosen, it is the mastery schedule.
       const scheduler =
         schemaVersion >= 8
-          ? createSchedulerStore(settings?.scheduler ?? undefined, (next) => database.saveScheduler(next))
+          ? createSchedulerStore(settings?.scheduler ?? undefined, (next) => {
+              forgetSettings(account.id);
+              return database.saveScheduler(next);
+            })
           : MASTERY_ONLY;
       return {
         account,
@@ -190,14 +230,18 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         }),
         async saveTimeZone(next) {
           if (!isValidTimeZone(next)) throw new DatabaseError('invalid', 'That is not a time zone this app recognises.');
-          return database.saveTimeZone(next);
+          const saved = await database.saveTimeZone(next);
+          forgetSettings(account.id);
+          return saved;
         },
         async saveFsrsRetention(next) {
           if (schemaVersion < 3) {
             throw new DatabaseError('invalid', 'This setting needs the latest database update.');
           }
           if (!isValidRetention(next)) throw new DatabaseError('invalid', 'That retention is outside the supported range.');
-          return database.saveFsrsRetention(next);
+          const saved = await database.saveFsrsRetention(next);
+          forgetSettings(account.id);
+          return saved;
         },
       };
     },

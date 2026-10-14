@@ -218,7 +218,7 @@ describe('extra answer keys', () => {
   });
 
   it('answer like the arrows, in either case, once chosen', async () => {
-    const { api, saves } = await open('/review', { cards: [card(1), card(2)], settings: { answerKeys: 'jk' } });
+    const { api, saves } = await open('/review', { cards: [card(1), card(2), card(3)], settings: { answerKeys: 'jk' } });
     await screen.findByTestId('flashcard');
     press(' ');
     press('K');
@@ -402,15 +402,17 @@ describe('the session rules for confidence', () => {
 
   it('never let a rating stand in for an answer', () => {
     const rated = transition(ready(), { type: 'RATE_CONFIDENCE', level: 3 });
-    expect(rated.pendingAction).toBeNull();
+    expect(rated.saving).toBeNull();
     expect(rated.tally).toEqual({ remember: 0, notRemember: 0, skipped: 0 });
   });
 
   it('clear the rating when the card changes', () => {
     let state = transition(ready(), { type: 'RATE_CONFIDENCE', level: 3 });
-    state = transition(state, { type: 'GRADE', action: 'remember' });
-    expect(state.confidence).toBe(3);
-    state = transition(state, { type: 'SAVE_SUCCEEDED' });
+    state = transition(state, { type: 'GRADE', action: 'remember', requestId: 'r1', durationMs: 100 });
+    // The rating travels with the answer; it is no longer the card's own.
+    expect(state.saving).toMatchObject({ confidence: 3 });
+    expect(state.confidence).toBeNull();
+    state = transition(state, { type: 'SAVE_SETTLED', requestId: 'r1', undoable: true });
     expect(state).toMatchObject({ index: 1, confidence: null, revealed: false });
   });
 

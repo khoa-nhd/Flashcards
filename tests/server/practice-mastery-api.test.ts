@@ -75,8 +75,8 @@ const scheduleOf = (id: string) =>
 
 describe('the rule', () => {
   it('is one point per correct answer, never more than the ceiling', () => {
-    expect([0, 1, 2, 9, 10, 11, 250].map(practiceMasteryOf)).toEqual([0, 1, 2, 9, 10, 10, 10]);
-    expect(PRACTICE_MASTERY_MAX).toBe(10);
+    expect([0, 1, 2, 9, 10, 11, 250].map(practiceMasteryOf)).toEqual([0, 1, 2, 3, 3, 3, 3]);
+    expect(PRACTICE_MASTERY_MAX).toBe(3);
   });
 
   it('is zero for anything that is not a count', () => {
@@ -90,7 +90,7 @@ describe('a word’s practice mastery', () => {
     const word = await candidOf(alice);
     expect(await masteryOf(alice, word.id)).toEqual({
       available: true,
-      max: 10,
+      max: 3,
       modes: STUDY_MODES.map((mode) => ({ mode, correct: 0, mastery: 0 })),
     });
   });
@@ -124,14 +124,14 @@ describe('a word’s practice mastery', () => {
     expect(await scores(alice, word.id)).toEqual({ typing: 2, cloze: 1, listening: 1, recall: 1 });
   });
 
-  it('stops at ten, however many more correct answers follow', async () => {
+  it('stops at three, however many more correct answers follow', async () => {
     const word = await candidOf(alice);
     let last = 0;
     for (let answer = 1; answer <= 12; answer += 1) last = (await typed(alice, word, 'candid')).modeMastery ?? -1;
-    expect(last).toBe(10);
+    expect(last).toBe(3);
     const typing = (await masteryOf(alice, word.id)).modes.find((mode) => mode.mode === 'typing');
     // The count behind it is kept as it is; only the score stops.
-    expect(typing).toEqual({ mode: 'typing', correct: 12, mastery: 10 });
+    expect(typing).toEqual({ mode: 'typing', correct: 12, mastery: 3 });
   });
 
   it('counts an answer that was sent twice only once', async () => {
@@ -264,7 +264,7 @@ describe('where practice is not recorded', () => {
 
     it('says so instead of showing zeros as if they had been earned', async () => {
       const word = await candidOf(owner, legacy);
-      expect(await masteryOf(owner, word.id, legacy)).toEqual({ available: false, max: 10, modes: [] });
+      expect(await masteryOf(owner, word.id, legacy)).toEqual({ available: false, max: 3, modes: [] });
     });
   });
 });

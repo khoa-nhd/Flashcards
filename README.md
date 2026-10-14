@@ -111,8 +111,8 @@ why.
 Practice is recorded and reported one mode at a time, and **never changes
 mastery, a review date or FSRS**.
 
-Each word also has a **practice mastery** from 0 to 10 in each mode: one point
-for every correct practice answer in that mode, never above 10, and unchanged
+Each word also has a **practice mastery** from 0 to 3 in each mode: one point
+for every correct practice answer in that mode, never above 3, and unchanged
 by a wrong answer. It is shown in the word's panel and after each practice
 answer. It is counted from the practice history, kept apart from the review
 mastery in the table above, and plays no part in deciding when a word is due. Listening uses the browser's own speech
@@ -485,7 +485,7 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
   happened to that word since.
 - Practice never moves a schedule, in any mode. Practice mastery is a count
   of correct answers, not a judgement of how well a word is known: it cannot
-  go down, and ten lucky recognitions score the same as ten typed answers
+  go down, and three lucky recognitions score the same as three typed answers
   would in their own mode.
 - Listening depends entirely on the browser's speech synthesis. It was checked
   for what the app asks the browser to say, in tests and in one desktop

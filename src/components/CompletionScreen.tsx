@@ -4,9 +4,10 @@ import { useApp } from '../app-context.js';
 import { formatDuration } from '../lib/format.js';
 import { FOCUS_TEXT, type FocusText } from '../lib/review-focus.js';
 import { ROUTES } from '../lib/router.js';
-import { canUndo, type SessionState } from '../lib/session-machine.js';
+import { canUndo, isSaving, saveIssue, type SessionState } from '../lib/session-machine.js';
 import { GoalProgress, hasGoal } from './GoalStatus.js';
 import { Link } from './Link.js';
+import { SaveIssuePanel } from './SaveIssuePanel.js';
 import { SkippedNotice } from './SkippedNotice.js';
 
 export interface CompletionScreenProps {
@@ -15,18 +16,30 @@ export interface CompletionScreenProps {
   sessionId: string;
   onReload: () => void;
   onUndo: () => void;
+  /** Repeats an answer that would not save. */
+  onRetry: () => void;
+  /** Gives up on an answer that would not save. */
+  onDiscard: () => void;
+  /** Passes a card whose record changed elsewhere. */
+  onSkip: () => void;
 }
 
 type Loaded = { for: string; summary: SessionSummary | null };
 
-export function CompletionScreen({ state, sessionId, onReload, onUndo }: CompletionScreenProps) {
+export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, onDiscard, onSkip }: CompletionScreenProps) {
   const { api } = useApp();
   const { meta, tally } = state;
   const total = state.cards.length;
   const preview = meta !== null && !meta.writesEnabled;
   const answered = tally.remember + tally.notRemember;
+  const saving = isSaving(state);
+  const issue = saveIssue(state);
+  const issueWord = state.failed === null ? null : (state.cards[state.failed.index]?.word ?? null);
+  // Re-read once the last answer has settled, so the counts are the server's own.
+  const settled = saving ? 'saving' : 'settled';
   // The server's own account of the session, where it keeps one. Asked for again whenever the count changes.
-  const wanted = meta?.capabilities.sessions === true && !preview && answered > 0 ? `${sessionId}:${answered}` : null;
+  const wanted =
+    meta?.capabilities.sessions === true && !preview && answered > 0 ? `${sessionId}:${answered}:${settled}` : null;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
 
   useEffect(() => {
@@ -76,7 +89,8 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo }: Complet
   }
 
   // Today's figures against the daily goal, re-read whenever another answer has been saved.
-  const goalWanted = meta?.capabilities.goals === true && !preview && total > 0 ? `${sessionId}:${answered}` : null;
+  const goalWanted =
+    meta?.capabilities.goals === true && !preview && total > 0 ? `${sessionId}:${answered}:${settled}` : null;
   const [plan, setPlan] = useState<{ for: string; plan: DayPlanResponse } | null>(null);
   useEffect(() => {
     if (goalWanted === null) return;
@@ -183,6 +197,22 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo }: Complet
         <p role="alert" className="w-full rounded-xl bg-bad-soft px-3 py-2 text-sm text-bad-ink">
           {state.undoError}
         </p>
+      )}
+
+      {saving && <p className="text-sm text-muted">Saving your last answer…</p>}
+
+      {issue !== null && (
+        <div className="w-full text-left">
+          <SaveIssuePanel
+            kind={issue.kind}
+            message={issue.message}
+            word={issueWord}
+            onRetry={onRetry}
+            onDiscard={onDiscard}
+            onReload={onReload}
+            onSkip={onSkip}
+          />
+        </div>
       )}
 
       <div className="flex w-full flex-col items-stretch gap-2">

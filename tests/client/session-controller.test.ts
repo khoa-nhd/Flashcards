@@ -122,16 +122,18 @@ describe('answering', () => {
     expect(Object.keys(sent).sort()).toEqual(['action', 'durationMs', 'expected', 'pageId', 'requestId', 'sessionId']);
   });
 
-  it('stays on the card until the server confirms, then shows the next front', async () => {
+  it('shows the next front at once and records the answer behind it', async () => {
     const { session, saves } = setup();
     await session.load();
     session.flip();
     session.grade('remember');
-    expect(session.getState()).toMatchObject({ status: 'saving', index: 0 });
+    // The card has already moved on; the answer is still being saved.
+    expect(session.getState()).toMatchObject({ status: 'ready', index: 1 });
+    expect(session.getState().saving).toMatchObject({ index: 0, action: 'remember' });
 
     saves[0]?.resolve(applied);
     await settled();
-    expect(session.getState()).toMatchObject({ status: 'ready', index: 1 });
+    expect(session.getState()).toMatchObject({ status: 'ready', index: 1, saving: null });
     expect(currentCard(session.getState())?.word).toBe('word-2');
   });
 
@@ -143,9 +145,8 @@ describe('answering', () => {
     // Same tick: a double key press, a click during a swipe, the other answer…
     expect(session.grade('remember')).toBe(false);
     expect(session.grade('not_remember')).toBe(false);
-    session.flip();
     expect(api.submitAction).toHaveBeenCalledTimes(1);
-    expect(session.getState()).toMatchObject({ status: 'saving', pendingAction: 'remember' });
+    expect(session.getState()).toMatchObject({ status: 'ready', index: 1, saving: { action: 'remember' } });
   });
 
   it('cannot reload while saving', async () => {
@@ -155,7 +156,7 @@ describe('answering', () => {
     session.grade('remember');
     await session.load();
     expect(api.fetchQueue).toHaveBeenCalledTimes(1);
-    expect(session.getState().status).toBe('saving');
+    expect(session.getState().saving).not.toBeNull();
     saves[0]?.resolve(applied);
     await settled();
     expect(session.getState().index).toBe(1);
@@ -173,7 +174,7 @@ describe('answering', () => {
 });
 
 describe('when a save fails', () => {
-  it('keeps the card, shows the reason, and does not advance', async () => {
+  it('keeps the reason and the answer, without stepping back over the card', async () => {
     const { session, saves } = setup();
     await session.load();
     session.flip();
@@ -181,12 +182,13 @@ describe('when a save fails', () => {
     saves[0]?.reject(new ApiError('network', 'Could not reach the server.'));
     await settled();
     expect(session.getState()).toMatchObject({
-      status: 'error',
-      index: 0,
+      status: 'ready',
+      index: 1,
       error: { kind: 'save', message: 'Could not reach the server.' },
-      tally: { remember: 0 },
+      tally: { remember: 1 },
     });
-    expect(currentCard(session.getState())?.word).toBe('word-1');
+    expect(session.getState().failed).toMatchObject({ index: 0, action: 'remember' });
+    expect(currentCard(session.getState())?.word).toBe('word-2');
   });
 
   it('retries with an identical request so the server can reconcile it', async () => {
@@ -208,7 +210,7 @@ describe('when a save fails', () => {
     expect(session.getState()).toMatchObject({ status: 'ready', index: 1, tally: { remember: 1 } });
   });
 
-  it('can go back to the card instead of retrying', async () => {
+  it('can discard a failed answer and go on', async () => {
     const { api, session, saves } = setup();
     await session.load();
     session.flip();
@@ -218,10 +220,13 @@ describe('when a save fails', () => {
     expect(session.getState().error?.message).toBe('Something unexpected went wrong.');
 
     session.cancelSave();
-    expect(session.getState()).toMatchObject({ status: 'flipped', index: 0, pendingAction: null });
+    expect(session.getState()).toMatchObject({ status: 'ready', index: 1, error: null, failed: null });
+    expect(session.getState().tally).toEqual({ remember: 0, notRemember: 0, skipped: 0 });
+
+    // The next card is a fresh answer, not a repeat of the failed one.
+    session.flip();
     expect(session.grade('not_remember')).toBe(true);
     expect(api.submitAction).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'not_remember' }));
-    // A different answer is a different submission, not a repeat of the failed one.
     const [first, second] = api.submitAction.mock.calls.map(([request]) => request.requestId);
     expect(second).not.toBe(first);
   });
@@ -246,7 +251,7 @@ describe('when a save fails', () => {
     session.grade('remember');
     saves[0]?.reject(new ApiError('conflict', 'This card was changed after it was loaded.', 409));
     await settled();
-    expect(session.getState()).toMatchObject({ status: 'error', index: 0, error: { kind: 'conflict' } });
+    expect(session.getState()).toMatchObject({ status: 'ready', index: 1, error: { kind: 'conflict' } });
 
     session.retrySave();
     expect(api.submitAction).toHaveBeenCalledTimes(1);

@@ -22,6 +22,10 @@ const PATHS = {
   download: 'M12 4v11m0 0-4-4m4 4 4-4M5 20h14',
   table: 'M4 6h16v12H4V6Zm0 4h16M4 14h16M10 6v12',
   list: 'M8 7h12M8 12h12M8 17h12M4 7h.01M4 12h.01M4 17h.01',
+  sync: 'M12 4v1a8 8 0 0 1 0 16M12 4v1a8 8 0 0 0 0 16M4 12h8M20 12h-8',
+  alertTriangle: 'M12 4 3 20h18L12 4Zm0 6v5m0 3v.01',
+  clock: 'M12 6v6l4 2M12 4v1M12 20v1M4 12h1M20 12h1',
+  database: 'M4 6v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2Zm0 8v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6',
 } as const;
 
 export type IconName = keyof typeof PATHS;
