@@ -49,9 +49,10 @@ order.
 | 8 | `20261017090000_scheduler_switch.sql` | `scheduler` on `user_settings`; `record_review` now stamps the history with the schedule in charge. | Choosing which schedule decides what is due. |
 | 9 | `20261018090000_weak_confidence.sql` | `last_confidence` on the `card_review_stats` function (the confidence of the card's latest standing answer). | "Critical misconception" in Weak words. |
 | 10 | `20261019090000_writing_mode.sql` | `submitted_answer` up to 6000 characters; `writing` as a history mode; `ai_feedback`, `model_answer` on `review_logs`; `record_practice` reads the two new keys. | The Writing Challenge and its coach note. |
+| 11 | `20261020090000_root_derived.sql` | `root_id` on `vocabulary` (a word points at the root it was formed from; self-reference refused, one index) and `update_vocabulary` manages it with the root checked to be the caller's own word. | The word-family panel: the family timeline and the AI family builder. |
 
 There are no database credentials in the project, so the owner runs each file
-in the Supabase SQL Editor. Nothing in versions 2 to 10 alters or removes
+in the Supabase SQL Editor. Nothing in versions 2 to 11 alters or removes
 existing rows.
 
 If the hosting project is linked to Supabase through Vercel's integration,
@@ -91,6 +92,7 @@ references `auth.users` with `on delete cascade`.
 | `request_id` | The submission that created the word. Unique per user, so a repeated request cannot create it twice. |
 | `created_at`, `updated_at` | Timestamps. An imported word keeps its original creation time. |
 | `deleted_at` | Set when the word is in the trash. |
+| `root_id` | (Version 11.) The word this one was formed from (`decide` → `decision`), or empty for a root of its own. A single-column foreign key to `vocabulary(id)` on purpose: a composite key with `on delete set null` would clear the owner too. A word cannot be its own root, and `update_vocabulary` only accepts a root of the caller's own account. |
 
 ### `card_states`
 

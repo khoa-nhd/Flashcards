@@ -9,13 +9,15 @@ import {
   deleteEntryResponseSchema,
   entryResponseSchema,
   vocabularyListResponseSchema,
+  NO_CAPABILITIES,
+  type Capabilities,
 } from '../../shared/api.js';
 import { FakeCatalog, entryData } from '../helpers/fake-catalog.js';
 import { NOW, TIME_ZONE, pageId } from '../helpers/fixtures.js';
 
 const REQUEST_ID = '11111111-1111-4111-8111-111111111111';
 
-function setup(configOverrides: Partial<AppConfig> = {}, writesRequested = true) {
+function setup(configOverrides: Partial<AppConfig> = {}, writesRequested = true, capabilities: Capabilities = NO_CAPABILITIES) {
   const catalog = new FakeCatalog([entryData(1), entryData(2, { word: 'bank' })]);
   const vocabulary = new VocabularyService({
     catalog,
@@ -23,6 +25,7 @@ function setup(configOverrides: Partial<AppConfig> = {}, writesRequested = true)
     defaults: { mastery: 1, reviewDate: 'empty' },
     timeZone: TIME_ZONE,
     writesRequested,
+    capabilities,
     now: () => NOW,
   });
   const config = { ...loadConfig({ DATA_MODE: 'mock' }), ...configOverrides };
@@ -140,6 +143,37 @@ describe('PATCH /api/vocabulary/:id', () => {
     const { app } = setup();
     expect((await app.request(`/api/vocabulary/${pageId(9)}`, json('PATCH', { definition: 'x' }))).status).toBe(404);
     expect((await app.request('/api/vocabulary/nope', json('PATCH', { definition: 'x' }))).status).toBe(400);
+  });
+});
+
+describe('PATCH /api/vocabulary/:id with the word a word was formed from', () => {
+  const withRoots = { ...NO_CAPABILITIES, roots: true };
+
+  it('stores the root and reads it back, and clears it with null', async () => {
+    const { app } = setup({}, true, withRoots);
+    const set = await app.request(`/api/vocabulary/${pageId(1)}`, json('PATCH', { rootId: pageId(2) }));
+    expect(set.status).toBe(200);
+    expect(entryResponseSchema.parse(await set.json()).entry.rootId).toBe(pageId(2));
+    const read = await app.request(`/api/vocabulary/${pageId(1)}`);
+    expect(entryResponseSchema.parse(await read.json()).entry.rootId).toBe(pageId(2));
+
+    const clear = await app.request(`/api/vocabulary/${pageId(1)}`, json('PATCH', { rootId: null }));
+    expect(entryResponseSchema.parse(await clear.json()).entry.rootId).toBeNull();
+  });
+
+  it('answers 404 for a root that is not in the account, and 400 for the word itself', async () => {
+    const { app, catalog } = setup({}, true, withRoots);
+    expect((await app.request(`/api/vocabulary/${pageId(1)}`, json('PATCH', { rootId: pageId(9) }))).status).toBe(404);
+    expect((await app.request(`/api/vocabulary/${pageId(1)}`, json('PATCH', { rootId: pageId(1) }))).status).toBe(400);
+    expect(catalog.updated).toEqual([]);
+  });
+
+  it('says the database cannot keep it yet when its version predates the column', async () => {
+    const { app, catalog } = setup();
+    const response = await app.request(`/api/vocabulary/${pageId(1)}`, json('PATCH', { rootId: pageId(2) }));
+    expect(response.status).toBe(409);
+    expect(apiErrorSchema.parse(await response.json()).error.code).toBe('not_supported');
+    expect(catalog.updated).toEqual([]);
   });
 });
 

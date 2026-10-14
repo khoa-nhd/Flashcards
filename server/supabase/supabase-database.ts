@@ -40,6 +40,8 @@ export const cardRowSchema = z.object({
   fsrs_scheduled_days: z.number().int().nullable().optional(),
   fsrs_learning_steps: z.number().int().nullable().optional(),
   fsrs_version: z.string().nullable().optional(),
+  // From schema version 11: the word this one was formed from.
+  root_id: z.string().nullable().optional(),
 });
 
 export type CardRow = z.infer<typeof cardRowSchema>;
@@ -52,7 +54,7 @@ const FSRS_COLUMNS =
 
 /** The columns a card is read with, which depends on what the database has. */
 export const cardColumns = (schemaVersion: number): string =>
-  schemaVersion >= 3 ? `${CARD_COLUMNS}, ${FSRS_COLUMNS}` : CARD_COLUMNS;
+  `${CARD_COLUMNS}${schemaVersion >= 3 ? `, ${FSRS_COLUMNS}` : ''}${schemaVersion >= 11 ? ', root_id' : ''}`;
 
 /** An FSRS state as the database stores it, with the engine that produced it. */
 export interface FsrsRow {
@@ -152,7 +154,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 10;
+export const LATEST_SCHEMA_VERSION = 11;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -335,6 +337,7 @@ export type CardPatch = Partial<{
   date_added: string | null;
   mastery: number;
   review_date: string | null;
+  root_id: string | null;
 }>;
 
 export interface VocabularyDatabase {

@@ -179,7 +179,16 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         database: { version: schemaVersion, latest: LATEST_SCHEMA_VERSION },
         fsrsRetention,
         review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, coach, now }),
-        vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, now }),
+        vocabulary: new VocabularyService({
+          catalog: repository,
+          rules,
+          defaults,
+          timeZone,
+          writesRequested,
+          scheduler,
+          capabilities: repository.capabilities,
+          now,
+        }),
         analytics: new AnalyticsService({
           repository,
           catalog: repository,

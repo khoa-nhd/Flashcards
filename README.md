@@ -11,7 +11,7 @@ in on.
 | **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, and listening. Recorded for your statistics; never changes mastery or a review date. Holds the link to **Exam** practice. |
 | **Exam** | A test you build yourself: sections of questions (a way of asking, a length, an optional time limit each), one optional clock for the whole exam, free movement between the sections, and a report at the end that scores each section and names the missed words with a drill into Practice. Reached from Practice; recorded like practice, never changes mastery or a review date. |
 | **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
-| **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples and related words. |
+| **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples, related words and — from database version 11 — the word family it belongs to, with an AI draft builder and suggested example sentences. |
 | **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
 | **Calendar** | A month at a glance: words by the day they were added, or saved reviews by the day you did them. |
 | **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of just those that are due, or practice with all of them. |
@@ -210,6 +210,7 @@ in the Supabase dashboard (SQL Editor → paste the file → Run):
 | `20261017090000_scheduler_switch.sql` | 8 | Choosing which schedule is in charge (FSRS or mastery). Changes nothing until an account chooses FSRS. |
 | `20261018090000_weak_confidence.sql` | 9 | The "critical misconception" reason in Weak words (the confidence of a card's latest answer). |
 | `20261019090000_writing_mode.sql` | 10 | The Writing Challenge: long written answers and the coach's note beside them. |
+| `20261020090000_root_derived.sql` | 11 | The word family of a word: which root it was formed from, the family timeline and the AI family builder. |
 
 Each file only adds things; none changes or removes existing data. The app
 checks the database version and keeps working on an older one, with the newer
@@ -246,7 +247,7 @@ Copy `.env.example` to `.env` and fill in:
 | `DATA_MODE` | Optional. `supabase` or `mock`. Empty means Supabase in a deployment or when `SUPABASE_URL` is set, sample data otherwise. |
 | `REVIEW_TIMEZONE` | Optional. The zone a new account starts with if its browser reports none. |
 | `REVIEW_WRITES_ENABLED` | Optional. Exactly `false` freezes all changes; anything else leaves saving on. |
-| `AI_API_KEY` | Optional. Enables Smart Reader and the Writing Challenge coach. Without it both features are off and say so. The key stays on the server. |
+| `AI_API_KEY` | Optional. Enables Smart Reader, the Writing Challenge coach, the word-family builder and suggested example sentences. Without it all four are off and say so. The key stays on the server. |
 | `AI_BASE_URL` | Optional. An OpenAI-compatible endpoint. Defaults to Google Gemini's. |
 | `AI_MODEL` | Optional. Model name. Defaults to `gemini-2.5-flash`. |
 | `AI_TIMEOUT_MS` | Optional. Milliseconds to wait, 1000–28000. Defaults to `20000`. |
@@ -395,8 +396,9 @@ links work.
 1. In Vercel choose **Add New → Project** and import the GitHub repository.
    Keep the detected **Vite** preset and the default build settings.
 2. Add the environment variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. Add
-   `AI_API_KEY` too if you want Smart Reader and the Writing Challenge coach;
-   without it those features are off and the app says so.
+   `AI_API_KEY` too if you want Smart Reader, the Writing Challenge coach,
+   the word-family builder and suggested example sentences; without it those
+   features are off and the app says so.
 3. Deploy, then open `/api/health` and confirm `"ok": true` and
    `"mode": "supabase"`.
 4. In Supabase, set **Authentication → URL Configuration → Site URL** to the
@@ -502,6 +504,8 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | `POST /api/relations`, `DELETE /api/relations/:id` | `{ fromId, toId, kind }`: link two of your words. Stored once per pair and kind. |
 | `GET /api/settings`, `PUT /api/settings` | The account's time zone and FSRS target retention; the database version found. |
 | `POST /api/ai/extract` | `{ text, word }` → the sentence your word sits in (always taken from your own text), plus a suggested definition and meaning. Smart Reader only; refused (`409`) where no model is configured, rate-limited per account (`429`), and frozen with the rest of saving. Every failure leaves the form working by hand. See [docs/ai-features.md](ai-features.md). |
+| `POST /api/ai/word-family` | `{ word, meaning?, definition? }` → the words formed from one root, each with a short gloss and one marked the root. A draft to review; saving it is ordinary create + `PATCH` with `rootId` (needs database version 11). Same `409`/`429`/frozen behaviour as above. |
+| `POST /api/ai/examples` | `{ word, meaning?, definition?, example?, collocations[] }` → suggested sentences, each naming the collocation it shows or `null`. Drafts only: saving a checked sentence is the ordinary examples path. Same `409`/`429`/frozen behaviour as above. |
 
 ## Development
 

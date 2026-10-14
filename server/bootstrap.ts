@@ -79,6 +79,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     timeZone,
     writesRequested: true,
     scheduler,
+    capabilities: repository.capabilities,
   });
   // The sample data has no account, so its goal is kept in memory with everything else.
   const goals = createGoalStore();

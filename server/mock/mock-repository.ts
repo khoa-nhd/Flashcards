@@ -70,6 +70,8 @@ interface StoredWord {
   trashed: boolean;
   createdTime: string;
   lastEditedTime: string;
+  /** The word this one was formed from, as in the real store (schema 11). */
+  rootId: string | null;
   /** Kept beside the mastery schedule, as in the real store. */
   fsrs?: StoredFsrs | null;
 }
@@ -109,6 +111,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     confidence: true,
     practice: true,
     library: true,
+    roots: true,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
@@ -144,6 +147,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         trashed: false,
         createdTime: `${dateAdded}T09:00:00.000Z`,
         lastEditedTime: `${dateAdded}T09:00:00.000Z`,
+        rootId: null,
       });
     });
   }
@@ -527,6 +531,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       trashed: false,
       createdTime: timestamp,
       lastEditedTime: timestamp,
+      rootId: null,
     };
     this.words.set(id, word);
     return { entry: toEntry(word), created: true };
@@ -584,5 +589,6 @@ function toEntry(word: StoredWord): EntryData {
     dateAdded: word.dateAdded,
     createdTime: word.createdTime,
     lastEditedTime: word.lastEditedTime,
+    rootId: word.rootId,
   };
 }

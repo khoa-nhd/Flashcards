@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { sampleRules } from '../../server/mock/sample-rules.js';
 import { VocabularyService, type VocabularyServiceOptions } from '../../server/vocabulary-service.js';
-import { createEntryRequestSchema, updateEntryRequestSchema } from '../../shared/api.js';
+import { createEntryRequestSchema, updateEntryRequestSchema, NO_CAPABILITIES } from '../../shared/api.js';
 import { FakeCatalog, entryData } from '../helpers/fake-catalog.js';
 import { NOW, TIME_ZONE, TODAY, pageId } from '../helpers/fixtures.js';
 import type { EntryData } from '../../server/vocabulary-catalog.js';
@@ -302,6 +302,49 @@ describe('update', () => {
     const { catalog, service } = setup([entryData(1)], { writesRequested: false });
     await expect(service.update(pageId(1), updateRequest({ definition: 'x' }))).rejects.toMatchObject({
       status: 403,
+    });
+    expect(catalog.updated).toEqual([]);
+  });
+});
+
+describe('the word a word was formed from', () => {
+  /** Only the family capability on, as in a store whose migration has reached version 11. */
+  const withRoots = { capabilities: { ...NO_CAPABILITIES, roots: true } };
+
+  it('is written only when it differs, and touches nothing else', async () => {
+    const { catalog, service } = setup([entryData(1), entryData(2)], withRoots);
+    const entry = await service.update(pageId(1), updateRequest({ rootId: pageId(2) }));
+    expect(catalog.updated).toEqual([{ id: pageId(1), changes: { rootId: pageId(2) } }]);
+    expect(entry).toMatchObject({ rootId: pageId(2), mastery: 3, reviewDate: '2026-10-09' });
+
+    // Pointing at the same root again is not a change.
+    await service.update(pageId(1), updateRequest({ rootId: pageId(2) }));
+    expect(catalog.updated).toHaveLength(1);
+  });
+
+  it('is cleared back to a word of its own', async () => {
+    const { catalog, service } = setup([entryData(1, { rootId: pageId(2) }), entryData(2)], withRoots);
+    const entry = await service.update(pageId(1), updateRequest({ rootId: null }));
+    expect(catalog.updated).toEqual([{ id: pageId(1), changes: { rootId: null } }]);
+    expect(entry.rootId).toBeNull();
+  });
+
+  it('refuses when the store cannot keep it', async () => {
+    const { catalog, service } = setup([entryData(1), entryData(2)]);
+    await expect(service.update(pageId(1), updateRequest({ rootId: pageId(2) }))).rejects.toMatchObject({
+      status: 409,
+      code: 'not_supported',
+    });
+    expect(catalog.updated).toEqual([]);
+  });
+
+  it('refuses a word as its own root, or a root that is not in the account', async () => {
+    const { catalog, service } = setup([entryData(1), entryData(2)], withRoots);
+    await expect(service.update(pageId(1), updateRequest({ rootId: pageId(1) }))).rejects.toMatchObject({
+      status: 400,
+    });
+    await expect(service.update(pageId(1), updateRequest({ rootId: pageId(9) }))).rejects.toMatchObject({
+      status: 404,
     });
     expect(catalog.updated).toEqual([]);
   });

@@ -7,6 +7,7 @@ import { ApiError } from '../lib/api-client.js';
 import { ROUTES, openWord } from '../lib/router.js';
 import { Link } from './Link.js';
 import { SemanticGraph } from './SemanticGraph.js';
+import { AiExamples, WordFamily } from './WordFamily.js';
 import { BUTTON_SECONDARY, HELP, INPUT, TEXTAREA } from './ui.js';
 
 const HEADING = 'text-xs font-medium uppercase tracking-[0.12em] text-muted';
@@ -62,6 +63,7 @@ export function WordExtras({ entry, canWrite }: { entry: VocabularyEntry; canWri
       <Collections entry={entry} canWrite={canWrite} />
       <Examples entry={entry} canWrite={canWrite} />
       <Relations entry={entry} canWrite={canWrite} />
+      <WordFamily entry={entry} canWrite={canWrite} />
       <Connections entry={entry} />
     </>
   );
@@ -209,6 +211,7 @@ function Examples({ entry, canWrite }: { entry: VocabularyEntry; canWrite: boole
           ))}
         </ul>
       )}
+      <AiExamples entry={entry} canWrite={canWrite} />
       {canWrite && (
         <form onSubmit={add} className="flex flex-col gap-2">
           <label className="sr-only" htmlFor="extra-example-sentence">

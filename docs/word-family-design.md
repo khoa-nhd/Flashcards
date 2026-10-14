@@ -1,6 +1,10 @@
-# Batch 4 (roadmap 2026-10-13): word families from root to derived — the design, ready to build
+# Batch 4 (roadmap 2026-10-13): word families from root to derived - the design, ready to build
 
-**Status: designed, not started.** The research below was done on branch
+**Status: implemented 2026-10-14 (batch 4).** Migration
+`20261020090000_root_derived.sql` (version 11), the `roots` capability, the
+two AI routes and the word-panel UI all landed as this document planned;
+`docs/upgrade-plan.md` and the README carry the "what", this file stays the
+"why". The research below was done on branch
 `newfeature` at commit `fcb04d4` (Batch 3). Every file path, line number and
 pattern here was read from the code as it stands, so the next session can go
 straight to writing code without re-exploring. When the batch lands, this

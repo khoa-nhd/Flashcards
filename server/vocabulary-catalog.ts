@@ -34,6 +34,8 @@ export interface EntryChanges {
   dateAdded?: IsoDate | null;
   mastery?: number;
   reviewDate?: IsoDate | null;
+  /** The word this one was formed from; `null` makes it a root of its own. */
+  rootId?: string | null;
 }
 
 /**

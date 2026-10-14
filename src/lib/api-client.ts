@@ -48,7 +48,17 @@ import {
   type WeakWordsResponse,
 } from '../../shared/api.js';
 import type { IsoDate } from '../../shared/dates.js';
-import { aiExtractResponseSchema, type AiExtractRequest, type AiExtractResponse } from '../../shared/ai.js';
+import {
+  aiExtractResponseSchema,
+  aiWordFamilyResponseSchema,
+  aiExamplesResponseSchema,
+  type AiExtractRequest,
+  type AiExtractResponse,
+  type AiWordFamilyRequest,
+  type AiWordFamilyResponse,
+  type AiExamplesRequest,
+  type AiExamplesResponse,
+} from '../../shared/ai.js';
 import { EXPORT_FORMAT, type AccountExport } from '../../shared/export-format.js';
 import type { ImportItem } from '../../shared/import.js';
 import type { Collection, ExtraExample, Relation, RelationKind } from '../../shared/library.js';
@@ -158,6 +168,20 @@ export interface AiApi {
    * simply enters the word by hand — nothing here is required.
    */
   extractSense(request: AiExtractRequest): Promise<AiExtractResponse>;
+
+  /**
+   * The words formed from one root, as a draft the reader reviews. Saving any
+   * of it is ordinary writes afterwards - creating the words, pointing their
+   * links - so a failure here only means the family is built by hand.
+   */
+  wordFamily(request: AiWordFamilyRequest): Promise<AiWordFamilyResponse>;
+
+  /**
+   * Example sentences for a word being added, as drafts with the collocations
+   * the reader has saved. Each sentence is saved through the ordinary
+   * examples path after it has been read; nothing is stored by asking.
+   */
+  suggestExamples(request: AiExamplesRequest): Promise<AiExamplesResponse>;
 }
 
 export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi & AiApi;
@@ -444,6 +468,22 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         // budget only delays the fallback of entering the word by hand.
         timeoutMs: TIMEOUTS.actionMs,
         timeoutMessage: 'The AI suggestion took too long. Enter the word by hand.',
+      }),
+
+    wordFamily: (body) =>
+      call('/api/ai/word-family', aiWordFamilyResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'The AI suggestion took too long. Build the family by hand.',
+      }),
+
+    suggestExamples: (body) =>
+      call('/api/ai/examples', aiExamplesResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'The AI suggestion took too long. Write the examples by hand.',
       }),
 
     fetchPlan: () =>

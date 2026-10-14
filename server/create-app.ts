@@ -31,8 +31,10 @@ import { bearerToken, type AccountGateway, type AccountSession } from './account
 import { createAiAdapter, AiError } from './ai/adapter.js';
 import { createTokenBucket } from './ai/rate-limit.js';
 import { AI_RATE, SmartReader, aiErrorToHttp } from './ai/smart-reader.js';
+import { WORD_FAMILY_RATE, WordFamily } from './ai/word-family.js';
+import { EXAMPLES_RATE, Examples } from './ai/examples.js';
 import type { AnalyticsService } from './analytics-service.js';
-import { aiExtractRequestSchema } from '../shared/ai.js';
+import { aiExtractRequestSchema, aiWordFamilyRequestSchema, aiExamplesRequestSchema } from '../shared/ai.js';
 import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
 import type { ExportService } from './export-service.js';
@@ -130,7 +132,10 @@ export function createApp({
   // The language model for the AI features, if this server has one. Built
   // once for the app; without a key the adapter answers "not configured" and
   // the features fall back to being done by hand.
-  const reader = new SmartReader({ adapter: createAiAdapter(config.ai), limiter: createTokenBucket(AI_RATE) });
+  const aiAdapter = createAiAdapter(config.ai);
+  const reader = new SmartReader({ adapter: aiAdapter, limiter: createTokenBucket(AI_RATE) });
+  const familyBuilder = new WordFamily({ adapter: aiAdapter, limiter: createTokenBucket(WORD_FAMILY_RATE) });
+  const exampleSuggester = new Examples({ adapter: aiAdapter, limiter: createTokenBucket(EXAMPLES_RATE) });
 
   const requireService = (c: Context<AppEnv>): ReviewService => {
     const { review } = c.get('scope');
@@ -463,6 +468,56 @@ export function createApp({
     const accountKey = c.get('scope').session?.account.id ?? 'sample';
     try {
       return c.json(await reader.extract(accountKey, request));
+    } catch (error) {
+      if (error instanceof AiError) {
+        const http = aiErrorToHttp(error);
+        throw new HttpError(http.status, http.code, http.message);
+      }
+      throw error;
+    }
+  });
+
+  // ---- Word families: which words were formed from one root ----
+
+  app.post('/api/ai/word-family', async (c) => {
+    // The family is only ever a draft the reader reviews, but asking for one
+    // costs quota, so a frozen account is refused here too.
+    if (!config.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
+    const request = await parseBody(c, aiWordFamilyRequestSchema);
+    const accountKey = c.get('scope').session?.account.id ?? 'sample';
+    try {
+      return c.json(await familyBuilder.suggest(accountKey, request));
+    } catch (error) {
+      if (error instanceof AiError) {
+        const http = aiErrorToHttp(error);
+        throw new HttpError(http.status, http.code, http.message);
+      }
+      throw error;
+    }
+  });
+
+  // ---- Example sentences for a word being added ----
+
+  app.post('/api/ai/examples', async (c) => {
+    // Asked for like any other AI feature, and reviewed sentence by sentence
+    // before anything is saved; a frozen account is refused here too.
+    if (!config.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
+    const request = await parseBody(c, aiExamplesRequestSchema);
+    const accountKey = c.get('scope').session?.account.id ?? 'sample';
+    try {
+      return c.json(await exampleSuggester.suggest(accountKey, request));
     } catch (error) {
       if (error instanceof AiError) {
         const http = aiErrorToHttp(error);

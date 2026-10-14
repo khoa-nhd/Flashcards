@@ -188,16 +188,28 @@ travels the existing recorded `POST /api/practice` path — mastery, review
 dates and FSRS untouched, as everywhere else. No preset exams are bundled;
 the AI-suggested exam plan stays deferred (owner decision, Đợt 5).
 
-### Batch 4 of the 2026-10-13 roadmap (planned 2026-10-14, not started)
+### Batch 4 of the 2026-10-13 roadmap (2026-10-14)
 
-Word families: an AI builder whose answer is always a draft, a
-`root_id` column (migration v11, capability-gated) so the direction
-root → derived is stored and not guessed, timelines in the word panel,
-and example sentences written around the reader's saved collocations.
-The full design — every file path, the migration sketch and the order of
-work — is in `docs/word-family-design.md`. Owner decision: the code is
-built now; applying v9–v11 to live Supabase stays the owner's step, and
-the features stay off until the schema catches up.
+**Word families.** Database version 11: one nullable `root_id` on
+`vocabulary` — a word points at the root it was formed from, which a
+relation row between two words cannot say because it does not know which
+end is the base. Single-column FK on purpose (a composite key with
+`on delete set null` would clear the owner too), self-reference refused by
+a check, one partial index, and `update_vocabulary` accepts only a root of
+the caller's own account. The capability `roots` (version 11) switches the
+feature on only where the column exists. A new section in the word panel
+shows the family as chips — root → the word → its members, each opening
+that word — and, where a model is configured, builds a draft family for
+the reader to untick and save: the missing words are created, then each
+kept member's `rootId` is set — ordinary writes through the existing
+paths, with no content, mastery, review date or FSRS state touched.
+Example sentences suggested with the reader's saved collocations land in
+the examples section as editable drafts, saved through the ordinary
+`addExample` path with the source "AI suggestion". Both AI routes copy the
+SmartReader contract end to end: named failures, per-account buckets,
+drafts only, refused while saving is frozen. `docs/word-family-design.md`
+holds the design; applying v9–v11 to live Supabase stays the owner's
+step, and the whole panel stays hidden until the version is found.
 
 ## 1. Audit: where the app stands
 

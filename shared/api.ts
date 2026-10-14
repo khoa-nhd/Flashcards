@@ -79,6 +79,8 @@ export const capabilitiesSchema = z.object({
   practice: z.boolean().default(false),
   /** Collections, further examples and relationships between words can be kept. */
   library: z.boolean().default(false),
+  /** A word can point at the root it was formed from, and the family can be suggested. */
+  roots: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -91,6 +93,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   confidence: false,
   practice: false,
   library: false,
+  roots: false,
 };
 
 /**
@@ -625,6 +628,11 @@ export const vocabularyEntrySchema = z.object({
   reviewStatus: reviewStatusSchema,
   /** Whether the word is in the review queue right now, by the same rule the Review tab uses. */
   reviewable: z.boolean(),
+  /**
+   * The word this one was formed from, where the reader has set one. Only
+   * ever a word of the same account; null means the word is its own root.
+   */
+  rootId: z.string().nullable().default(null),
   /** When the record itself was created and last changed, kept apart from the user-entered Date Added. */
   createdTime: z.string().nullable(),
   lastEditedTime: z.string().nullable(),
@@ -638,6 +646,8 @@ export const vocabularyListResponseSchema = z.object({
   /** False when the app may not change stored data; adding, editing and deleting are then unavailable. */
   writesEnabled: z.boolean(),
   skipped: z.array(skippedRecordSchema),
+  /** What the store behind the app can do, as the queue reports it too. */
+  capabilities: capabilitiesSchema.default(NO_CAPABILITIES),
   /** What a new word starts with, so the Add form can show it rather than hide it. */
   defaults: z.object({ mastery: z.number(), reviewDate: z.enum(['empty', 'today']) }),
 });
@@ -723,6 +733,11 @@ export const updateEntryRequestSchema = z
     definition: textSchema.optional(),
     example: textSchema.optional(),
     dateAdded: isoDateSchema.nullable().optional(),
+    /**
+     * The word this one was formed from, or null to make it a root of its
+     * own. Checked against the account's own words before it is stored.
+     */
+    rootId: z.string().min(1).nullable().optional(),
     /** Review state is only ever changed through this explicit block. */
     schedule: z
       .strictObject({ mastery: masterySchema, reviewDate: isoDateSchema.nullable() })

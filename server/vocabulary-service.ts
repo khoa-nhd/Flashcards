@@ -1,6 +1,8 @@
 import {
   importItemSchema,
   normalizeId,
+  NO_CAPABILITIES,
+  type Capabilities,
   type CreateEntryRequest,
   type ImportResponse,
   type UpdateEntryRequest,
@@ -27,6 +29,8 @@ export interface VocabularyServiceOptions {
   writesRequested: boolean;
   /** Which schedule decides when a word is due. Without one, the mastery schedule. */
   scheduler?: SchedulerStore;
+  /** What the store behind this service can keep. Without one, nothing optional. */
+  capabilities?: Capabilities;
   now?: () => Date;
 }
 
@@ -47,10 +51,12 @@ export class VocabularyService {
   /** Submissions already answered, so a repeated request returns the same record. */
   private readonly recentCreates = new Map<string, { entry: EntryData; at: number }>();
   private readonly scheduler: SchedulerStore;
+  private readonly capabilities: Capabilities;
 
   constructor(private readonly options: VocabularyServiceOptions) {
     this.now = options.now ?? (() => new Date());
     this.scheduler = options.scheduler ?? MASTERY_ONLY;
+    this.capabilities = options.capabilities ?? NO_CAPABILITIES;
   }
 
   private today(): IsoDate {
@@ -109,6 +115,7 @@ export class VocabularyService {
       mode: catalog.mode,
       writesEnabled: await this.writesEnabled(),
       skipped: invalid,
+      capabilities: this.capabilities,
       defaults,
     };
   }
@@ -219,6 +226,27 @@ export class VocabularyService {
       }
       if (request.dateAdded !== undefined && request.dateAdded !== current.dateAdded) {
         changes.dateAdded = request.dateAdded;
+      }
+      // The root pointer is organisation, like a collection membership: it
+      // needs a store that can keep it, and the root must be a word of this
+      // own account. It never touches the word's content or its schedule.
+      if (request.rootId !== undefined && request.rootId !== current.rootId) {
+        if (!this.capabilities.roots) {
+          throw new HttpError(
+            409,
+            'not_supported',
+            'This database cannot keep which word a word was formed from yet. Settings → Connection shows the update that adds it.',
+          );
+        }
+        if (request.rootId !== null) {
+          if (request.rootId === pageId) {
+            throw new HttpError(400, 'invalid_request', 'A word cannot be its own root.');
+          }
+          if ((await catalog.getEntry(request.rootId)) === null) {
+            throw new HttpError(404, 'not_found', 'That root word is not in your vocabulary.');
+          }
+        }
+        changes.rootId = request.rootId;
       }
       if (request.schedule !== undefined) {
         if (request.schedule.mastery !== current.mastery) changes.mastery = request.schedule.mastery;

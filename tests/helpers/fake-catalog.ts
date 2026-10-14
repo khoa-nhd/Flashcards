@@ -13,6 +13,7 @@ export function entryData(n: number, overrides: Partial<EntryData> = {}): EntryD
     mastery: 3,
     reviewDate: '2026-10-09',
     dateAdded: '2026-10-01',
+    rootId: null,
     createdTime: '2026-10-01T02:00:00.000Z',
     lastEditedTime: '2026-10-05T02:00:00.000Z',
     ...overrides,

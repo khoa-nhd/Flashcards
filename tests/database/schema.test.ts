@@ -625,6 +625,49 @@ describe('update_vocabulary', () => {
   });
 });
 
+describe('the root a word was formed from', () => {
+  const patch = (session: Session, id: string, changes: object) =>
+    session.query<{ ok: boolean }>('select public.update_vocabulary($1::uuid, $2::jsonb) as ok', [id, JSON.stringify(changes)]);
+  const rootOf = (session: Session, id: string) =>
+    session.query<{ root_id: string | null }>('select root_id from public.vocabulary_cards where id = $1', [id]);
+  let word: string;
+  let root: string;
+
+  beforeEach(async () => {
+    word = (await db.as(alice, (s) => createWord(s))).id;
+    root = (await db.as(alice, (s) => createWord(s, { word: 'decide' }))).id;
+  });
+
+  it("accepts the caller's own word and reads it back through the card view", async () => {
+    expect(await db.as(alice, (s) => patch(s, word, { root_id: root }))).toEqual([{ ok: true }]);
+    expect(await db.as(alice, (s) => rootOf(s, word))).toEqual([{ root_id: root }]);
+  });
+
+  it('refuses a root of another account, and a word as its own root', async () => {
+    const foreign = (await db.as(bob, (s) => createWord(s, { word: 'resolve' }))).id;
+    await expect(db.as(alice, (s) => patch(s, word, { root_id: foreign }))).rejects.toMatchObject({ code: 'P0002' });
+    await expect(db.as(alice, (s) => patch(s, word, { root_id: word }))).rejects.toMatchObject({ code: CHECK_VIOLATION });
+    expect(await db.as(alice, (s) => rootOf(s, word))).toEqual([{ root_id: null }]);
+  });
+
+  it('refuses a root that does not exist', async () => {
+    await expect(
+      db.as(alice, (s) => patch(s, word, { root_id: '99999999-9999-4999-8999-999999999999' })),
+    ).rejects.toMatchObject({ code: 'P0002' });
+  });
+
+  it('is cleared given null, like any other field', async () => {
+    await db.as(alice, (s) => patch(s, word, { root_id: root }));
+    await db.as(alice, (s) => patch(s, word, { root_id: null }));
+    expect(await db.as(alice, (s) => rootOf(s, word))).toEqual([{ root_id: null }]);
+  });
+
+  it('has an index for finding the family of a root', async () => {
+    const rows = await db.admin<{ indexname: string }>(`select indexname from pg_indexes where tablename = 'vocabulary'`);
+    expect(rows.map((row) => row.indexname)).toContain('vocabulary_root_id_idx');
+  });
+});
+
 describe('trash and timestamps', () => {
   it('keeps a trashed word and its state, and brings both back on restore', async () => {
     const word = (await db.as(alice, (s) => createWord(s, { mastery: 7 }))).id;

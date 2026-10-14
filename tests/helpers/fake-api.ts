@@ -18,6 +18,7 @@ import type {
   WeakWordView,
   WeakWordsResponse,
 } from '../../shared/api.js';
+import { NO_CAPABILITIES } from '../../shared/api.js';
 import { EXPORT_FORMAT, EXPORT_VERSION } from '../../shared/export-format.js';
 import { collectionKey, orderPair, tidyName } from '../../shared/library.js';
 import { NO_GOAL, planDay, type PlanInput } from '../../shared/session-planner.js';
@@ -39,6 +40,7 @@ export function entry(n: number, overrides: Partial<VocabularyEntry> = {}): Voca
     dateAdded: '2026-10-01',
     reviewStatus: 'due_today',
     reviewable: true,
+    rootId: null,
     createdTime: '2026-10-01T02:00:00.000Z',
     lastEditedTime: '2026-10-05T02:00:00.000Z',
     ...overrides,
@@ -56,6 +58,7 @@ export function vocabularyList(
     mode: 'supabase',
     writesEnabled: true,
     skipped: [],
+    capabilities: NO_CAPABILITIES,
     defaults: { mastery: 1, reviewDate: 'empty' },
     ...overrides,
   };
@@ -501,6 +504,22 @@ export function createFakeApi({
       if (sentence === null) throw new ApiError('invalid_request', 'That word was not found in the text.', 400);
       return { sentence, definition: `definition of ${request.word}`, meaning: `nghĩa của ${request.word}` };
     }),
+
+    // The drafts stand in for the model's reply, shaped like the server's;
+    // tests wanting a different family (or a failure) use
+    // mockResolvedValueOnce / mockRejectedValueOnce on them.
+    wordFamily: vi.fn<AppApi['wordFamily']>(async (request) => ({
+      family: [
+        { word: request.word, gloss: request.meaning ?? null, root: true },
+        { word: `${request.word}s`, gloss: null, root: false },
+      ],
+    })),
+    suggestExamples: vi.fn<AppApi['suggestExamples']>(async (request) => ({
+      examples: request.collocations.map((collocation) => ({
+        sentence: `She put it to good use: ${collocation}.`,
+        uses: collocation,
+      })),
+    })),
   } satisfies AppApi;
 
   return { api, saves, store };

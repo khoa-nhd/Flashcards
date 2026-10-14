@@ -42,6 +42,7 @@ function toEntry(row: CardRow): EntryData {
     dateAdded: row.date_added,
     createdTime: row.created_at,
     lastEditedTime: row.updated_at,
+    rootId: row.root_id ?? null,
   };
 }
 
@@ -73,6 +74,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     confidence: schemaVersion >= 5,
     practice: schemaVersion >= 6,
     library: schemaVersion >= 7,
+    roots: schemaVersion >= 11,
   };
 }
 
@@ -358,6 +360,7 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     if (changes.dateAdded !== undefined) patch.date_added = changes.dateAdded;
     if (changes.mastery !== undefined) patch.mastery = changes.mastery;
     if (changes.reviewDate !== undefined) patch.review_date = changes.reviewDate;
+    if (changes.rootId !== undefined) patch.root_id = changes.rootId;
 
     const updated = await this.database.updateCard(id, patch);
     const row = updated ? await this.database.getCard(id) : null;
