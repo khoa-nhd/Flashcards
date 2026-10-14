@@ -137,17 +137,30 @@ export function PracticePage() {
     return entries.map(toPracticeWord);
   }, [state.entries, source, today, weak.data, collections]);
 
+  // Prioritise words that haven't been practised yet (totalAnswers === 0)
+  const sortedCandidates = useMemo(() => {
+    return [...candidates].sort((a, b) => {
+      const statsA = statsMap.get(a.id);
+      const statsB = statsMap.get(b.id);
+      const practicedA = statsA && statsA.totalAnswers > 0;
+      const practicedB = statsB && statsB.totalAnswers > 0;
+      if (!practicedA && practicedB) return -1;
+      if (practicedA && !practicedB) return 1;
+      return 0;
+    });
+  }, [candidates, statsMap]);
+
   // What each mode can use from the chosen words, and why the rest are left out.
   const usable = useMemo(() => {
     const reasons = new Map<Ineligible, number>();
     let ready = 0;
-    for (const word of candidates) {
+    for (const word of sortedCandidates) {
       const reason = ineligibility(mode, word, pool);
       if (reason === null) ready += 1;
       else reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
     }
     return { ready, reasons: [...reasons] };
-  }, [candidates, mode, pool]);
+  }, [sortedCandidates, mode, pool]);
 
   const silent = mode === 'listening' && !canSpeak;
 
@@ -165,7 +178,7 @@ export function PracticePage() {
 
   const start = () => {
     if (silent) return;
-    const { words } = selectForPractice(mode, candidates, pool, length, Math.random);
+    const { words } = selectForPractice(mode, sortedCandidates, pool, length, Math.random);
     if (words.length === 0) return;
     setFinished(null);
     outcomes.current = new Map();
@@ -400,7 +413,6 @@ export function PracticePage() {
         ) : (
           <div className="flex max-w-2xl flex-col gap-6">
             {finished !== null && <Summary mode={finished.mode} outcomes={finished.outcomes} />}
-            <PracticeStatsTable statsMap={statsMap} loading={statsLoading} error={statsError} onReload={reloadStats} />
 
             <section className={`${CARD} flex flex-col gap-4 p-5`} aria-labelledby="practice-setup-title">
               <h2 id="practice-setup-title" className={SECTION_TITLE}>
@@ -542,9 +554,11 @@ export function PracticePage() {
                 <button type="button" className={BUTTON_PRIMARY} disabled={usable.ready === 0 || silent} onClick={start}>
                   Start
                 </button>
-                <span className={HELP}>Questions come in a random order.</span>
+                <span className={HELP}>Questions come in a random order. Unpractised words are prioritised.</span>
               </div>
             </section>
+
+            <PracticeStatsTable statsMap={statsMap} loading={statsLoading} error={statsError} onReload={reloadStats} />
           </div>
         )}
       </VocabularyGate>
@@ -684,7 +698,11 @@ function PracticeStatsTable({
           </thead>
           <tbody className="tabular-nums">
             {wordsWithPractice
-              .sort((a, b) => b.lastPractisedOn?.localeCompare(a.lastPractisedOn ?? '') ?? 0)
+              .sort((a, b) => {
+                const accuracyA = a.totalAnswers > 0 ? a.totalCorrect / a.totalAnswers : 0;
+                const accuracyB = b.totalAnswers > 0 ? b.totalCorrect / b.totalAnswers : 0;
+                return accuracyA - accuracyB;
+              })
               .map((stats) => (
                 <tr key={stats.vocabularyId} className="border-t border-line">
                   <th scope="row" className="py-2 text-left font-medium sticky left-0 bg-surface z-10 px-3">
