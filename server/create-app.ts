@@ -444,7 +444,8 @@ export function createApp({
   // Practice history for True Mastery: detailed answers with correctness, timestamps, mode, grading, session.
   app.get('/api/practice-history', async (c) => {
     const since = c.req.query('since') ?? null;
-    return c.json(await requireService(c).practiceHistory(since));
+    const answers = await requireService(c).practiceHistory(since);
+    return c.json({ available: answers.length > 0, answers });
   });
 
   app.get('/api/trash', async (c) => c.json({ entries: await requireVocabulary(c).listTrashed() }));
