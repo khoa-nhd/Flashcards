@@ -25,8 +25,10 @@ import { PracticeCard, Verdict, type PracticeVerdict } from '../components/Pract
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { useRemote } from '../hooks/useRemote.js';
+import { usePracticeStats, type WordPracticeStats } from '../hooks/usePracticeStats.js';
 import { ApiError } from '../lib/api-client.js';
 import { count } from '../lib/format.js';
+import { formatDate } from '../components/badges.js';
 import { startTiming } from '../lib/perf.js';
 import { newRequestId } from '../lib/request-id.js';
 import { ROUTES, buildHref, openWord, useLocation } from '../lib/router.js';
@@ -103,6 +105,7 @@ export function PracticePage() {
   // Listening needs the browser to be able to read text aloud. Asked once: it does not change while the page is open.
   const [canSpeak] = useState(speechAvailable);
   const weak = useRemote(api.fetchWeakWords, 'Could not load your weak words.');
+  const { statsMap, loading: statsLoading, error: statsError, reload: reloadStats } = usePracticeStats();
 
   const [mode, setMode] = useState<StudyMode>(() => (isMode(query.get('mode')) ? (query.get('mode') as StudyMode) : 'recognition'));
   const [source, setSource] = useState<Source>(() => sourceFromQuery(query));
@@ -397,6 +400,7 @@ export function PracticePage() {
         ) : (
           <div className="flex max-w-2xl flex-col gap-6">
             {finished !== null && <Summary mode={finished.mode} outcomes={finished.outcomes} />}
+            <PracticeStatsTable statsMap={statsMap} loading={statsLoading} error={statsError} onReload={reloadStats} />
 
             <section className={`${CARD} flex flex-col gap-4 p-5`} aria-labelledby="practice-setup-title">
               <h2 id="practice-setup-title" className={SECTION_TITLE}>
@@ -592,6 +596,141 @@ function Summary({ mode, outcomes }: { mode: StudyMode; outcomes: Outcome[] }) {
           See Insights
         </Link>
       </div>
+    </section>
+  );
+}
+
+function PracticeStatsTable({
+  statsMap,
+  loading,
+  error,
+  onReload,
+}: {
+  statsMap: Map<string, WordPracticeStats>;
+  loading: boolean;
+  error: string | null;
+  onReload: () => void;
+}) {
+  if (loading) {
+    return (
+      <section className={`${CARD} p-5`} aria-label="Practice statistics">
+        <div className="flex items-center gap-3">
+          <div className="h-5 w-5 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+          <span className="text-sm text-muted">Loading practice statistics…</span>
+        </div>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className={`${CARD} p-5`} aria-label="Practice statistics">
+        <div className="flex flex-wrap items-center gap-3">
+          <p role="alert" className="text-sm text-bad-ink">
+            {error}
+          </p>
+          <button type="button" className={BUTTON_SECONDARY} onClick={onReload}>
+            Try again
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  // Filter to only words with practice data
+  const wordsWithPractice = Array.from(statsMap.values()).filter((stats) => stats.totalAnswers > 0);
+
+  if (wordsWithPractice.length === 0) {
+    return (
+      <section className={`${CARD} p-5`} aria-label="Practice statistics">
+        <h3 className={SECTION_TITLE}>Practice statistics per word</h3>
+        <p className="mt-3 text-sm text-muted">
+          No practice recorded yet. Start a practice session to see statistics here.
+        </p>
+      </section>
+    );
+  }
+
+  // Collect all modes used across all words for column headers
+  const allModes = new Set<string>();
+  for (const stats of wordsWithPractice) {
+    for (const mode of stats.modes) {
+      allModes.add(mode.mode);
+    }
+  }
+  const modeList = Array.from(allModes).sort();
+
+  return (
+    <section className={`${CARD} p-5`} aria-label="Practice statistics">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className={SECTION_TITLE}>Practice statistics per word</h3>
+        <span className="text-xs text-muted">{wordsWithPractice.length} word{wordsWithPractice.length !== 1 ? 's' : ''} with practice data</span>
+      </div>
+
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="text-left text-xs text-muted">
+            <tr>
+              <th scope="col" className="py-1 font-medium sticky left-0 bg-surface z-10 px-3">Word</th>
+              {modeList.map((mode) => (
+                <th key={mode} scope="col" className="py-1 text-right font-medium px-3">
+                  {STUDY_MODE_LABELS[mode as keyof typeof STUDY_MODE_LABELS] ?? mode}
+                </th>
+              ))}
+              <th scope="col" className="py-1 text-right font-medium px-3">Total</th>
+              <th scope="col" className="py-1 text-right font-medium px-3">Accuracy</th>
+              <th scope="col" className="py-1 text-right font-medium px-3">Last practised</th>
+            </tr>
+          </thead>
+          <tbody className="tabular-nums">
+            {wordsWithPractice
+              .sort((a, b) => b.lastPractisedOn?.localeCompare(a.lastPractisedOn ?? '') ?? 0)
+              .map((stats) => (
+                <tr key={stats.vocabularyId} className="border-t border-line">
+                  <th scope="row" className="py-2 text-left font-medium sticky left-0 bg-surface z-10 px-3">
+                    <button
+                      type="button"
+                      onClick={() => openWord(stats.vocabularyId)}
+                      className="cursor-pointer hover:underline"
+                    >
+                      {stats.word}
+                    </button>
+                  </th>
+                  {modeList.map((mode) => {
+                    const modeStat = stats.modes.find((m) => m.mode === mode);
+                    if (!modeStat) {
+                      return <td key={mode} className="py-2 text-right text-muted px-3">—</td>;
+                    }
+                    const accuracy = modeStat.total > 0 ? Math.round((modeStat.correct / modeStat.total) * 100) : 0;
+                    return (
+                      <td key={mode} className="py-2 text-right px-3">
+                        <span className="font-medium">{modeStat.correct}</span>
+                        <span className="text-muted"> / {modeStat.total}</span>
+                        <span className="ml-1 text-xs text-muted">({accuracy}%)</span>
+                      </td>
+                    );
+                  })}
+                  <td className="py-2 text-right font-medium px-3">
+                    {stats.totalCorrect} / {stats.totalAnswers}
+                  </td>
+                  <td className="py-2 text-right px-3">
+                    {stats.totalAnswers > 0
+                      ? `${Math.round((stats.totalCorrect / stats.totalAnswers) * 100)}%`
+                      : '—'}
+                  </td>
+                  <td className="py-2 text-right text-muted px-3">
+                    {stats.lastPractisedOn ? formatDate(stats.lastPractisedOn, 'short') : '—'}
+                  </td>
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+
+      <p className="mt-3 text-xs text-muted">
+        Shows correct / total answers per mode. Click a word to open its details.
+        Practice mastery (capped at 10 per mode) is shown in the word detail panel.
+      </p>
     </section>
   );
 }
