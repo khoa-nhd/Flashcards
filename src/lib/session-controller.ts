@@ -221,7 +221,7 @@ export function createSessionController(
 
     if (mutationQueue && !inTestMode) {
       // Enqueue for background sync - UI already updated optimistically
-      enqueueReviewAction(mutationQueue, {
+      await enqueueReviewAction(mutationQueue, {
         pageId: card.id,
         action: attempt.action,
         expected: { mastery: card.mastery, nextReview: card.nextReview },
@@ -268,7 +268,7 @@ export function createSessionController(
     const inTestMode = getGlobalTestMode();
 
     if (mutationQueue && !inTestMode) {
-      enqueueReviewUndo(mutationQueue, {
+      await enqueueReviewUndo(mutationQueue, {
         reviewRequestId,
         requestId: undoRequest.requestId,
       });

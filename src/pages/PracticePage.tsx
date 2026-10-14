@@ -251,7 +251,7 @@ export function PracticePage() {
 
     if (!inTestMode) {
       // Enqueue for background persistence - UI already updated optimistically
-      enqueuePracticeAnswer(mutationQueue, {
+      await enqueuePracticeAnswer(mutationQueue, {
         pageId: word.id,
         mode: current.mode,
         answer: given,

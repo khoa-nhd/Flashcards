@@ -252,7 +252,8 @@ function isPermanentError(error: unknown): boolean {
 // Mutation queue input type (what callers pass to enqueue)
 // -----------------------------------------------------------------------------
 
-type MutationInput = Omit<Mutation, 'id' | 'createdAt' | 'attempt' | 'lastError' | 'status' | 'serverResponse'>;
+// Callers must not provide accountId; the queue sets it from the current account.
+type MutationInput = Omit<Mutation, 'id' | 'createdAt' | 'attempt' | 'lastError' | 'status' | 'serverResponse' | 'accountId'>;
 
 // Internal type for mutations in the queue (adds internal tracking fields)
 type QueuedMutation = Mutation & {
@@ -287,7 +288,7 @@ export class MutationQueue {
   private syncInProgress = false;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private onlineListenerAdded = false;
-  private handlers = new Map<MutationKind, MutationHandler<any>>();
+  private handlers = new Map<MutationKind, MutationHandler<unknown>>();
   private pendingMutations: QueuedMutation[] = [];
 
   private get testMode(): boolean {
@@ -320,7 +321,7 @@ export class MutationQueue {
 
   private scheduleSync(delayMs: number = 0): void {
     if (this.testMode) {
-      this.processQueueSync();
+      // In test mode, enqueue already processes synchronously via processTestMutation
       return;
     }
     if (this.syncTimer) clearTimeout(this.syncTimer);
@@ -380,7 +381,7 @@ export class MutationQueue {
 
   /** Register a handler for a mutation kind. */
   registerHandler<P>(kind: MutationKind, handler: MutationHandler<P>): void {
-    this.handlers.set(kind, handler as MutationHandler<any>);
+    this.handlers.set(kind, handler as MutationHandler<unknown>);
   }
 
   /** Unregister a handler. */
@@ -416,8 +417,12 @@ export class MutationQueue {
     return () => this.listeners.delete(listener);
   }
 
-  /** Enqueue a mutation for background sync. Returns the mutation ID. */
-  enqueue(mutation: MutationInput): string {
+  /** Enqueue a mutation for background sync. Returns the mutation ID. Throws if no account is set or persistence fails. */
+  async enqueue(mutation: MutationInput): Promise<string> {
+    if (!this.currentAccountId) {
+      throw new Error('Cannot enqueue mutation: no account ID set. Call setAccountId() first.');
+    }
+
     const id = newRequestId();
     const fullMutation = {
       ...mutation,
@@ -427,20 +432,19 @@ export class MutationQueue {
       lastError: null,
       status: 'pending' as const,
       serverResponse: null,
+      accountId: this.currentAccountId,
     } as QueuedMutation;
 
     if (this.testMode) {
       // In test mode, process immediately by calling the handler directly
       this.pendingMutations.push(fullMutation);
-      this.processTestMutation(fullMutation);
+      await this.processTestMutation(fullMutation);
       this.notify();
     } else {
-      void (async () => {
-        const db = await this.getDB();
-        await db.put('mutations', fullMutation);
-        this.notify();
-        this.scheduleSync(0);
-      })();
+      const db = await this.getDB();
+      await db.put('mutations', fullMutation);
+      this.notify();
+      this.scheduleSync(0);
     }
     return id;
   }
@@ -451,6 +455,8 @@ export class MutationQueue {
       console.warn(`No handler registered for mutation kind: ${mutation.kind}`);
       return;
     }
+    // Increment attempt to match non-test mode behavior (syncMutation increments before calling handler)
+    mutation.attempt += 1;
     try {
       const response = await handler(mutation.payload);
       mutation.status = 'synced';
@@ -504,7 +510,7 @@ export class MutationQueue {
     if (this.testMode) {
       const mutation = this.pendingMutations.find((m) => m.id === id);
       if (!mutation || mutation.accountId !== this.currentAccountId) return;
-      if (mutation.status === 'synced') return;
+      if (mutation.status === 'synced' || mutation.status === 'permanent') return;
       mutation.status = 'pending';
       mutation.lastError = null;
       await this.processTestMutation(mutation);
@@ -514,7 +520,7 @@ export class MutationQueue {
     const db = await this.getDB();
     const mutation = await db.get('mutations', id);
     if (!mutation || mutation.accountId !== this.currentAccountId) return;
-    if (mutation.status === 'synced') return;
+    if (mutation.status === 'synced' || mutation.status === 'permanent') return;
     await db.put('mutations', { ...mutation, status: 'pending', lastError: null });
     this.notify();
     this.scheduleSync(0);
@@ -671,54 +677,52 @@ export class MutationQueue {
 // Convenience enqueue helpers
 // -----------------------------------------------------------------------------
 
-export function enqueueReviewAction(
+export async function enqueueReviewAction(
   queue: MutationQueue,
   payload: ReviewActionMutation['payload'],
-): string {
+): Promise<string> {
   return queue.enqueue(createBaseMutation('review_action', payload));
 }
 
-export function enqueuePracticeAnswer(
+export async function enqueuePracticeAnswer(
   queue: MutationQueue,
   payload: PracticeAnswerMutation['payload'],
-): string {
+): Promise<string> {
   return queue.enqueue(createBaseMutation('practice_answer', payload));
 }
 
-export function enqueueReviewUndo(
+export async function enqueueReviewUndo(
   queue: MutationQueue,
   payload: ReviewUndoMutation['payload'],
-): string {
+): Promise<string> {
   return queue.enqueue(createBaseMutation('review_undo', payload));
 }
 
-export function enqueueVocabularyUpsert(
+export async function enqueueVocabularyUpsert(
   queue: MutationQueue,
   payload: VocabularyUpsertMutation['payload'],
-): string {
+): Promise<string> {
   return queue.enqueue(createBaseMutation('vocabulary_upsert', payload));
 }
 
-export function enqueueVocabularyDelete(
+export async function enqueueVocabularyDelete(
   queue: MutationQueue,
   payload: VocabularyDeleteMutation['payload'],
-): string {
+): Promise<string> {
   return queue.enqueue(createBaseMutation('vocabulary_delete', payload));
 }
 
-export function enqueueVocabularyRestore(
+export async function enqueueVocabularyRestore(
   queue: MutationQueue,
   payload: VocabularyRestoreMutation['payload'],
-): string {
+): Promise<string> {
   return queue.enqueue(createBaseMutation('vocabulary_restore', payload));
 }
 
 function createBaseMutation(kind: MutationKind, payload: unknown): MutationInput {
-  // The accountId will be filled in by the queue's enqueue method
   return {
     kind,
     payload: payload as Mutation['payload'],
-    accountId: '', // Will be set by the queue
   } as MutationInput;
 }
 
