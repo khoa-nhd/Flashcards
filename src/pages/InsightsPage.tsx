@@ -13,7 +13,7 @@ import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { ReviewActivityDetail, useReviewActivity } from '../components/ReviewActivity.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
-import { CARD, PAGE, SECTION_TITLE, HELP } from '../components/ui.js';
+import { CARD, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { MISSING_LABELS, missingFields } from '../lib/bank-query.js';
 import { ROUTES, buildHref } from '../lib/router.js';
 import { STUDY_MODE_LABELS } from '../../shared/study-modes.js';

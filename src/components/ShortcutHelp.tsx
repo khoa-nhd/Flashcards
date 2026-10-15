@@ -24,8 +24,14 @@ export function ShortcutHelp({ answerKeys, undo, confidence, onClose }: Shortcut
     // jsdom has no showModal; the dialog is then simply rendered open.
     if (typeof element.showModal === 'function' && !element.open) element.showModal();
     else element.setAttribute('open', '');
+    // Lock body scroll as a safety net (native showModal should do this)
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
     return () => {
-      if (typeof element.close === 'function' && element.open) element.close();
+      // Use removeAttribute('open') for non-modal, close() for modal
+      if (typeof element.close === 'function') element.close();
+      else element.removeAttribute('open');
+      document.body.style.overflow = originalOverflow;
     };
   }, []);
 

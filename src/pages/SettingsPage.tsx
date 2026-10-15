@@ -18,6 +18,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   dateAdded: 'Date added',
   reviewDate: 'Review date',
   mastery: 'Mastery',
+  trueMastery: 'True Mastery',
 };
 
 const SOURCE_TEXT = {

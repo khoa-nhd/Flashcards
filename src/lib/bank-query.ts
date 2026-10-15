@@ -8,7 +8,7 @@ import { addDays, compareDates, isIsoDate, type IsoDate } from '../../shared/dat
 import { matchesQuery } from '../../shared/text.js';
 import type { ReviewStatus, TextFieldKey } from '../../shared/vocabulary.js';
 import { SORT_KEYS, type SortDirection, type SortKey } from './settings.js';
-import type { TrueMasteryEntry } from '../../hooks/useTrueMastery.js';
+import type { TrueMasteryEntry } from '../hooks/useTrueMastery.js';
 
 /** `learning` is every word that is not yet mastered and has a usable mastery. */
 export const STATUS_FILTERS = ['due_today', 'overdue', 'upcoming', 'mastered', 'learning', 'unscheduled'] as const;

@@ -97,6 +97,15 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
 
   const [practiceHistory, setPracticeHistory] = useState<PracticeAnswer[]>([]);
 
+  // Lock body scroll when the panel is open
+  useEffect(() => {
+    const originalOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = originalOverflow;
+    };
+  }, []);
+
   const closeButton = useRef<HTMLButtonElement>(null);
   const editing = draft !== null;
 

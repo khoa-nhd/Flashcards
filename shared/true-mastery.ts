@@ -97,6 +97,8 @@ export interface ModeBreakdown {
   incorrectAnswers: number;
   /** Last attempted date */
   lastAttemptedOn: IsoDate | null;
+  /** Whether answers in this mode are self-graded (recall) or auto-graded */
+  grading: 'self' | 'auto';
 }
 
 /** Evidence coverage level */
@@ -131,6 +133,7 @@ interface ModeComputation {
   correctAnswers: number;
   incorrectAnswers: number;
   lastAttemptedOn: IsoDate | null;
+  grading: 'self' | 'auto';
 }
 
 /**
@@ -225,6 +228,7 @@ export function calculateTrueMastery(
     correctAnswers: m.correctAnswers,
     incorrectAnswers: m.incorrectAnswers,
     lastAttemptedOn: m.lastAttemptedOn,
+    grading: m.grading,
   }));
 
   return {
@@ -355,6 +359,7 @@ function computeMode(
     correctAnswers,
     incorrectAnswers,
     lastAttemptedOn,
+    grading: mode === 'recall' ? 'self' : 'auto',
   };
 }
 

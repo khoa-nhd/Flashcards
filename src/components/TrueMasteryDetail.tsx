@@ -6,7 +6,7 @@ import {
   type PracticeAnswer,
   type ModeBreakdown,
 } from '../../shared/true-mastery.js';
-import { formatDate, relativeDay } from '../../shared/dates.js';
+import { formatDate, relativeDay } from './badges.js';
 
 /** Detailed True Mastery breakdown for a single vocabulary item. */
 export function TrueMasteryDetail({
