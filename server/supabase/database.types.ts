@@ -169,6 +169,93 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      /** From schema version 10. */
+      ai_conversations: {
+        Row: { id: string; user_id: string; mode: string; title: string; created_at: string; updated_at: string };
+        Insert: { id?: string; user_id?: string; mode: string; title?: string };
+        Update: { title?: string };
+        Relationships: [];
+      };
+      /** From schema version 10. */
+      ai_messages: {
+        Row: { id: string; user_id: string; conversation_id: string; role: string; content: string; metadata: unknown; created_at: string };
+        Insert: { id?: string; user_id?: string; conversation_id: string; role: string; content: string; metadata?: unknown };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      /** From schema version 10. */
+      ai_rate_limits: {
+        Row: { user_id: string; mode: string; window_start: string; count: number };
+        Insert: { user_id?: string; mode: string; window_start: string; count?: number };
+        Update: { count?: number };
+        Relationships: [];
+      };
+      /** From schema version 11. */
+      vocabulary_analysis: {
+        Row: {
+          id: string;
+          user_id: string;
+          vocabulary_id: string;
+          pronunciation: string | null;
+          part_of_speech: string | null;
+          cefr_level: string | null;
+          confidence: number | null;
+          english_definition: string | null;
+          vietnamese_meaning: string | null;
+          senses: unknown;
+          examples: unknown;
+          word_family: unknown;
+          collocations: unknown;
+          synonyms: unknown;
+          antonyms: unknown;
+          usage_notes: string | null;
+          common_mistakes: string | null;
+          revision_summary: string | null;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          vocabulary_id: string;
+          pronunciation?: string | null;
+          part_of_speech?: string | null;
+          cefr_level?: string | null;
+          confidence?: number | null;
+          english_definition?: string | null;
+          vietnamese_meaning?: string | null;
+          senses?: unknown;
+          examples?: unknown;
+          word_family?: unknown;
+          collocations?: unknown;
+          synonyms?: unknown;
+          antonyms?: unknown;
+          usage_notes?: string | null;
+          common_mistakes?: string | null;
+          revision_summary?: string | null;
+          model?: string | null;
+        };
+        Update: {
+          pronunciation?: string | null;
+          part_of_speech?: string | null;
+          cefr_level?: string | null;
+          confidence?: number | null;
+          english_definition?: string | null;
+          vietnamese_meaning?: string | null;
+          senses?: unknown;
+          examples?: unknown;
+          word_family?: unknown;
+          collocations?: unknown;
+          synonyms?: unknown;
+          antonyms?: unknown;
+          usage_notes?: string | null;
+          common_mistakes?: string | null;
+          revision_summary?: string | null;
+          model?: string | null;
+        };
+        Relationships: [];
+      };
     };
     Views: {
       vocabulary_cards: {
@@ -307,6 +394,126 @@ export interface Database {
           duration_ms: number;
           timed_reviews: number;
         }>;
+      };
+      /** From schema version 10. */
+      list_ai_conversations: {
+        Args: { p_limit?: number; p_offset?: number };
+        Returns: Array<{ id: string; mode: string; title: string; created_at: string; updated_at: string }>;
+      };
+      /** From schema version 10. */
+      create_ai_conversation: {
+        Args: { p_mode: string; p_title?: string };
+        Returns: Array<{ id: string; mode: string; title: string; created_at: string; updated_at: string }>;
+      };
+      /** From schema version 10. */
+      get_ai_conversation: {
+        Args: { p_id: string };
+        Returns: Array<{ id: string; mode: string; title: string; created_at: string; updated_at: string }>;
+      };
+      /** From schema version 10. */
+      update_ai_conversation_title: {
+        Args: { p_id: string; p_title: string };
+        Returns: boolean;
+      };
+      /** From schema version 10. */
+      delete_ai_conversation: {
+        Args: { p_id: string };
+        Returns: boolean;
+      };
+      /** From schema version 10. */
+      list_ai_messages: {
+        Args: { p_conversation_id: string; p_limit?: number; p_offset?: number };
+        Returns: Array<{ id: string; role: string; content: string; metadata: unknown; created_at: string }>;
+      };
+      /** From schema version 10. */
+      insert_ai_message: {
+        Args: { p_conversation_id: string; p_role: string; p_content: string; p_metadata?: unknown };
+        Returns: Array<{ id: string; role: string; content: string; metadata: unknown; created_at: string }>;
+      };
+      /** From schema version 10. */
+      check_ai_rate_limit: {
+        Args: { p_mode: string; p_window: string; p_limit: number };
+        Returns: Array<{ allowed: boolean; retry_after_seconds: number; current_count: number; limit: number }>;
+      };
+      /** From schema version 10. */
+      prune_ai_rate_limits: {
+        Args: Record<string, never>;
+        Returns: number;
+      };
+      /** From schema version 11. */
+      upsert_vocabulary_analysis: {
+        Args: {
+          p_vocabulary_id: string;
+          p_pronunciation?: string | null;
+          p_part_of_speech?: string | null;
+          p_cefr_level?: string | null;
+          p_confidence?: number | null;
+          p_english_definition?: string | null;
+          p_vietnamese_meaning?: string | null;
+          p_senses?: unknown;
+          p_examples?: unknown;
+          p_word_family?: unknown;
+          p_collocations?: unknown;
+          p_synonyms?: unknown;
+          p_antonyms?: unknown;
+          p_usage_notes?: string | null;
+          p_common_mistakes?: string | null;
+          p_revision_summary?: string | null;
+          p_model?: string | null;
+        };
+        Returns: Array<{
+          id: string;
+          vocabulary_id: string;
+          pronunciation: string | null;
+          part_of_speech: string | null;
+          cefr_level: string | null;
+          confidence: number | null;
+          english_definition: string | null;
+          vietnamese_meaning: string | null;
+          senses: unknown;
+          examples: unknown;
+          word_family: unknown;
+          collocations: unknown;
+          synonyms: unknown;
+          antonyms: unknown;
+          usage_notes: string | null;
+          common_mistakes: string | null;
+          revision_summary: string | null;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+        }>;
+      };
+      /** From schema version 11. */
+      get_vocabulary_analysis: {
+        Args: { p_vocabulary_id: string };
+        Returns: Array<{
+          id: string;
+          vocabulary_id: string;
+          pronunciation: string | null;
+          part_of_speech: string | null;
+          cefr_level: string | null;
+          confidence: number | null;
+          english_definition: string | null;
+          vietnamese_meaning: string | null;
+          senses: unknown;
+          examples: unknown;
+          word_family: unknown;
+          collocations: unknown;
+          synonyms: unknown;
+          antonyms: unknown;
+          usage_notes: string | null;
+          common_mistakes: string | null;
+          revision_summary: string | null;
+          model: string | null;
+          created_at: string;
+          updated_at: string;
+        }>;
+      };
+      /** From schema version 11. */
+      delete_vocabulary_analysis: {
+        Args: { p_vocabulary_id: string };
+        Returns: boolean;
       };
     };
     Enums: Record<string, never>;

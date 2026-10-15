@@ -95,6 +95,9 @@ describe('schema', () => {
         where n.nspname = 'public' and c.relkind = 'r' order by c.relname`,
     );
     expect(tables).toEqual([
+      { relname: 'ai_conversations', relrowsecurity: true },
+      { relname: 'ai_messages', relrowsecurity: true },
+      { relname: 'ai_rate_limits', relrowsecurity: true },
       { relname: 'card_states', relrowsecurity: true },
       { relname: 'collection_items', relrowsecurity: true },
       { relname: 'collections', relrowsecurity: true },
@@ -102,6 +105,7 @@ describe('schema', () => {
       { relname: 'study_sessions', relrowsecurity: true },
       { relname: 'user_settings', relrowsecurity: true },
       { relname: 'vocabulary', relrowsecurity: true },
+      { relname: 'vocabulary_analysis', relrowsecurity: true },
       { relname: 'vocabulary_examples', relrowsecurity: true },
       { relname: 'vocabulary_relations', relrowsecurity: true },
     ]);
@@ -151,6 +155,15 @@ describe('schema', () => {
     // Words, their schedules and their history can never be deleted. Only the
     // organising tables (collections, further examples, links) allow it.
     expect(policies.map((policy) => `${policy.tablename} ${policy.cmd} ${policy.roles}`)).toEqual([
+      'ai_conversations DELETE {authenticated}',
+      'ai_conversations INSERT {authenticated}',
+      'ai_conversations SELECT {authenticated}',
+      'ai_conversations UPDATE {authenticated}',
+      'ai_messages INSERT {authenticated}',
+      'ai_messages SELECT {authenticated}',
+      'ai_rate_limits INSERT {authenticated}',
+      'ai_rate_limits SELECT {authenticated}',
+      'ai_rate_limits UPDATE {authenticated}',
       'card_states INSERT {authenticated}',
       'card_states SELECT {authenticated}',
       'card_states UPDATE {authenticated}',
@@ -172,6 +185,10 @@ describe('schema', () => {
       'vocabulary INSERT {authenticated}',
       'vocabulary SELECT {authenticated}',
       'vocabulary UPDATE {authenticated}',
+      'vocabulary_analysis DELETE {authenticated}',
+      'vocabulary_analysis INSERT {authenticated}',
+      'vocabulary_analysis SELECT {authenticated}',
+      'vocabulary_analysis UPDATE {authenticated}',
       'vocabulary_examples DELETE {authenticated}',
       'vocabulary_examples INSERT {authenticated}',
       'vocabulary_examples SELECT {authenticated}',

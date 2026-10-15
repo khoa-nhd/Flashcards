@@ -15,6 +15,7 @@ import type { SettingsStore } from './lib/settings.js';
 import { AddPage } from './pages/AddPage.js';
 import { BankPage } from './pages/BankPage.js';
 import { CalendarPage } from './pages/CalendarPage.js';
+import { ChatPage } from './pages/ChatPage.js';
 import { CollectionsPage } from './pages/CollectionsPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { ImportPage } from './pages/ImportPage.js';
@@ -31,6 +32,7 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   import: { title: 'Import', render: () => <ImportPage /> },
   bank: { title: 'Vocabulary bank', render: () => <BankPage /> },
   calendar: { title: 'Calendar', render: () => <CalendarPage /> },
+  chat: { title: 'AI Chat', render: () => <ChatPage /> },
   practice: { title: 'Practice', render: () => <PracticePage /> },
   collections: { title: 'Collections', render: () => <CollectionsPage /> },
   weak: { title: 'Weak words', render: () => <WeakWordsPage /> },

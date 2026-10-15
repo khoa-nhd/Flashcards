@@ -30,6 +30,8 @@ import {
 } from './supabase-database.js';
 import { createSupabaseLibraryStore } from './supabase-library.js';
 import { SupabaseVocabularyRepository } from './supabase-repository.js';
+import { createAiService, loadAiConfig } from '../ai-service-impl.js';
+import { AiError, AiErrorCode } from '../ai-service.js';
 
 export interface TokenVerifier {
   /** The account the token belongs to, or `null` if it is not a valid user token. */
@@ -228,6 +230,17 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           settings: () => ({ timeZone, dailyGoal: goals.get(), fsrsRetention, scheduler: scheduler.get() }),
           now,
         }),
+        ai: (() => {
+          try {
+            loadAiConfig();
+            return createAiService(repository);
+          } catch (error) {
+            if (error instanceof AiError && error.code === AiErrorCode.CONFIG_MISSING) {
+              return null; // AI not configured; service will be unavailable
+            }
+            throw error;
+          }
+        })(),
         async saveTimeZone(next) {
           if (!isValidTimeZone(next)) throw new DatabaseError('invalid', 'That is not a time zone this app recognises.');
           const saved = await database.saveTimeZone(next);

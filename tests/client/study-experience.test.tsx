@@ -103,7 +103,7 @@ describe('choosing what to review', () => {
     ['overdue', 'Nothing is overdue'],
     ['due_today', 'Nothing is dated today'],
     ['recent', 'No recent words are due'],
-    ['weak', 'No weak words are due'],
+    ['weak', 'No weak words'],
   ])('says what an empty "%s" selection means, without claiming nothing at all is due', async (focus, title) => {
     await open(`/review?focus=${focus}`, { cards: [] });
     expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();

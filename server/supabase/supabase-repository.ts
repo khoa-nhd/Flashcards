@@ -5,6 +5,7 @@ import type { HistoryEvent } from '../../shared/export-format.js';
 import type { CardHistory } from '../../shared/weak-words.js';
 import type { ReviewRules } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
+import type { StudyMode } from '../../shared/study-modes.js';
 import { DEFAULT_SCHEDULER, isSchedulerId } from '../../shared/scheduler/active.js';
 import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
 import type { StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
@@ -20,6 +21,10 @@ import type {
   SetupReport,
   UndoResult,
   VocabularyRepository,
+  AiConversationRow,
+  AiMessageRow,
+  RateLimitCheckRow,
+  VocabularyAnalysisRow,
 } from '../vocabulary-repository.js';
 import {
   LATEST_SCHEMA_VERSION,
@@ -75,6 +80,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     practice: schemaVersion >= 6,
     library: schemaVersion >= 7,
     practiceHistory: schemaVersion >= 9,
+    aiChat: schemaVersion >= 10,
   };
 }
 
@@ -254,7 +260,7 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     const rows = await this.database.practiceHistory(since);
     return rows.map((row) => ({
       vocabularyId: row.vocabulary_id,
-      mode: row.review_mode,
+      mode: row.review_mode as StudyMode,
       correct: row.answer_correct,
       grading: row.grading as 'self' | 'auto',
       submitted: row.submitted_answer,
@@ -397,4 +403,89 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     return row === null || row.deleted_at !== null ? null : toEntry(row);
   }
 
+  // ---- AI Conversations (schema version 10) ----
+
+  async listAiConversations(limit?: number, offset?: number): Promise<AiConversationRow[]> {
+    if (!this.capabilities.aiChat) return [];
+    return this.database.listAiConversations(limit, offset);
+  }
+
+  async createAiConversation(mode: 'general' | 'vocabulary_expert', title?: string): Promise<AiConversationRow> {
+    if (!this.capabilities.aiChat) throw new Error('AI chat not supported by this database version.');
+    return this.database.createAiConversation(mode, title);
+  }
+
+  async getAiConversation(id: string): Promise<AiConversationRow | null> {
+    if (!this.capabilities.aiChat) return null;
+    return this.database.getAiConversation(id);
+  }
+
+  async updateAiConversationTitle(id: string, title: string): Promise<boolean> {
+    if (!this.capabilities.aiChat) return false;
+    return this.database.updateAiConversationTitle(id, title);
+  }
+
+  async deleteAiConversation(id: string): Promise<boolean> {
+    if (!this.capabilities.aiChat) return false;
+    return this.database.deleteAiConversation(id);
+  }
+
+  async listAiMessages(conversationId: string, limit?: number, offset?: number): Promise<AiMessageRow[]> {
+    if (!this.capabilities.aiChat) return [];
+    return this.database.listAiMessages(conversationId, limit, offset);
+  }
+
+  async insertAiMessage(
+    conversationId: string,
+    role: 'user' | 'assistant' | 'system',
+    content: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<AiMessageRow> {
+    if (!this.capabilities.aiChat) throw new Error('AI chat not supported by this database version.');
+    return this.database.insertAiMessage(conversationId, role, content, metadata);
+  }
+
+  async checkAiRateLimit(
+    mode: 'general' | 'vocabulary_expert',
+    window: 'minute' | 'day',
+    limit: number,
+  ): Promise<RateLimitCheckRow> {
+    if (!this.capabilities.aiChat) throw new Error('AI chat not supported by this database version.');
+    return this.database.checkAiRateLimit(mode, window, limit);
+  }
+
+  // ---- Vocabulary Analysis (schema version 11) ----
+
+  async upsertVocabularyAnalysis(args: {
+    vocabularyId: string;
+    pronunciation?: string | null;
+    partOfSpeech?: string | null;
+    cefrLevel?: string | null;
+    confidence?: number | null;
+    englishDefinition?: string | null;
+    vietnameseMeaning?: string | null;
+    senses?: Record<string, unknown>[];
+    examples?: Record<string, unknown>[];
+    wordFamily?: Record<string, unknown>[];
+    collocations?: Record<string, unknown>[];
+    synonyms?: Record<string, unknown>[];
+    antonyms?: Record<string, unknown>[];
+    usageNotes?: string | null;
+    commonMistakes?: string | null;
+    revisionSummary?: string | null;
+    model?: string | null;
+  }): Promise<VocabularyAnalysisRow> {
+    if (!this.capabilities.aiChat) throw new Error('AI chat not supported by this database version.');
+    return this.database.upsertVocabularyAnalysis(args);
+  }
+
+  async getVocabularyAnalysis(vocabularyId: string): Promise<VocabularyAnalysisRow | null> {
+    if (!this.capabilities.aiChat) return null;
+    return this.database.getVocabularyAnalysis(vocabularyId);
+  }
+
+  async deleteVocabularyAnalysis(vocabularyId: string): Promise<boolean> {
+    if (!this.capabilities.aiChat) return false;
+    return this.database.deleteVocabularyAnalysis(vocabularyId);
+  }
 }

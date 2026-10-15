@@ -230,7 +230,7 @@ describe('weak words', () => {
 });
 
 describe('focusing a review on the weakest words', () => {
-  it('holds only weak words that are already due, weakest first', async () => {
+  it('holds every weak word, weakest first, whether or not it is due', async () => {
     const app = on('2026-10-09');
     const full = { meaning: 'm', definition: 'd', example: 'e' };
     await addWord(app, alice, { word: 'healthy', ...full, mastery: 3, reviewDate: '2026-10-09' });
@@ -244,11 +244,41 @@ describe('focusing a review on the weakest words', () => {
 
     const focused = queueResponseSchema.parse(await (await call(app, alice, '/api/review-queue?focus=weak')).json());
     expect(focused.focus).toBe('weak');
-    // Narrowed, never widened: the weak word that is not due yet is not pulled forward.
-    expect(focused.cards.map((card) => card.word)).toEqual(['overdue-a-month', 'overdue-a-week']);
+    // A weak word is brought forward whether it is overdue or dated in the future; the waiting one still leads.
+    expect(focused.cards.map((card) => card.word)).toEqual(['overdue-a-month', 'overdue-a-week', 'weak-but-not-due']);
   });
 
-  it('is simply empty when no weak word is due, without claiming nothing at all is due', async () => {
+  it('lets a weak word be answered early, and schedules it from today', async () => {
+    const app = on('2026-10-09');
+    const word = await addWord(app, alice, { word: 'early', mastery: 3, reviewDate: '2026-10-20' });
+
+    const focused = queueResponseSchema.parse(await (await call(app, alice, '/api/review-queue?focus=weak')).json());
+    expect(focused.cards.map((card) => card.word)).toEqual(['early']);
+
+    // Without the weak focus it is refused, exactly as before.
+    const without = await call(app, alice, '/api/review-action', {
+      method: 'POST',
+      body: { pageId: word.id, action: 'remember', expected: { mastery: 3, nextReview: '2026-10-20' }, requestId: newId() },
+    });
+    expect(without.status).toBe(409);
+
+    const response = await call(app, alice, '/api/review-action', {
+      method: 'POST',
+      body: {
+        pageId: word.id,
+        action: 'remember',
+        expected: { mastery: 3, nextReview: '2026-10-20' },
+        requestId: newId(),
+        focus: 'weak',
+      },
+    });
+    expect(response.status).toBe(200);
+    const after = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${word.id}`)).json()).entry;
+    // Mastery 3 remembered on the 9th: mastery 4, due three days later, counted from today rather than the future date.
+    expect(after).toMatchObject({ mastery: 4, reviewDate: '2026-10-12' });
+  });
+
+  it('is simply empty when there is no weak word, without claiming nothing at all is due', async () => {
     const app = on('2026-10-09');
     await addWord(app, alice, { word: 'healthy', meaning: 'm', definition: 'd', example: 'e', mastery: 3, reviewDate: '2026-10-09' });
     const focused = queueResponseSchema.parse(await (await call(app, alice, '/api/review-queue?focus=weak')).json());

@@ -76,10 +76,21 @@ export type IneligibleReason =
 
 export type Eligibility = { eligible: true } | { eligible: false; reason: IneligibleReason };
 
+/** Extra permissions for one call. The rules themselves are unchanged. */
+export interface EligibilityOptions {
+  /**
+   * A weak focused review may take a word early: a review date in the future
+   * is not by itself a reason to refuse it. Retirement and an unusable mastery
+   * still are.
+   */
+  allowNotDue?: boolean;
+}
+
 export function checkEligibility(
   record: { mastery: number | null; nextReview: IsoDate | null },
   today: IsoDate,
   rules: ReviewRules,
+  options: EligibilityOptions = {},
 ): Eligibility {
   const mastery = resolveMastery(record.mastery, rules);
   if (mastery === null) return { eligible: false, reason: 'missing_mastery' };
@@ -93,7 +104,8 @@ export function checkEligibility(
   }
   const order = compareDates(record.nextReview, today);
   const due = order < 0 || (order === 0 && rules.includeDueToday);
-  return due ? { eligible: true } : { eligible: false, reason: 'not_due' };
+  if (due || options.allowNotDue === true) return { eligible: true };
+  return { eligible: false, reason: 'not_due' };
 }
 
 export interface QueueCandidate {
@@ -110,12 +122,15 @@ export interface QueueResult<T> {
 /**
  * Builds the review queue: drops duplicate ids (first occurrence wins), keeps
  * eligible records, then orders by due date. The sort is stable, so records
- * sharing a due date stay in the order the source returned them.
+ * sharing a due date stay in the order the source returned them. With
+ * `allowNotDue`, records that are not due yet are kept too (a weak review may
+ * take a word early).
  */
 export function buildQueue<T extends QueueCandidate>(
   records: readonly T[],
   today: IsoDate,
   rules: ReviewRules,
+  options: EligibilityOptions = {},
 ): QueueResult<T> {
   const seen = new Set<string>();
   const queue: T[] = [];
@@ -127,7 +142,7 @@ export function buildQueue<T extends QueueCandidate>(
       continue;
     }
     seen.add(record.id);
-    const eligibility = checkEligibility(record, today, rules);
+    const eligibility = checkEligibility(record, today, rules, options);
     if (eligibility.eligible) queue.push(record);
     else excluded.push({ record, reason: eligibility.reason });
   }

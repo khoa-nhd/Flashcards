@@ -9,6 +9,10 @@ import type {
   SetupReport,
   UndoResult,
   VocabularyRepository,
+  AiConversationRow,
+  AiMessageRow,
+  RateLimitCheckRow,
+  VocabularyAnalysisRow,
 } from '../../server/vocabulary-repository.js';
 
 /** The fixed "today" used throughout the tests. */
@@ -96,12 +100,15 @@ export const TEST_FIELDS: CardFieldConfig[] = [
  */
 export class FakeRepository implements VocabularyRepository {
   readonly mode = 'mock' as const;
-  readonly capabilities = { ...NO_CAPABILITIES, practiceHistory: false };
+  readonly capabilities = { ...NO_CAPABILITIES, practiceHistory: false, aiChat: true };
   readonly updates: Array<{ pageId: string; changes: Partial<ReviewState> }> = [];
   setup: SetupReport = { readIssues: [], writeIssues: [], warnings: [] };
   /** Lets a test corrupt what the "database" reports back after a write. */
   afterUpdate: (record: VocabularyRecord) => VocabularyRecord = (updated) => updated;
   private readonly records: Map<string, VocabularyRecord>;
+  private readonly aiConversations = new Map<string, AiConversationRow>();
+  private readonly aiMessages = new Map<string, AiMessageRow[]>();
+  private aiSequence = 0;
 
   constructor(
     records: VocabularyRecord[],
@@ -198,6 +205,135 @@ export class FakeRepository implements VocabularyRepository {
 
   async practiceHistory(): Promise<PracticeHistoryRow[]> {
     return [];
+  }
+
+  // ---- AI Conversations ----
+
+  async listAiConversations(limit?: number, offset?: number): Promise<AiConversationRow[]> {
+    const all = [...this.aiConversations.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return all.slice(offset ?? 0, (offset ?? 0) + (limit ?? 50));
+  }
+
+  async createAiConversation(mode: 'general' | 'vocabulary_expert', title?: string): Promise<AiConversationRow> {
+    this.aiSequence += 1;
+    const now = new Date().toISOString();
+    const id = `00000000-0000-4000-a000-${String(this.aiSequence).padStart(12, '0')}`;
+    const row: AiConversationRow = { id, mode, title: title ?? 'New conversation', created_at: now, updated_at: now };
+    this.aiConversations.set(id, row);
+    this.aiMessages.set(id, []);
+    return row;
+  }
+
+  async getAiConversation(id: string): Promise<AiConversationRow | null> {
+    return this.aiConversations.get(id) ?? null;
+  }
+
+  async updateAiConversationTitle(id: string, title: string): Promise<boolean> {
+    const conv = this.aiConversations.get(id);
+    if (!conv) return false;
+    conv.title = title;
+    conv.updated_at = new Date().toISOString();
+    return true;
+  }
+
+  async deleteAiConversation(id: string): Promise<boolean> {
+    if (!this.aiConversations.has(id)) return false;
+    this.aiConversations.delete(id);
+    this.aiMessages.delete(id);
+    return true;
+  }
+
+  async listAiMessages(conversationId: string, limit?: number, offset?: number): Promise<AiMessageRow[]> {
+    const messages = this.aiMessages.get(conversationId) ?? [];
+    return messages.slice(offset ?? 0, (offset ?? 0) + (limit ?? 200));
+  }
+
+  async insertAiMessage(
+    conversationId: string,
+    role: 'user' | 'assistant' | 'system',
+    content: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<AiMessageRow> {
+    const messages = this.aiMessages.get(conversationId);
+    if (!messages) throw new Error('Conversation not found');
+    const row: AiMessageRow = {
+      id: `00000000-0000-4000-b000-${String(messages.length + 1).padStart(12, '0')}`,
+      role,
+      content,
+      metadata: metadata ?? {},
+      created_at: new Date().toISOString(),
+    };
+    messages.push(row);
+    const conv = this.aiConversations.get(conversationId);
+    if (conv) conv.updated_at = row.created_at;
+    return row;
+  }
+
+  async checkAiRateLimit(
+    _mode: 'general' | 'vocabulary_expert',
+    _window: 'minute' | 'day',
+    limit: number,
+  ): Promise<RateLimitCheckRow> {
+    return { allowed: true, retry_after_seconds: 0, current_count: 1, limit };
+  }
+
+  // ---- Vocabulary Analysis ----
+
+  private readonly vocabularyAnalysis = new Map<string, VocabularyAnalysisRow>();
+
+  async upsertVocabularyAnalysis(args: {
+    vocabularyId: string;
+    pronunciation?: string | null;
+    partOfSpeech?: string | null;
+    cefrLevel?: string | null;
+    confidence?: number | null;
+    englishDefinition?: string | null;
+    vietnameseMeaning?: string | null;
+    senses?: Record<string, unknown>[];
+    examples?: Record<string, unknown>[];
+    wordFamily?: Record<string, unknown>[];
+    collocations?: Record<string, unknown>[];
+    synonyms?: Record<string, unknown>[];
+    antonyms?: Record<string, unknown>[];
+    usageNotes?: string | null;
+    commonMistakes?: string | null;
+    revisionSummary?: string | null;
+    model?: string | null;
+  }): Promise<VocabularyAnalysisRow> {
+    const now = new Date().toISOString();
+    const existing = this.vocabularyAnalysis.get(args.vocabularyId);
+    const row: VocabularyAnalysisRow = {
+      id: existing?.id ?? `00000000-0000-4000-c000-${String(this.vocabularyAnalysis.size + 1).padStart(12, '0')}`,
+      vocabulary_id: args.vocabularyId,
+      pronunciation: args.pronunciation ?? null,
+      part_of_speech: args.partOfSpeech ?? null,
+      cefr_level: args.cefrLevel ?? null,
+      confidence: args.confidence ?? null,
+      english_definition: args.englishDefinition ?? null,
+      vietnamese_meaning: args.vietnameseMeaning ?? null,
+      senses: args.senses ?? [],
+      examples: args.examples ?? [],
+      word_family: args.wordFamily ?? [],
+      collocations: args.collocations ?? [],
+      synonyms: args.synonyms ?? [],
+      antonyms: args.antonyms ?? [],
+      usage_notes: args.usageNotes ?? null,
+      common_mistakes: args.commonMistakes ?? null,
+      revision_summary: args.revisionSummary ?? null,
+      model: args.model ?? 'vocabulary_expert',
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.vocabularyAnalysis.set(args.vocabularyId, row);
+    return row;
+  }
+
+  async getVocabularyAnalysis(vocabularyId: string): Promise<VocabularyAnalysisRow | null> {
+    return this.vocabularyAnalysis.get(vocabularyId) ?? null;
+  }
+
+  async deleteVocabularyAnalysis(vocabularyId: string): Promise<boolean> {
+    return this.vocabularyAnalysis.delete(vocabularyId);
   }
 
   /** Simulates a change made somewhere else, such as on another device. */

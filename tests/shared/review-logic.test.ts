@@ -95,6 +95,17 @@ describe('checkEligibility', () => {
     const asZero: ReviewRules = { ...sampleRules, missingMastery: { treatAs: 0 } };
     expect(checkEligibility({ mastery: null, nextReview: TODAY }, TODAY, asZero).eligible).toBe(true);
   });
+
+  it('can allow a word to be reviewed before it is due, for a weak focused review', () => {
+    expect(checkEligibility({ mastery: 3, nextReview: TOMORROW }, TODAY, sampleRules, { allowNotDue: true })).toEqual({
+      eligible: true,
+    });
+    // Retirement and an unusable mastery are still refused.
+    expect(checkEligibility({ mastery: 10, nextReview: TOMORROW }, TODAY, sampleRules, { allowNotDue: true })).toEqual({
+      eligible: false,
+      reason: 'retired',
+    });
+  });
 });
 
 describe('buildQueue', () => {
@@ -159,6 +170,17 @@ describe('buildQueue', () => {
 
   it('returns an empty queue for no records', () => {
     expect(buildQueue([], TODAY, sampleRules)).toEqual({ queue: [], excluded: [] });
+  });
+
+  it('keeps a not-yet-due record when the caller allows it, without keeping retired ones', () => {
+    const { queue, excluded } = buildQueue(
+      [item('future', TOMORROW), item('mastered', TOMORROW, 10)],
+      TODAY,
+      sampleRules,
+      { allowNotDue: true },
+    );
+    expect(queue.map((entry) => entry.id)).toEqual(['future']);
+    expect(excluded.map((entry) => entry.record.id)).toEqual(['mastered']);
   });
 });
 

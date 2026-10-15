@@ -312,18 +312,18 @@ describe('Weak words', () => {
     await waitFor(() => expect(api.fetchEntry).toHaveBeenCalledWith(EPHEMERAL.id));
   });
 
-  it('says how many are due, and that a focused review brings nothing forward', async () => {
+  it('says how many are due, and that a focused review can bring a word forward', async () => {
     await open('/weak', { weakWords: { words: WEAK } });
     await screen.findByRole('button', { name: 'ephemeral' });
-    expect(screen.getByText(/1 is due for review now\./)).toHaveTextContent('never brings a word forward');
+    expect(screen.getByText(/1 is due for review now\./)).toHaveTextContent('can bring any of these forward');
     expect(screen.getByRole('link', { name: /Review my weakest words/ })).toHaveAttribute('href', '/review?focus=weak');
   });
 
-  it('offers no focused review when none of the words is due', async () => {
+  it('offers a focused review even when no weak word is due', async () => {
     await open('/weak', { weakWords: { words: [LUCID] } });
     await screen.findByRole('button', { name: 'lucid' });
     expect(screen.getByText(/None of these is due for review right now\./)).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: /Review my weakest words/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Review my weakest words/ })).toHaveAttribute('href', '/review?focus=weak');
   });
 
   it('says so when no word stands out', async () => {
@@ -363,7 +363,7 @@ describe('Weak words', () => {
 
 describe('reviewing only the weakest words', () => {
   const press = (key: string) => fireEvent.keyDown(document.body, { key, code: key === ' ' ? 'Space' : key });
-  const banner = () => screen.queryByText(/Weakest words only, from those due now\./);
+  const banner = () => screen.queryByText(/Weakest words only, whether or not they are due\./);
 
   it('starts from the Weak words page', async () => {
     const { api, user } = await open('/weak', { weakWords: { words: WEAK }, cards: [card(1)] });
@@ -388,13 +388,17 @@ describe('reviewing only the weakest words', () => {
     expect(banner()).not.toBeInTheDocument();
   });
 
-  it('saves answers exactly as an ordinary review does', async () => {
+  it('saves answers with the focus, so the server lets an early word through', async () => {
     const { api, saves } = await open('/review?focus=weak', { cards: [card(1), card(2)] });
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowLeft');
     expect(api.submitAction).toHaveBeenCalledTimes(1);
-    expect(api.submitAction.mock.calls[0]?.[0]).toMatchObject({ pageId: card(1).id, action: 'not_remember' });
+    expect(api.submitAction.mock.calls[0]?.[0]).toMatchObject({
+      pageId: card(1).id,
+      action: 'not_remember',
+      focus: 'weak',
+    });
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
     expect(screen.getByText(/Card 2 of 2: word-2\./)).toBeInTheDocument();
   });
@@ -440,7 +444,7 @@ describe('reviewing only the weakest words', () => {
 
   it('explains an empty selection without claiming that nothing at all is due', async () => {
     await open('/review?focus=weak', { cards: [] });
-    expect(await screen.findByRole('heading', { name: 'No weak words are due' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'No weak words' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Nothing is due right now' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Review everything due' })).toHaveAttribute('href', '/review');
   });
@@ -452,7 +456,7 @@ describe('reviewing only the weakest words', () => {
     press('ArrowRight');
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
     expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
-    expect(screen.getByText(/They were your weakest words among those due\./)).toBeInTheDocument();
+    expect(screen.getByText(/They were your weakest words\./)).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Review everything due' })).toHaveLength(1);
   });
 });

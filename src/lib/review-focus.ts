@@ -1,6 +1,7 @@
 /**
  * The ways a review can be narrowed, as the reviewer reads them. Every one
- * selects among words that are already due; none brings a word forward.
+ * selects among words that are already due, except `weak`, which may also
+ * bring a weak word forward.
  */
 import { RECENTLY_ADDED_DAYS, reviewFocusSchema, type ReviewFocus } from '../../shared/api.js';
 
@@ -19,10 +20,10 @@ export interface FocusText {
 export const FOCUS_TEXT: Record<ReviewFocus, FocusText> = {
   weak: {
     label: 'Weakest words',
-    banner: 'Weakest words only, from those due now.',
-    emptyTitle: 'No weak words are due',
-    emptyDetail: 'None of the words that need attention is due for review right now.',
-    done: 'They were your weakest words among those due.',
+    banner: 'Weakest words only, whether or not they are due.',
+    emptyTitle: 'No weak words',
+    emptyDetail: 'Nothing is flagged as needing attention right now.',
+    done: 'They were your weakest words.',
   },
   overdue: {
     label: 'Overdue only',

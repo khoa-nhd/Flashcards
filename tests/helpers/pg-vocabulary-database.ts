@@ -39,6 +39,10 @@ import {
   type CardRow,
   type SettingsRow,
   type VocabularyDatabase,
+  type AiConversationRow,
+  type AiMessageRow,
+  type RateLimitCheckRow,
+  type VocabularyAnalysisRow,
 } from '../../server/supabase/supabase-database.js';
 import { isSchedulerId } from '../../shared/scheduler/active.js';
 import type { Row, Session, TestDatabase } from './test-database.js';
@@ -573,6 +577,158 @@ export function createPgVocabularyDatabase(
         ),
       );
       return rows[0]?.time_zone ?? timeZone;
+    },
+
+    // ---- AI Conversations (schema version 10) ----
+
+    async listAiConversations(limit = 50, offset = 0) {
+      const rows = await run((session) =>
+        session.query<{ conv: unknown }>(
+          `select to_jsonb(c) as conv from public.list_ai_conversations($1, $2) c`,
+          [limit, offset],
+        ),
+      );
+      return rows.map((row) => row.conv) as AiConversationRow[];
+    },
+
+    async createAiConversation(mode: 'general' | 'vocabulary_expert', title?: string) {
+      const rows = await run((session) =>
+        session.query<{ conv: unknown }>(
+          `select to_jsonb(c) as conv from public.create_ai_conversation($1, $2) c`,
+          [mode, title ?? 'New conversation'],
+        ),
+      );
+      return rows[0]?.conv as AiConversationRow;
+    },
+
+    async getAiConversation(id: string) {
+      const rows = await run((session) =>
+        session.query<{ conv: unknown }>(
+          `select to_jsonb(c) as conv from public.get_ai_conversation($1::uuid) c`,
+          [id],
+        ),
+      );
+      return rows[0]?.conv as AiConversationRow ?? null;
+    },
+
+    async updateAiConversationTitle(id: string, title: string) {
+      const rows = await run((session) =>
+        session.query<{ done: boolean }>(
+          `select public.update_ai_conversation_title($1::uuid, $2) as done`,
+          [id, title],
+        ),
+      );
+      return rows[0]?.done === true;
+    },
+
+    async deleteAiConversation(id: string) {
+      const rows = await run((session) =>
+        session.query<{ done: boolean }>(
+          `select public.delete_ai_conversation($1::uuid) as done`,
+          [id],
+        ),
+      );
+      return rows[0]?.done === true;
+    },
+
+    async listAiMessages(conversationId: string, limit = 200, offset = 0) {
+      const rows = await run((session) =>
+        session.query<{ msg: unknown }>(
+          `select to_jsonb(m) as msg from public.list_ai_messages($1::uuid, $2, $3) m`,
+          [conversationId, limit, offset],
+        ),
+      );
+      return rows.map((row) => row.msg) as AiMessageRow[];
+    },
+
+    async insertAiMessage(conversationId: string, role: 'user' | 'assistant' | 'system', content: string, metadata?: Record<string, unknown>) {
+      const rows = await run((session) =>
+        session.query<{ msg: unknown }>(
+          `select to_jsonb(m) as msg from public.insert_ai_message($1::uuid, $2, $3, $4::jsonb) m`,
+          [conversationId, role, content, JSON.stringify(metadata ?? {})],
+        ),
+      );
+      return rows[0]?.msg as AiMessageRow;
+    },
+
+    async checkAiRateLimit(mode: 'general' | 'vocabulary_expert', window: 'minute' | 'day', limit: number) {
+      const rows = await run((session) =>
+        session.query<{ check: unknown }>(
+          `select to_jsonb(c) as check from public.check_ai_rate_limit($1, $2, $3) c`,
+          [mode, window, limit],
+        ),
+      );
+      return rows[0]?.check as RateLimitCheckRow;
+    },
+
+    // ---- Vocabulary Analysis (schema version 11) ----
+
+    async upsertVocabularyAnalysis(args: {
+      vocabularyId: string;
+      pronunciation?: string | null;
+      partOfSpeech?: string | null;
+      cefrLevel?: string | null;
+      confidence?: number | null;
+      englishDefinition?: string | null;
+      vietnameseMeaning?: string | null;
+      senses?: Record<string, unknown>[];
+      examples?: Record<string, unknown>[];
+      wordFamily?: Record<string, unknown>[];
+      collocations?: Record<string, unknown>[];
+      synonyms?: Record<string, unknown>[];
+      antonyms?: Record<string, unknown>[];
+      usageNotes?: string | null;
+      commonMistakes?: string | null;
+      revisionSummary?: string | null;
+      model?: string | null;
+    }) {
+      const rows = await run((session) =>
+        session.query<{ analysis: unknown }>(
+          `select to_jsonb(a) as analysis from public.upsert_vocabulary_analysis(
+            $1::uuid, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+          ) a`,
+          [
+            args.vocabularyId,
+            args.pronunciation ?? null,
+            args.partOfSpeech ?? null,
+            args.cefrLevel ?? null,
+            args.confidence ?? null,
+            args.englishDefinition ?? null,
+            args.vietnameseMeaning ?? null,
+            JSON.stringify(args.senses ?? []),
+            JSON.stringify(args.examples ?? []),
+            JSON.stringify(args.wordFamily ?? []),
+            JSON.stringify(args.collocations ?? []),
+            JSON.stringify(args.synonyms ?? []),
+            JSON.stringify(args.antonyms ?? []),
+            args.usageNotes ?? null,
+            args.commonMistakes ?? null,
+            args.revisionSummary ?? null,
+            args.model ?? 'vocabulary_expert',
+          ],
+        ),
+      );
+      return rows[0]?.analysis as VocabularyAnalysisRow;
+    },
+
+    async getVocabularyAnalysis(vocabularyId: string) {
+      const rows = await run((session) =>
+        session.query<{ analysis: unknown }>(
+          `select to_jsonb(a) as analysis from public.get_vocabulary_analysis($1::uuid) a`,
+          [vocabularyId],
+        ),
+      );
+      return rows[0]?.analysis as VocabularyAnalysisRow ?? null;
+    },
+
+    async deleteVocabularyAnalysis(vocabularyId: string) {
+      const rows = await run((session) =>
+        session.query<{ deleted: boolean }>(
+          `select public.delete_vocabulary_analysis($1::uuid) as deleted`,
+          [vocabularyId],
+        ),
+      );
+      return rows[0]?.deleted === true;
     },
   };
 

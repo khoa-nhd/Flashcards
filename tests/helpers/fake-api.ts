@@ -268,9 +268,11 @@ export function createFakeApi({
   // Register handlers for the mutation queue
   mutationQueue.registerHandler<ReviewActionMutation['payload']>('review_action', async (payload) => {
     // Call the mock to record the call for test assertions and return its promise
+    const { focus, ...rest } = payload;
     const apiPayload = {
-      ...payload,
+      ...rest,
       confidence: payload.confidence ?? undefined,
+      ...(focus == null ? {} : { focus }),
     };
     return api.submitAction(apiPayload);
   });
@@ -565,6 +567,49 @@ export function createFakeApi({
       if (timeZone !== undefined) settings.timeZone = timeZone;
       if (fsrsRetention !== undefined) settings.fsrsRetention = fsrsRetention;
       return { ...settings };
+    }),
+
+    // ---- AI Chat (mock) ----
+    listConversations: vi.fn<AppApi['listConversations']>(async (limit = 50, offset = 0) => ({
+      conversations: [],
+      limit,
+      offset,
+    })),
+    createConversation: vi.fn<AppApi['createConversation']>(async (mode, title) => ({
+      id: pageId(nextId++),
+      mode,
+      title: title ?? 'New conversation',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    })),
+    getConversation: vi.fn<AppApi['getConversation']>(async (id, limit = 200, offset = 0) => ({
+      conversation: {
+        id,
+        mode: 'general',
+        title: 'Test conversation',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+      messages: [],
+      limit,
+      offset,
+    })),
+    updateConversation: vi.fn<AppApi['updateConversation']>(async () => {
+      // Mock implementation
+    }),
+    deleteConversation: vi.fn<AppApi['deleteConversation']>(async () => {
+      // Mock implementation
+    }),
+    sendMessage: vi.fn<AppApi['sendMessage']>(async (_id, content) => {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'delta', content })}\n\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+          controller.close();
+        },
+      });
+      return stream;
     }),
   } satisfies AppApi;
 

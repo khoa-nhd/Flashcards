@@ -1,6 +1,9 @@
 import { z, type ZodType } from 'zod';
 import {
   accountSettingsSchema,
+  aiConversationListResponseSchema,
+  aiConversationSchema,
+  aiMessageSchema,
   analyticsResponseSchema,
   apiErrorSchema,
   collectionSchema,
@@ -27,6 +30,9 @@ import {
   weakWordsResponseSchema,
   type AccountSettings,
   type AnalyticsResponse,
+  type AiConversation,
+  type AiConversationListResponse,
+  type AiMessage,
   type DayPlanResponse,
   type ImportResponse,
   type LibraryResponse,
@@ -156,7 +162,24 @@ export interface PracticeApi {
   fetchPracticeHistory(since: string | null): Promise<PracticeHistoryResponse>;
 }
 
-export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi;
+export interface AiApi {
+  /** Lists the user's conversations with pagination. */
+  listConversations(limit?: number, offset?: number): Promise<AiConversationListResponse>;
+  /** Creates a new conversation. */
+  createConversation(mode: 'general' | 'vocabulary_expert', title?: string): Promise<AiConversation>;
+  /** Gets a conversation with its messages. */
+  getConversation(id: string, limit?: number, offset?: number): Promise<{ conversation: AiConversation; messages: AiMessage[] }>;
+  /** Updates a conversation title. */
+  updateConversation(id: string, title: string): Promise<void>;
+  /** Deletes a conversation. */
+  deleteConversation(id: string): Promise<void>;
+  /** Sends a message and returns a readable stream of SSE chunks. */
+  sendMessage(id: string, content: string): Promise<ReadableStream<Uint8Array>>;
+}
+
+export type { AiConversation, AiMessage, AiStreamChunk, AiConversationListResponse, AiMessageListResponse } from '../../shared/api.js';
+
+export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi & AiApi;
 
 /** How requests prove who is asking, where the app has accounts. */
 export interface ApiAuth {
@@ -494,6 +517,64 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         timeoutMs: TIMEOUTS.actionMs,
         timeoutMessage: SAVE_TIMEOUT_MESSAGE,
       }),
+
+    // AI Chat
+    listConversations: (limit, offset) =>
+      call(
+        `/api/ai/conversations${new URLSearchParams({ limit: String(limit ?? 50), offset: String(offset ?? 0) })}`,
+        aiConversationListResponseSchema,
+        {
+          method: 'GET',
+          timeoutMs: TIMEOUTS.queueMs,
+          timeoutMessage: 'Loading conversations took too long.',
+        },
+      ),
+
+    createConversation: (mode, title) =>
+      call('/api/ai/conversations', aiConversationSchema, {
+        method: 'POST',
+        body: { mode, title },
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Creating conversation took too long.',
+      }),
+
+    getConversation: (id, limit, offset) =>
+      call(
+        `/api/ai/conversations/${encodeURIComponent(id)}${new URLSearchParams({ limit: String(limit ?? 200), offset: String(offset ?? 0) })}`,
+        z.object({ conversation: aiConversationSchema, messages: z.array(aiMessageSchema) }),
+        {
+          method: 'GET',
+          timeoutMs: TIMEOUTS.queueMs,
+          timeoutMessage: 'Loading conversation took too long.',
+        },
+      ).then((r) => ({ conversation: r.conversation, messages: r.messages })),
+
+    updateConversation: (id, title) =>
+      call(`/api/ai/conversations/${encodeURIComponent(id)}`, null, {
+        method: 'PATCH',
+        body: { title },
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Updating conversation took too long.',
+      }),
+
+    deleteConversation: (id) =>
+      call(`/api/ai/conversations/${encodeURIComponent(id)}`, null, {
+        method: 'DELETE',
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Deleting conversation took too long.',
+      }),
+
+    sendMessage: (id, content) =>
+      call(
+        `/api/ai/conversations/${encodeURIComponent(id)}/messages`,
+        null,
+        {
+          method: 'POST',
+          body: { content },
+          timeoutMs: 120000, // Longer timeout for streaming
+          timeoutMessage: 'Message generation timed out.',
+        },
+      ).then((response) => response as unknown as ReadableStream<Uint8Array>),
   };
 }
 

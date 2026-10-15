@@ -20,6 +20,10 @@ import type {
   ReviewWriteResult,
   UndoResult,
   VocabularyRepository,
+  AiConversationRow,
+  AiMessageRow,
+  RateLimitCheckRow,
+  VocabularyAnalysisRow,
 } from '../vocabulary-repository.js';
 
 export const mockCardFields: CardFieldConfig[] = [
@@ -114,6 +118,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     practice: true,
     practiceHistory: true,
     library: true,
+    aiChat: true,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
@@ -583,6 +588,142 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     if (!word) return null;
     word.trashed = false;
     return toEntry(word);
+  }
+
+  // ---- AI Conversations (mock: not persisted) ----
+
+  private readonly aiConversations = new Map<string, AiConversationRow>();
+  private readonly aiMessages = new Map<string, AiMessageRow[]>();
+  private aiSequence = 0;
+
+  async listAiConversations(limit?: number, offset?: number): Promise<AiConversationRow[]> {
+    const all = [...this.aiConversations.values()].sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return all.slice(offset ?? 0, (offset ?? 0) + (limit ?? 50));
+  }
+
+  async createAiConversation(mode: 'general' | 'vocabulary_expert', title?: string): Promise<AiConversationRow> {
+    this.aiSequence += 1;
+    const now = this.now().toISOString();
+    const id = `00000000-0000-4000-a000-${String(this.aiSequence).padStart(12, '0')}`;
+    const row: AiConversationRow = { id, mode, title: title ?? 'New conversation', created_at: now, updated_at: now };
+    this.aiConversations.set(id, row);
+    this.aiMessages.set(id, []);
+    return row;
+  }
+
+  async getAiConversation(id: string): Promise<AiConversationRow | null> {
+    return this.aiConversations.get(normalizeId(id)) ?? null;
+  }
+
+  async updateAiConversationTitle(id: string, title: string): Promise<boolean> {
+    const norm = normalizeId(id);
+    const conv = this.aiConversations.get(norm);
+    if (!conv) return false;
+    conv.title = title;
+    conv.updated_at = this.now().toISOString();
+    return true;
+  }
+
+  async deleteAiConversation(id: string): Promise<boolean> {
+    const norm = normalizeId(id);
+    if (!this.aiConversations.has(norm)) return false;
+    this.aiConversations.delete(norm);
+    this.aiMessages.delete(norm);
+    return true;
+  }
+
+  async listAiMessages(conversationId: string, limit?: number, offset?: number): Promise<AiMessageRow[]> {
+    const messages = this.aiMessages.get(normalizeId(conversationId)) ?? [];
+    return messages.slice(offset ?? 0, (offset ?? 0) + (limit ?? 200));
+  }
+
+  async insertAiMessage(
+    conversationId: string,
+    role: 'user' | 'assistant' | 'system',
+    content: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<AiMessageRow> {
+    const norm = normalizeId(conversationId);
+    const messages = this.aiMessages.get(norm);
+    if (!messages) throw new Error('Conversation not found');
+    const row: AiMessageRow = {
+      id: `00000000-0000-4000-b000-${String(messages.length + 1).padStart(12, '0')}`,
+      role,
+      content,
+      metadata: metadata ?? {},
+      created_at: this.now().toISOString(),
+    };
+    messages.push(row);
+    const conv = this.aiConversations.get(norm);
+    if (conv) conv.updated_at = row.created_at;
+    return row;
+  }
+
+  async checkAiRateLimit(
+    _mode: 'general' | 'vocabulary_expert',
+    _window: 'minute' | 'day',
+    limit: number,
+  ): Promise<RateLimitCheckRow> {
+    return { allowed: true, retry_after_seconds: 0, current_count: 1, limit };
+  }
+
+  // ---- Vocabulary Analysis (mock: not persisted) ----
+
+  private readonly vocabularyAnalysis = new Map<string, VocabularyAnalysisRow>();
+
+  async upsertVocabularyAnalysis(args: {
+    vocabularyId: string;
+    pronunciation?: string | null;
+    partOfSpeech?: string | null;
+    cefrLevel?: string | null;
+    confidence?: number | null;
+    englishDefinition?: string | null;
+    vietnameseMeaning?: string | null;
+    senses?: Record<string, unknown>[];
+    examples?: Record<string, unknown>[];
+    wordFamily?: Record<string, unknown>[];
+    collocations?: Record<string, unknown>[];
+    synonyms?: Record<string, unknown>[];
+    antonyms?: Record<string, unknown>[];
+    usageNotes?: string | null;
+    commonMistakes?: string | null;
+    revisionSummary?: string | null;
+    model?: string | null;
+  }): Promise<VocabularyAnalysisRow> {
+    const now = this.now().toISOString();
+    const existing = this.vocabularyAnalysis.get(args.vocabularyId);
+    const row: VocabularyAnalysisRow = {
+      id: existing?.id ?? `00000000-0000-4000-c000-${String(this.vocabularyAnalysis.size + 1).padStart(12, '0')}`,
+      vocabulary_id: args.vocabularyId,
+      pronunciation: args.pronunciation ?? null,
+      part_of_speech: args.partOfSpeech ?? null,
+      cefr_level: args.cefrLevel ?? null,
+      confidence: args.confidence ?? null,
+      english_definition: args.englishDefinition ?? null,
+      vietnamese_meaning: args.vietnameseMeaning ?? null,
+      senses: args.senses ?? [],
+      examples: args.examples ?? [],
+      word_family: args.wordFamily ?? [],
+      collocations: args.collocations ?? [],
+      synonyms: args.synonyms ?? [],
+      antonyms: args.antonyms ?? [],
+      usage_notes: args.usageNotes ?? null,
+      common_mistakes: args.commonMistakes ?? null,
+      revision_summary: args.revisionSummary ?? null,
+      model: args.model ?? 'vocabulary_expert',
+      created_at: existing?.created_at ?? now,
+      updated_at: now,
+    };
+    this.vocabularyAnalysis.set(args.vocabularyId, row);
+    return row;
+  }
+
+  async getVocabularyAnalysis(vocabularyId: string): Promise<VocabularyAnalysisRow | null> {
+    return this.vocabularyAnalysis.get(vocabularyId) ?? null;
+  }
+
+  async deleteVocabularyAnalysis(vocabularyId: string): Promise<boolean> {
+    return this.vocabularyAnalysis.delete(vocabularyId);
   }
 }
 

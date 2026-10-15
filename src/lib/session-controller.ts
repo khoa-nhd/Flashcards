@@ -192,6 +192,7 @@ export function createSessionController(
       requestId: payload.requestId,
       durationMs: payload.durationMs,
       sessionId: payload.sessionId,
+      ...(payload.focus == null ? {} : { focus: payload.focus }),
       ...(payload.confidence === null ? {} : { confidence: payload.confidence }),
     });
     return response;
@@ -229,6 +230,7 @@ export function createSessionController(
         durationMs: attempt.durationMs,
         sessionId,
         confidence: attempt.confidence,
+        focus,
       });
       // The mutation queue will handle retry, conflict, etc. via its own logic
       // We still call onSaved to mark vocabulary as stale for other views
@@ -244,6 +246,7 @@ export function createSessionController(
           requestId: attempt.requestId,
           durationMs: attempt.durationMs,
           sessionId,
+          ...(focus == null ? {} : { focus }),
           ...(attempt.confidence === null ? {} : { confidence: attempt.confidence }),
         });
         const undoable = response.outcome !== 'dry_run' && state.meta?.capabilities.undo === true;

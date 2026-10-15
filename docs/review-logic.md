@@ -211,7 +211,7 @@ added by the app and changes none of the rules above.
 - **FSRS** is calculated from each saved answer and stored beside the mastery
   schedule for comparison. It never decides what is due. See
   [supabase-schema.md](supabase-schema.md).
-- **Reviewing the weakest words** shows a subset of the queue from section 2,
-  in a different order. It cannot make a word due, and its answers follow
-  sections 5 and 6 unchanged.
+- **Reviewing the weakest words** shows the words on the weak list, in a
+  different order, and it may take a weak word before its due date. Its answers
+  follow sections 5 and 6 unchanged.
 - **Review activity and weak-word scores** only read the history.

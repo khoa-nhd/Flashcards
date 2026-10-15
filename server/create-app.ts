@@ -26,6 +26,7 @@ import {
   type AccountSettings,
   type ApiErrorBody,
   type AppConfigResponse,
+  type VocabularyEntry,
 } from '../shared/api.js';
 import { bearerToken, type AccountGateway, type AccountSession } from './accounts.js';
 import type { AnalyticsService } from './analytics-service.js';
@@ -36,6 +37,8 @@ import type { LibraryService } from './library-service.js';
 import type { ReviewService } from './review-service.js';
 import { DatabaseError } from './supabase/supabase-database.js';
 import type { VocabularyService } from './vocabulary-service.js';
+import { type AiService } from './ai-service-impl.js';
+import { AI_MODES } from './ai-service.js';
 
 export interface AppDependencies {
   config: AppConfig;
@@ -43,6 +46,8 @@ export interface AppDependencies {
   service: ReviewService | null;
   /** Whole-record operations; `null` under the same conditions as `service`. */
   vocabulary?: VocabularyService | null;
+  /** AI chat service; `null` under the same conditions as `service`. */
+  ai?: AiService | null;
   /** Present when the app has accounts: every request then gets services of its own. */
   accounts?: AccountGateway | null;
   /** Review activity and weak words; `null` under the same conditions as `service`. */
@@ -61,6 +66,7 @@ interface Scope {
   library: LibraryService | null;
   exporter: ExportService | null;
   session: AccountSession | null;
+  ai: AiService | null;
 }
 
 type AppEnv = { Variables: { scope: Scope } };
@@ -132,6 +138,12 @@ export function createApp({
   const requireVocabulary = (c: Context<AppEnv>): VocabularyService => {
     const scoped = c.get('scope').vocabulary;
     if (scoped === null) throw notConfigured();
+    return scoped;
+  };
+
+  const requireAi = (c: Context<AppEnv>): AiService => {
+    const scoped = c.get('scope').ai;
+    if (scoped === null) throw new HttpError(503, 'ai_unavailable', 'AI chat is not configured on this server.');
     return scoped;
   };
 
@@ -221,11 +233,12 @@ export function createApp({
         analytics: session.analytics,
         library: session.library,
         exporter: session.exporter,
+        ai: session.ai,
         session,
       });
       return next();
     }
-    c.set('scope', { review: service, vocabulary, analytics, library, exporter, session: null });
+    c.set('scope', { review: service, vocabulary, analytics, library, exporter, ai: null, session: null });
     await next();
   });
 
@@ -270,7 +283,7 @@ export function createApp({
     if (!parsed.success) {
       throw new HttpError(400, 'invalid_request', `Unknown focus. Use one of: ${REVIEW_FOCUSES.join(', ')}.`);
     }
-    // Every focus selects among the words already due: a focused review never reviews a word early.
+    // Every focus narrows the due queue; `weak` is the one exception, bringing weak words forward.
     const focus = parsed.data;
     if (focus === 'weak') {
       const { words } = await requireAnalytics(c).weakWords();
@@ -482,6 +495,276 @@ export function createApp({
   app.post('/api/vocabulary/:id/restore', async (c) =>
     c.json({ entry: await requireVocabulary(c).restore(entryId(c)) }),
   );
+
+  // ---- AI Chat routes (require schema version 10) ----
+
+  const aiModeSchema = z.enum(AI_MODES);
+  const aiMessageSchema = z.strictObject({
+    content: z.string().min(1).max(32000),
+  });
+  const aiConversationCreateSchema = z.strictObject({
+    mode: aiModeSchema,
+    title: z.string().max(200).optional(),
+  });
+  const aiConversationUpdateSchema = z.strictObject({
+    title: z.string().max(200),
+  });
+
+  // List conversations
+  app.get('/api/ai/conversations', async (c) => {
+    const limit = Number(c.req.query('limit') ?? '50');
+    const offset = Number(c.req.query('offset') ?? '0');
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      throw new HttpError(400, 'invalid_request', 'limit must be an integer between 1 and 100.');
+    }
+    if (!Number.isInteger(offset) || offset < 0) {
+      throw new HttpError(400, 'invalid_request', 'offset must be a non-negative integer.');
+    }
+    return c.json({ conversations: await requireAi(c).listConversations(limit, offset) });
+  });
+
+  // Create conversation
+  app.post('/api/ai/conversations', async (c) => {
+    const { mode, title } = await parseBody(c, aiConversationCreateSchema);
+    return c.json({ conversation: await requireAi(c).createConversation(mode, title) }, 201);
+  });
+
+  // Get conversation with messages
+  app.get('/api/ai/conversations/:id', async (c) => {
+    const conversationId = idParam(c, 'id', 'conversation');
+    const limit = Number(c.req.query('limit') ?? '200');
+    const offset = Number(c.req.query('offset') ?? '0');
+    const conversation = await requireAi(c).getConversation(conversationId);
+    if (!conversation) throw new HttpError(404, 'not_found', 'Conversation not found.');
+    const messages = await requireAi(c).listMessages(conversationId, limit, offset);
+    return c.json({ conversation, messages });
+  });
+
+  // Update conversation title
+  app.patch('/api/ai/conversations/:id', async (c) => {
+    const conversationId = idParam(c, 'id', 'conversation');
+    const { title } = await parseBody(c, aiConversationUpdateSchema);
+    const updated = await requireAi(c).updateConversationTitle(conversationId, title);
+    if (!updated) throw new HttpError(404, 'not_found', 'Conversation not found.');
+    return c.json({ success: true });
+  });
+
+  // Delete conversation
+  app.delete('/api/ai/conversations/:id', async (c) => {
+    const conversationId = idParam(c, 'id', 'conversation');
+    const deleted = await requireAi(c).deleteConversation(conversationId);
+    if (!deleted) throw new HttpError(404, 'not_found', 'Conversation not found.');
+    return c.json({ success: true });
+  });
+
+  // Send message (streaming)
+  app.post('/api/ai/conversations/:id/messages', async (c) => {
+    const conversationId = idParam(c, 'id', 'conversation');
+    const { content } = await parseBody(c, aiMessageSchema);
+
+    const ai = requireAi(c);
+    const conversation = await ai.getConversation(conversationId);
+    if (!conversation) throw new HttpError(404, 'not_found', 'Conversation not found.');
+
+    // Build history
+    const history = await ai.listMessages(conversationId);
+    const context = ai.buildContext(conversationId, conversation.mode, history, content);
+
+    // Check rate limits
+    const limits = await ai.checkRateLimits(conversation.mode);
+    ai.enforceRateLimits(limits);
+
+    // Stream response as SSE
+    c.header('Content-Type', 'text/event-stream');
+    c.header('Cache-Control', 'no-store');
+    c.header('Connection', 'keep-alive');
+
+    const generator = ai.generateResponse(conversationId, context);
+    const readable = new ReadableStream({
+      async start(controller) {
+        try {
+          for await (const chunk of generator) {
+            const data = `data: ${JSON.stringify(chunk)}\n\n`;
+            controller.enqueue(new TextEncoder().encode(data));
+          }
+        } catch (error) {
+          controller.error(error);
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(readable, {
+        headers: {
+          'Content-Type': 'text/event-stream',
+          'Cache-Control': 'no-store',
+          Connection: 'keep-alive',
+        },
+      });
+  });
+
+  // Save vocabulary from Vocabulary Expert response
+  const aiVocabularySaveSchema = z.strictObject({
+    conversationId: z.string().uuid(),
+    analysis: z.object({
+      word: z.string(),
+      definition: z.string(),
+      pronunciation: z.string().nullable().optional(),
+      partOfSpeech: z.string().nullable().optional(),
+      cefrLevel: z.string().nullable().optional(),
+      confidence: z.number().min(0).max(1).nullable().optional(),
+      englishDefinition: z.string().nullable().optional(),
+      vietnameseMeaning: z.string().nullable().optional(),
+      senses: z.array(
+        z
+          .object({
+            partOfSpeech: z.string().nullable().optional(),
+            englishDefinition: z.string().nullable().optional(),
+            vietnameseMeaning: z.string().nullable().optional(),
+            examples: z.array(z.unknown()).optional(),
+          })
+          .passthrough(),
+      ).optional(),
+      examples: z.array(z.object({
+        english: z.string(),
+        vietnamese: z.string(),
+      })).optional(),
+      wordFamily: z.array(z.object({
+        word: z.string(),
+        partOfSpeech: z.string().nullable().optional(),
+        definition: z.string().nullable().optional(),
+      })).optional(),
+      collocations: z.array(z.object({
+        expression: z.string(),
+        meaning: z.string(),
+        example: z.string().nullable().optional(),
+      })).optional(),
+      synonyms: z.array(z.object({
+        word: z.string(),
+        nuance: z.string().nullable().optional(),
+      })).optional(),
+      antonyms: z.array(z.object({
+        word: z.string(),
+        nuance: z.string().nullable().optional(),
+      })).optional(),
+      usageNotes: z.string().nullable().optional(),
+      commonMistakes: z.string().nullable().optional(),
+      revisionSummary: z.string().nullable().optional(),
+      model: z.string().nullable().optional(),
+    }).passthrough(),
+  });
+
+  app.post('/api/ai/conversations/:id/vocabulary-save', async (c) => {
+    const conversationId = idParam(c, 'id', 'conversation');
+    const { analysis } = await parseBody(c, aiVocabularySaveSchema);
+
+    const ai = requireAi(c);
+    const vocabulary = requireVocabulary(c);
+    const conversation = await ai.getConversation(conversationId);
+    if (!conversation) throw new HttpError(404, 'not_found', 'Conversation not found.');
+    if (conversation.mode !== 'vocabulary_expert') {
+      throw new HttpError(400, 'invalid_request', 'Vocabulary save only available in Vocabulary Expert mode.');
+    }
+
+    // The analysis always carries `definition`; `englishDefinition` is the same
+    // value under its longer name. Falling back means the word keeps its
+    // definition whichever name the caller used.
+    const definition = analysis.englishDefinition ?? analysis.definition ?? null;
+    const example = analysis.examples?.[0]?.english ?? null;
+
+    // Check if word already exists
+    const existing = await vocabulary.findEntriesByWord(analysis.word);
+    let vocabularyEntry: VocabularyEntry;
+    const found = existing[0];
+    if (found) {
+      // Word exists, update it with new analysis. Omitted fields are left as they are.
+      vocabularyEntry = await vocabulary.update(found.id, {
+        meaning: analysis.vietnameseMeaning ?? undefined,
+        definition: definition ?? undefined,
+        example: example ?? undefined,
+      });
+    } else {
+      // Create new vocabulary entry
+      const result = await vocabulary.create({
+        word: analysis.word,
+        meaning: analysis.vietnameseMeaning ?? undefined,
+        definition: definition ?? undefined,
+        example: example ?? undefined,
+        requestId: crypto.randomUUID(),
+      });
+      vocabularyEntry = result.entry;
+    }
+
+    // Save the full analysis
+    const senses = analysis.senses
+      ? analysis.senses.map(s => ({
+          partOfSpeech: s.partOfSpeech,
+          englishDefinition: s.englishDefinition,
+          vietnameseMeaning: s.vietnameseMeaning,
+          examples: s.examples,
+        }))
+      : [];
+
+    const examples = analysis.examples
+      ? analysis.examples.map(e => ({
+          english: e.english,
+          vietnamese: e.vietnamese,
+        }))
+      : [];
+
+    const wordFamily = analysis.wordFamily
+      ? analysis.wordFamily.map(w => ({
+          word: w.word,
+          partOfSpeech: w.partOfSpeech,
+          definition: w.definition,
+        }))
+      : [];
+
+    const collocations = analysis.collocations
+      ? analysis.collocations.map(c => ({
+          expression: c.expression,
+          meaning: c.meaning,
+          example: c.example,
+        }))
+      : [];
+
+    const synonyms = analysis.synonyms
+      ? analysis.synonyms.map(s => ({
+          word: s.word,
+          nuance: s.nuance,
+        }))
+      : [];
+
+    const antonyms = analysis.antonyms
+      ? analysis.antonyms.map(a => ({
+          word: a.word,
+          nuance: a.nuance,
+        }))
+      : [];
+
+    await ai.upsertVocabularyAnalysis({
+      vocabularyId: vocabularyEntry.id,
+      pronunciation: analysis.pronunciation ?? null,
+      partOfSpeech: analysis.partOfSpeech ?? null,
+      cefrLevel: analysis.cefrLevel ?? null,
+      confidence: analysis.confidence ?? null,
+      englishDefinition: analysis.englishDefinition ?? null,
+      vietnameseMeaning: analysis.vietnameseMeaning ?? null,
+      senses,
+      examples,
+      wordFamily,
+      collocations,
+      synonyms,
+      antonyms,
+      usageNotes: analysis.usageNotes ?? null,
+      commonMistakes: analysis.commonMistakes ?? null,
+      revisionSummary: analysis.revisionSummary ?? null,
+      model: analysis.model ?? 'vocabulary_expert',
+    });
+
+    return c.json({ vocabulary: vocabularyEntry }, 201);
+  });
 
   return app;
 }

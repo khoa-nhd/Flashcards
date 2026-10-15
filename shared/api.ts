@@ -81,6 +81,8 @@ export const capabilitiesSchema = z.object({
   practiceHistory: z.boolean().default(false),
   /** Collections, further examples and relationships between words can be kept. */
   library: z.boolean().default(false),
+  /** AI chat conversations and messages can be kept. */
+  aiChat: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -94,11 +96,12 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   practice: false,
   practiceHistory: false,
   library: false,
+  aiChat: false,
 };
 
 /**
- * Ways to narrow the review queue. Every one of them selects among the words
- * that are already due; none can make a word due.
+ * Ways to narrow the review queue. Each name selects among the words that are
+ * already due, except `weak`, which may also bring a weak word forward.
  */
 export const REVIEW_FOCUSES = ['weak', 'overdue', 'due_today', 'recent'] as const;
 export const reviewFocusSchema = z.enum(REVIEW_FOCUSES);
@@ -158,6 +161,12 @@ export const reviewActionRequestSchema = z.strictObject({
    * beside the answer; it never changes what the answer does.
    */
   confidence: confidenceSchema.optional(),
+  /**
+   * The selection the answer came from, where it changes what is allowed.
+   * A `weak` answer may be taken before the word is due; every other selection
+   * is due-only. Absent on an ordinary review.
+   */
+  focus: reviewFocusSchema.optional(),
 });
 
 export const reviewActionResponseSchema = z.object({
@@ -847,3 +856,57 @@ export type UpdateEntryRequest = z.infer<typeof updateEntryRequestSchema>;
 export type UpdateEntryInput = z.input<typeof updateEntryRequestSchema>;
 export type AppConfigResponse = z.infer<typeof appConfigResponseSchema>;
 export type AccountSettings = z.infer<typeof accountSettingsSchema>;
+
+// ---- AI Chat ----
+
+export const AI_MODES = ['general', 'vocabulary_expert'] as const;
+export type AiMode = typeof AI_MODES[number];
+
+export const aiConversationSchema = z.object({
+  id: z.string().uuid(),
+  mode: z.enum(AI_MODES),
+  title: z.string().max(200),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+export type AiConversation = z.infer<typeof aiConversationSchema>;
+
+export const aiConversationListResponseSchema = z.object({
+  conversations: z.array(aiConversationSchema),
+});
+export type AiConversationListResponse = z.infer<typeof aiConversationListResponseSchema>;
+
+export const aiMessageSchema = z.object({
+  id: z.string().uuid(),
+  role: z.enum(['user', 'assistant', 'system']),
+  content: z.string(),
+  metadata: z.unknown(),
+  createdAt: z.string(),
+});
+export type AiMessage = z.infer<typeof aiMessageSchema>;
+
+export const aiMessageListResponseSchema = z.object({
+  messages: z.array(aiMessageSchema),
+});
+export type AiMessageListResponse = z.infer<typeof aiMessageListResponseSchema>;
+
+export const aiConversationCreateSchema = z.strictObject({
+  mode: z.enum(AI_MODES),
+  title: z.string().max(200).optional(),
+});
+export type AiConversationCreateRequest = z.infer<typeof aiConversationCreateSchema>;
+
+export const aiConversationUpdateSchema = z.strictObject({
+  title: z.string().max(200),
+});
+export type AiConversationUpdateRequest = z.infer<typeof aiConversationUpdateSchema>;
+
+export const aiMessageSendSchema = z.strictObject({
+  content: z.string().min(1).max(32000),
+});
+export type AiMessageSendRequest = z.infer<typeof aiMessageSendSchema>;
+
+export type AiStreamChunk = 
+  | { type: 'delta'; delta: string }
+  | { type: 'done'; usage?: { promptTokens: number; completionTokens: number; totalTokens: number } | null; finishReason?: string | null }
+  | { type: 'error'; code: string; message: string };

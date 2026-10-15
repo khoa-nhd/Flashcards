@@ -202,9 +202,10 @@ reason that is shown beside the word.
 - At most 100 words are sent; the page says when there are more.
 
 **Reviewing the weakest words** (`/review?focus=weak`) shows the words on this
-list that are **already due**, weakest first. It narrows the normal queue and
-never widens it: no word is reviewed early, and answers are saved by exactly
-the same rules as any other review.
+list, weakest first, **whether or not they are due**. It is the one selection
+that can bring a word forward, so a weak word may be reviewed early; answers are
+saved by exactly the same rules as any other review, and a new date is counted
+from the day of the review.
 
 ## Daily goal
 
@@ -230,16 +231,17 @@ midnight.
 
 ## Narrowing a review
 
-The Review tab can show a subset of what is due. Every choice selects among
-words that are **already in the queue**; none can bring a word forward, and an
-answer is saved by the same rules whichever choice it came from.
+The Review tab can show a subset of what is due. Except for "Weakest words",
+every choice selects among words that are **already in the queue** and cannot
+bring a word forward; an answer is saved by the same rules whichever choice it
+came from.
 
 | Choice | Words kept |
 | --- | --- |
 | Everything due | The whole queue: most overdue first, words with no date last. |
 | Overdue only | Review date before today. |
 | Due today only | Review date is today. Words with no review date are in neither this nor "Overdue only". |
-| Weakest words | Words on the Weak words list, weakest first. |
+| Weakest words | Words on the Weak words list, weakest first, due or not. |
 | Recently added | Date Added within today and the six days before it. |
 
 ## Confidence and calibration

@@ -13,6 +13,7 @@ in on.
 | **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples and related words. |
 | **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
 | **Calendar** | A month at a glance: words by the day they were added, or saved reviews by the day you did them. |
+| **AI Chat** | Ask an AI, in **General** for anything or **Vocabulary Expert** to look at a word or phrase in depth. Conversations and messages are saved to your account. Off unless the server is configured (see Deploying). |
 | **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of just those that are due, or practice with all of them. |
 | **Insights** | Reviews per day, accuracy and time per card week by week, accuracy and retention by period, confidence calibration, practice by mode, additions over time, share mastered, busiest days, incomplete entries. |
 | **Settings** | Account, time zone, daily goal, review preferences, scheduling (which schedule is in charge, the FSRS comparison and estimate, and a what-if on your saved answers), display preferences, exports, deleted words, connection and database status. |
@@ -175,6 +176,9 @@ in the Supabase dashboard (SQL Editor → paste the file → Run):
 | `20261015090000_practice_modes.sql` | 6 | Recording practice in the other study modes. |
 | `20261016090000_collections_and_relations.sql` | 7 | Collections, further examples, related words. |
 | `20261017090000_scheduler_switch.sql` | 8 | Choosing which schedule is in charge (FSRS or mastery). Changes nothing until an account chooses FSRS. |
+| `20261018090000_true_mastery_practice_history.sql` | 9 | The practice history the True Mastery estimate is counted from. |
+| `20261020090000_ai_conversations.sql` | 10 | AI Chat: saved conversations and messages. |
+| `20261025090000_vocabulary_analysis.sql` | 11 | The structured analysis Vocabulary Expert stores for a word. |
 
 Each file only adds things; none changes or removes existing data. The app
 checks the database version and keeps working on an older one, with the newer
@@ -211,6 +215,9 @@ Copy `.env.example` to `.env` and fill in:
 | `DATA_MODE` | Optional. `supabase` or `mock`. Empty means Supabase in a deployment or when `SUPABASE_URL` is set, sample data otherwise. |
 | `REVIEW_TIMEZONE` | Optional. The zone a new account starts with if its browser reports none. |
 | `REVIEW_WRITES_ENABLED` | Optional. Exactly `false` freezes all changes; anything else leaves saving on. |
+| `AI_PROVIDER` | Optional. `openai` or `anthropic`. Without it AI Chat stays off. |
+| `AI_MODEL` | Optional. The model id the provider expects, e.g. `gpt-4o-mini` or `claude-3-5-sonnet-latest`. |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional. The key for the provider chosen; set only the one in use. Server-side only; never sent to the browser. |
 
 Both Supabase values are public by design: the server hands them to the
 browser. **Never use the secret / `service_role` key.** The server refuses to
@@ -340,7 +347,9 @@ links work.
 
 1. In Vercel choose **Add New → Project** and import the GitHub repository.
    Keep the detected **Vite** preset and the default build settings.
-2. Add the environment variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`.
+2. Add the environment variables `SUPABASE_URL` and `SUPABASE_ANON_KEY`. To
+   turn on AI Chat, also add `AI_PROVIDER`, `AI_MODEL` and the matching key
+   (`OPENAI_API_KEY` or `ANTHROPIC_API_KEY`).
 3. Deploy, then open `/api/health` and confirm `"ok": true` and
    `"mode": "supabase"`.
 4. In Supabase, set **Authentication → URL Configuration → Site URL** to the

@@ -349,21 +349,25 @@ describe('narrowing a review', () => {
     expect(words(queue)).toEqual(['late-new', 'today-new', 'undated-new']);
   });
 
-  it('never brings forward a word that is not due, or one that is mastered', async () => {
+  it('never brings forward a mastered word, and only a weak review brings forward a word that is not due', async () => {
     const app = on(TODAY);
     await library(app);
-    for (const focus of ['weak', 'overdue', 'due_today', 'recent']) {
+    for (const focus of ['overdue', 'due_today', 'recent']) {
       const listed = words(await queueOf(app, alice, focus));
       expect(listed, focus).not.toContain('future-new');
       expect(listed, focus).not.toContain('mastered-new');
     }
+    const weak = words(await queueOf(app, alice, 'weak'));
+    // A weak word may be taken early; a mastered one never appears.
+    expect(weak).toContain('future-new');
+    expect(weak).not.toContain('mastered-new');
   });
 
-  it('is a subset of the full queue, with the same cards', async () => {
+  it('the due-only selections are a subset of the full queue, with the same cards', async () => {
     const app = on(TODAY);
     await library(app);
     const all = (await queueOf(app, alice)).cards;
-    for (const focus of ['weak', 'overdue', 'due_today', 'recent']) {
+    for (const focus of ['overdue', 'due_today', 'recent']) {
       for (const card of (await queueOf(app, alice, focus)).cards) expect(all, `${focus}: ${card.word}`).toContainEqual(card);
     }
   });

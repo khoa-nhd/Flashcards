@@ -9,6 +9,19 @@ import type { SchedulerId } from '../shared/scheduler/active.js';
 import type { ScheduleCard } from '../shared/scheduler/comparison.js';
 import type { FsrsRating, FsrsState } from '../shared/scheduler/fsrs.js';
 import type { StoredFsrs, VocabularyRecord } from '../shared/vocabulary.js';
+import type {
+  AiConversationRow,
+  AiMessageRow,
+  RateLimitCheckRow,
+  VocabularyAnalysisRow,
+} from './supabase/supabase-database.js';
+
+export type {
+  AiConversationRow,
+  AiMessageRow,
+  RateLimitCheckRow,
+  VocabularyAnalysisRow,
+};
 
 export interface SetupReport {
   /** Problems that prevent reading the queue at all. */
@@ -79,7 +92,7 @@ export interface PracticeDailyStat {
 /** One practice answer with full detail for True Mastery calculation. */
 export interface PracticeHistoryRow {
   vocabularyId: string;
-  mode: string;
+  mode: StudyMode;
   correct: boolean;
   grading: 'self' | 'auto';
   submitted: string | null;
@@ -167,4 +180,53 @@ export interface VocabularyRepository {
   practiceCorrectCounts(id: string): Promise<Map<string, number>>;
   /** Standing answers since `since` that carried a confidence rating, by rating. Empty where none are kept. */
   confidenceStats(since: IsoDate): Promise<ConfidenceStat[]>;
+
+  // ---- AI Conversations (schema version 10) ----
+  /** Rate limiting: check and increment counter. Needs schema version 10. */
+  checkAiRateLimit(mode: 'general' | 'vocabulary_expert', window: 'minute' | 'day', limit: number): Promise<RateLimitCheckRow>;
+  /** Lists the caller's conversations, most recently updated first. */
+  listAiConversations(limit?: number, offset?: number): Promise<AiConversationRow[]>;
+  /** Creates a new conversation for the caller. */
+  createAiConversation(mode: 'general' | 'vocabulary_expert', title?: string): Promise<AiConversationRow>;
+  /** Gets one conversation by id, only if it belongs to the caller. */
+  getAiConversation(id: string): Promise<AiConversationRow | null>;
+  /** Updates the title of a conversation owned by the caller. */
+  updateAiConversationTitle(id: string, title: string): Promise<boolean>;
+  /** Deletes a conversation and its messages (cascade via FK). */
+  deleteAiConversation(id: string): Promise<boolean>;
+  /** Lists messages for a conversation owned by the caller, oldest first. */
+  listAiMessages(conversationId: string, limit?: number, offset?: number): Promise<AiMessageRow[]>;
+  /** Appends a message to a conversation owned by the caller. Returns the created message row. */
+  insertAiMessage(
+    conversationId: string,
+    role: 'user' | 'assistant' | 'system',
+    content: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<AiMessageRow>;
+
+  // ---- Vocabulary Analysis (schema version 11) ----
+  /** Vocabulary Analysis: upsert analysis for a vocabulary entry. Needs schema version 11. */
+  upsertVocabularyAnalysis(args: {
+    vocabularyId: string;
+    pronunciation?: string | null;
+    partOfSpeech?: string | null;
+    cefrLevel?: string | null;
+    confidence?: number | null;
+    englishDefinition?: string | null;
+    vietnameseMeaning?: string | null;
+    senses?: Record<string, unknown>[];
+    examples?: Record<string, unknown>[];
+    wordFamily?: Record<string, unknown>[];
+    collocations?: Record<string, unknown>[];
+    synonyms?: Record<string, unknown>[];
+    antonyms?: Record<string, unknown>[];
+    usageNotes?: string | null;
+    commonMistakes?: string | null;
+    revisionSummary?: string | null;
+    model?: string | null;
+  }): Promise<VocabularyAnalysisRow>;
+  /** Vocabulary Analysis: get analysis for a vocabulary entry. Needs schema version 11. */
+  getVocabularyAnalysis(vocabularyId: string): Promise<VocabularyAnalysisRow | null>;
+  /** Vocabulary Analysis: delete analysis for a vocabulary entry. Needs schema version 11. */
+  deleteVocabularyAnalysis(vocabularyId: string): Promise<boolean>;
 }

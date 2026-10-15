@@ -252,6 +252,14 @@ export class VocabularyService {
     });
   }
 
+  /**
+   * Stored words that share this spelling, so a caller can check for an
+   * existing word before writing. Read-only; it never changes anything.
+   */
+  async findEntriesByWord(word: string): Promise<EntryData[]> {
+    return this.options.catalog.findEntriesByWord(word);
+  }
+
   /** Words that were deleted and can still be restored, where the store can list them. */
   async listTrashed(): Promise<VocabularyEntry[]> {
     const today = this.today();

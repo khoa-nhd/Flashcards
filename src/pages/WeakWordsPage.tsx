@@ -127,7 +127,7 @@ export function WeakWordsPage() {
                 <Icon name="practice" className="size-4" /> Practise these
               </Link>
             )}
-            {dueNow > 0 && (
+            {words.length > 0 && (
               <Link to={buildHref(ROUTES.review, { focus: 'weak' })} className={BUTTON_PRIMARY}>
                 <Icon name="review" className="size-4" /> Review my weakest words
               </Link>
@@ -200,7 +200,7 @@ export function WeakWordsPage() {
                 {dueNow === 0
                   ? 'None of these is due for review right now.'
                   : `${dueNow} ${dueNow === 1 ? 'is' : 'are'} due for review now.`}{' '}
-                A focused review only includes words that are already due, so it never brings a word forward.
+                A focused review can bring any of these forward, even if it is not due yet.
               </p>
 
               {shown.length === 0 ? (

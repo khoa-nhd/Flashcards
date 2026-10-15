@@ -152,7 +152,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 9;
+export const LATEST_SCHEMA_VERSION = 11;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -321,6 +321,59 @@ export const sessionSummaryRowSchema = z.object({
 
 export type SessionSummaryRow = z.infer<typeof sessionSummaryRowSchema>;
 
+export const vocabularyAnalysisRowSchema = z.object({
+  id: z.string(),
+  vocabulary_id: z.string(),
+  pronunciation: z.string().nullable(),
+  part_of_speech: z.string().nullable(),
+  cefr_level: z.string().nullable(),
+  confidence: z.number().nullable(),
+  english_definition: z.string().nullable(),
+  vietnamese_meaning: z.string().nullable(),
+  senses: z.unknown(),
+  examples: z.unknown(),
+  word_family: z.unknown(),
+  collocations: z.unknown(),
+  synonyms: z.unknown(),
+  antonyms: z.unknown(),
+  usage_notes: z.string().nullable(),
+  common_mistakes: z.string().nullable(),
+  revision_summary: z.string().nullable(),
+  model: z.string().nullable(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type VocabularyAnalysisRow = z.infer<typeof vocabularyAnalysisRowSchema>;
+
+/** AI conversation row as returned by the database. */
+export const aiConversationRowSchema = z.object({
+  id: z.string().uuid(),
+  mode: z.enum(['general', 'vocabulary_expert']),
+  title: z.string(),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type AiConversationRow = z.infer<typeof aiConversationRowSchema>;
+
+/** AI message row as returned by the database. */
+export const aiMessageRowSchema = z.object({
+  id: z.string().uuid(),
+  role: z.enum(['user', 'assistant', 'system']),
+  content: z.string(),
+  metadata: z.record(z.string(), z.unknown()),
+  created_at: z.string(),
+});
+export type AiMessageRow = z.infer<typeof aiMessageRowSchema>;
+
+/** Rate limit check result row as returned by the database. */
+export const rateLimitCheckRowSchema = z.object({
+  allowed: z.boolean(),
+  retry_after_seconds: z.number().int(),
+  current_count: z.number().int(),
+  limit: z.number().int(),
+});
+export type RateLimitCheckRow = z.infer<typeof rateLimitCheckRowSchema>;
+
 /** Keys the edit function accepts. Anything else is refused by the database itself. */
 export type CardPatch = Partial<{
   word: string;
@@ -400,6 +453,30 @@ export interface VocabularyDatabase {
   confidenceStats(since: IsoDate): Promise<ConfidenceStatRow[]>;
   /** The study mode of each correct practice answer recorded for one word. Needs schema version 6. */
   listCorrectPracticeModes(vocabularyId: string): Promise<string[]>;
+  /** Vocabulary Analysis: upsert analysis for a vocabulary entry. Needs schema version 11. */
+  upsertVocabularyAnalysis(args: {
+    vocabularyId: string;
+    pronunciation?: string | null;
+    partOfSpeech?: string | null;
+    cefrLevel?: string | null;
+    confidence?: number | null;
+    englishDefinition?: string | null;
+    vietnameseMeaning?: string | null;
+    senses?: Record<string, unknown>[];
+    examples?: Record<string, unknown>[];
+    wordFamily?: Record<string, unknown>[];
+    collocations?: Record<string, unknown>[];
+    synonyms?: Record<string, unknown>[];
+    antonyms?: Record<string, unknown>[];
+    usageNotes?: string | null;
+    commonMistakes?: string | null;
+    revisionSummary?: string | null;
+    model?: string | null;
+  }): Promise<VocabularyAnalysisRow>;
+  /** Vocabulary Analysis: get analysis for a vocabulary entry. Needs schema version 11. */
+  getVocabularyAnalysis(vocabularyId: string): Promise<VocabularyAnalysisRow | null>;
+  /** Vocabulary Analysis: delete analysis for a vocabulary entry. Needs schema version 11. */
+  deleteVocabularyAnalysis(vocabularyId: string): Promise<boolean>;
   /** The account's settings in one read, or `null` if it has none yet. */
   getSettings(): Promise<StoredSettings | null>;
   /** Needs schema version 5. */
@@ -412,6 +489,32 @@ export interface VocabularyDatabase {
   /** Stores the zone only if the user has none yet; returns the one in effect. */
   ensureTimeZone(timeZone: string): Promise<string>;
   saveTimeZone(timeZone: string): Promise<string>;
+  // ---- AI Conversations (schema version 10) ----
+  /** Lists the caller's conversations, most recently updated first. */
+  listAiConversations(limit?: number, offset?: number): Promise<AiConversationRow[]>;
+  /** Creates a new conversation for the caller. */
+  createAiConversation(mode: 'general' | 'vocabulary_expert', title?: string): Promise<AiConversationRow>;
+  /** Gets one conversation by id, only if it belongs to the caller. */
+  getAiConversation(id: string): Promise<AiConversationRow | null>;
+  /** Updates the title of a conversation owned by the caller. */
+  updateAiConversationTitle(id: string, title: string): Promise<boolean>;
+  /** Deletes a conversation and its messages (cascade via FK). */
+  deleteAiConversation(id: string): Promise<boolean>;
+  /** Lists messages for a conversation owned by the caller, oldest first. */
+  listAiMessages(conversationId: string, limit?: number, offset?: number): Promise<AiMessageRow[]>;
+  /** Appends a message to a conversation owned by the caller. Returns the created message row. */
+  insertAiMessage(
+    conversationId: string,
+    role: 'user' | 'assistant' | 'system',
+    content: string,
+    metadata?: Record<string, unknown>,
+  ): Promise<AiMessageRow>;
+  /** Checks and increments rate limit counters for the caller. */
+  checkAiRateLimit(
+    mode: 'general' | 'vocabulary_expert',
+    window: 'minute' | 'day',
+    limit: number,
+  ): Promise<RateLimitCheckRow>;
 }
 
 /**
@@ -1003,6 +1106,141 @@ export function createSupabaseDatabase(
       return data === null ? null : settingsFromRow(data as unknown as SettingsRow, schemaVersion);
     },
 
+    async upsertVocabularyAnalysis(args) {
+      const { data, error, status } = await client.rpc('upsert_vocabulary_analysis', {
+        p_vocabulary_id: args.vocabularyId,
+        p_pronunciation: args.pronunciation ?? null,
+        p_part_of_speech: args.partOfSpeech ?? null,
+        p_cefr_level: args.cefrLevel ?? null,
+        p_confidence: args.confidence ?? null,
+        p_english_definition: args.englishDefinition ?? null,
+        p_vietnamese_meaning: args.vietnameseMeaning ?? null,
+        p_senses: args.senses ?? [],
+        p_examples: args.examples ?? [],
+        p_word_family: args.wordFamily ?? [],
+        p_collocations: args.collocations ?? [],
+        p_synonyms: args.synonyms ?? [],
+        p_antonyms: args.antonyms ?? [],
+        p_usage_notes: args.usageNotes ?? null,
+        p_common_mistakes: args.commonMistakes ?? null,
+        p_revision_summary: args.revisionSummary ?? null,
+        p_model: args.model ?? null,
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(vocabularyAnalysisRowSchema).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not confirm the vocabulary analysis.');
+      }
+      return rows.data[0];
+    },
+
+    async getVocabularyAnalysis(vocabularyId) {
+      const { data, error, status } = await client.rpc('get_vocabulary_analysis', { p_vocabulary_id: vocabularyId });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(vocabularyAnalysisRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned vocabulary analysis in an unexpected shape.');
+      return rows.data[0] ?? null;
+    },
+
+    async deleteVocabularyAnalysis(vocabularyId) {
+      const { data, error, status } = await client.rpc('delete_vocabulary_analysis', { p_vocabulary_id: vocabularyId });
+      if (error) throw toDatabaseError(error, status);
+      return data === true;
+    },
+
+    // ---- AI Conversations (schema version 10) ----
+
+    async listAiConversations(limit = 50, offset = 0) {
+      const { data, error, status } = await client.rpc('list_ai_conversations', {
+        p_limit: limit,
+        p_offset: offset,
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(aiConversationRowSchema).safeParse(data ?? []);
+      if (!rows.success) {
+        throw new DatabaseError('unavailable', 'The database returned conversations in an unexpected shape.');
+      }
+      return rows.data;
+    },
+
+    async createAiConversation(mode, title) {
+      const { data, error, status } = await client.rpc('create_ai_conversation', {
+        p_mode: mode,
+        p_title: title ?? 'New conversation',
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(aiConversationRowSchema).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not confirm the new conversation.');
+      }
+      return rows.data[0];
+    },
+
+    async getAiConversation(id) {
+      const { data, error, status } = await client.rpc('get_ai_conversation', { p_id: id });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(aiConversationRowSchema).safeParse(data ?? []);
+      if (!rows.success) {
+        throw new DatabaseError('unavailable', 'The database returned a conversation in an unexpected shape.');
+      }
+      return rows.data[0] ?? null;
+    },
+
+    async updateAiConversationTitle(id, title) {
+      const { data, error, status } = await client.rpc('update_ai_conversation_title', { p_id: id, p_title: title });
+      if (error) throw toDatabaseError(error, status);
+      return data === true;
+    },
+
+    async deleteAiConversation(id) {
+      const { data, error, status } = await client.rpc('delete_ai_conversation', { p_id: id });
+      if (error) throw toDatabaseError(error, status);
+      return data === true;
+    },
+
+    async listAiMessages(conversationId, limit = 200, offset = 0) {
+      const { data, error, status } = await client.rpc('list_ai_messages', {
+        p_conversation_id: conversationId,
+        p_limit: limit,
+        p_offset: offset,
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(aiMessageRowSchema).safeParse(data ?? []);
+      if (!rows.success) {
+        throw new DatabaseError('unavailable', 'The database returned messages in an unexpected shape.');
+      }
+      return rows.data;
+    },
+
+    async insertAiMessage(conversationId, role, content, metadata) {
+      const { data, error, status } = await client.rpc('insert_ai_message', {
+        p_conversation_id: conversationId,
+        p_role: role,
+        p_content: content,
+        p_metadata: metadata ?? {},
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(aiMessageRowSchema).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not confirm the new message.');
+      }
+      return rows.data[0];
+    },
+
+    async checkAiRateLimit(mode, window, limit) {
+      const { data, error, status } = await client.rpc('check_ai_rate_limit', {
+        p_mode: mode,
+        p_window: window,
+        p_limit: limit,
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(rateLimitCheckRowSchema).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not return a rate limit result.');
+      }
+      return rows.data[0];
+    },
+
     async saveDailyGoal(goal) {
       const { data, error, status } = await client
         .from('user_settings')
@@ -1083,3 +1321,5 @@ export function createSupabaseDatabase(
     },
   };
 }
+
+

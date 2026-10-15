@@ -26,6 +26,7 @@ const PATHS = {
   alertTriangle: 'M12 4 3 20h18L12 4Zm0 6v5m0 3v.01',
   clock: 'M12 6v6l4 2M12 4v1M12 20v1M4 12h1M20 12h1',
   database: 'M4 6v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2Zm0 8v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6',
+  chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10Z',
 } as const;
 
 export type IconName = keyof typeof PATHS;

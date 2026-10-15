@@ -79,6 +79,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const cached = loaded.entries.find((entry) => entry.id === entryId) ?? null;
   const meta = loaded.meta;
   const canWrite = meta?.writesEnabled ?? false;
+  /** A word this browser has just added and is still saving; there is nothing to fetch yet. */
+  const savingNew = loaded.pending.some((write) => write.id === entryId && write.operation === 'create');
 
   const [entry, setEntry] = useState<VocabularyEntry | null>(cached);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -111,6 +113,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
 
   // Always show what is stored now, not what was loaded a while ago.
   useEffect(() => {
+    // A word that has not reached the database yet has nothing newer to read.
+    if (savingNew) return;
     let current = true;
     api
       .fetchEntry(entryId)
@@ -129,7 +133,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
     return () => {
       current = false;
     };
-  }, [api, entryId, vocabulary]);
+  }, [api, entryId, vocabulary, savingNew]);
 
   // Fetch practice history for True Mastery detail
   useEffect(() => {
@@ -185,7 +189,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
     setDuplicateOf(null);
   };
 
-  const save = async (allowDuplicate: boolean) => {
+  const save = (allowDuplicate: boolean) => {
     if (entry === null || draft === null || saving) return;
     const before = toDraft(entry);
     // An edit to the schedule counts whether or not its section is still open: closing the
@@ -215,22 +219,28 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
     }
     if (allowDuplicate) input.allowDuplicate = true;
 
-    setSaving(true);
+    // The change shows at once; the database is told behind it.
+    const stored = entry;
+    const typed = draft;
+    const { entry: optimistic, result } = vocabulary.update(stored.id, input);
+    setEntry(optimistic);
+    setDuplicateOf(null);
     setSaveError(null);
-    try {
-      const updated = await api.updateEntry(entry.id, input);
-      setEntry(updated);
-      vocabulary.upsert(updated);
-      setDraft(null);
-      setDuplicateOf(null);
-      toasts.show({ message: `Saved “${updated.word}”.` });
-    } catch (error) {
-      // The draft stays exactly as typed so nothing has to be entered again.
-      if (error instanceof ApiError && error.code === 'duplicate') setDuplicateOf(error.duplicates);
-      else setSaveError(error instanceof ApiError ? error.message : 'Could not save the changes.');
-    } finally {
+    setSaving(true);
+    setDraft(null);
+    void result.then((outcome) => {
       setSaving(false);
-    }
+      if (outcome.ok) {
+        if (outcome.entry !== null) setEntry(outcome.entry);
+        toasts.show({ message: `Saved “${(outcome.entry ?? optimistic).word}”.` });
+        return;
+      }
+      // Nothing has to be typed again: the stored values come back and the draft reopens as it was.
+      setEntry(stored);
+      if (outcome.code === 'duplicate') setDuplicateOf(outcome.duplicates);
+      else setSaveError(outcome.message);
+      setDraft(typed);
+    });
   };
 
   const remove = async () => {
@@ -308,7 +318,6 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
             type="button"
             aria-label="Close"
             onClick={onClose}
-            disabled={saving}
             className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-line/40 hover:text-ink"
           >
             <Icon name="close" />
@@ -316,12 +325,12 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
-          {entry === null && checking && (
+          {entry === null && checking && !savingNew && (
             <p role="status" className="flex items-center gap-2 text-sm text-muted">
               <Spinner /> Loading the word…
             </p>
           )}
-          {entry === null && !checking && (
+          {entry === null && !checking && !savingNew && (
             <p role="alert" className="rounded-xl bg-bad-soft px-3 py-2 text-sm text-bad-ink">
               {loadError ?? 'This word could not be found.'}
             </p>

@@ -3,6 +3,7 @@ import type { ExportService } from './export-service.js';
 import type { LibraryService } from './library-service.js';
 import type { ReviewService } from './review-service.js';
 import type { VocabularyService } from './vocabulary-service.js';
+import type { AiService } from './ai-service-impl.js';
 
 export interface Account {
   id: string;
@@ -24,6 +25,8 @@ export interface AccountSession {
   analytics: AnalyticsService;
   library: LibraryService;
   exporter: ExportService;
+  /** `null` when AI chat is not configured. */
+  ai: AiService | null;
   saveTimeZone(timeZone: string): Promise<string>;
 }
 

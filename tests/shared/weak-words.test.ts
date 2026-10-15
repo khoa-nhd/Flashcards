@@ -175,6 +175,19 @@ describe('ranking', () => {
     expect(ranked.map((item) => item.id)).toEqual(['mango', 'apple', 'zebra']);
   });
 
+  it('breaks a tie by lower mastery, then by word, so a missing mastery is not treated as strong', () => {
+    const ranked = rankWeakWords(
+      [
+        word('high', { mastery: 9, example: null }),
+        word('none', { mastery: null, example: null }),
+        word('low', { mastery: 2, example: null }),
+      ],
+      TODAY,
+    );
+    // All score the same for the one missing field; the least mastered comes first.
+    expect(ranked.map((item) => item.id)).toEqual(['none', 'low', 'high']);
+  });
+
   it('gives each word an action that follows from its main reason', () => {
     expect(score(word('bare', { example: null }))?.action).toBe('Fill in what is missing so the card can be reviewed properly.');
     expect(score(word('late', { reviewDate: '2026-09-01' }))?.action).toBe('Review it: it has been waiting a long time.');

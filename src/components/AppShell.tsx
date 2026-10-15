@@ -18,6 +18,7 @@ const PRIMARY: NavItem[] = [
   { route: 'add', label: 'Add vocabulary', short: 'Add', icon: 'add' },
   { route: 'bank', label: 'Vocabulary bank', short: 'Bank', icon: 'bank' },
   { route: 'calendar', label: 'Calendar', short: 'Calendar', icon: 'calendar' },
+  { route: 'chat', label: 'AI Chat', short: 'Chat', icon: 'chat' },
 ];
 
 const SECONDARY: NavItem[] = [

@@ -16,6 +16,7 @@ export const ROUTES = {
   weak: '/weak',
   insights: '/insights',
   settings: '/settings',
+  chat: '/chat',
 } as const;
 
 export type RouteKey = keyof typeof ROUTES;

@@ -13,7 +13,7 @@
  */
 import { openDB, type DBSchema, type IDBPDatabase } from 'idb';
 import type { ReviewAction } from '../../shared/review-logic.js';
-import type { PracticeRequest } from '../../shared/api.js';
+import type { PracticeRequest, ReviewFocus } from '../../shared/api.js';
 import type { VocabularyEntry } from '../../shared/api.js';
 import { newRequestId } from './request-id.js';
 
@@ -70,6 +70,8 @@ export interface ReviewActionMutation extends BaseMutation {
     durationMs: number;
     sessionId: string;
     confidence: 1 | 2 | 3 | null;
+    /** The selection the answer came from, where it changes what is allowed (`weak` may be early). */
+    focus: ReviewFocus | null;
   };
 }
 

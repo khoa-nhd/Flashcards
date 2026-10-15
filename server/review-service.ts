@@ -128,9 +128,9 @@ export class ReviewService {
   }
 
   /**
-   * The cards due now. A `focus` keeps only some of them: the queue is
-   * narrowed, never widened, so a focused review still only moves words the
-   * schedule says are ready.
+   * The cards to review. A `focus` keeps only some of them. Every focus
+   * narrows the queue to words the schedule says are ready, except `weak`,
+   * which may also bring a weak word forward before its due date.
    */
   async getQueue(focus: QueueFocus | null = null): Promise<QueueResponse> {
     const { repository, rules, timeZone } = this.options;
@@ -141,15 +141,17 @@ export class ReviewService {
 
     const today = this.today();
     const scheduler = this.activeScheduler();
-    // The mastery date narrows the read only while it is what decides; otherwise every live word is a candidate.
+    // The mastery date narrows the read only while it is what decides. A weak focus reads every live word,
+    // because it may bring a word forward and so its review date cannot decide which are candidates.
+    const weakFocus = focus?.kind === 'weak';
     const { records, invalid } =
-      scheduler === 'fsrs' ? await repository.listLiveRecords() : await repository.listDueCandidates(today);
+      scheduler === 'fsrs' || weakFocus ? await repository.listLiveRecords() : await repository.listDueCandidates(today);
     const candidates: Candidate[] = records.map((record) => ({
       ...record,
       storedReview: record.nextReview,
       nextReview: this.dueDate(record, scheduler),
     }));
-    const built = buildQueue(candidates, today, rules);
+    const built = buildQueue(candidates, today, rules, { allowNotDue: weakFocus });
     const { excluded } = built;
     let { queue } = built;
     if (focus !== null) {
@@ -236,12 +238,14 @@ export class ReviewService {
       throw conflict(current);
     }
     // Unchanged since it was shown, but still not something that may be reviewed now.
-    // Whether it is due is the one thing the schedule in charge decides.
+    // Whether it is due is the one thing the schedule in charge decides, except for a weak
+    // focused review, which may take a word early.
     const scheduler = this.activeScheduler();
     const eligibility = checkEligibility(
       { mastery: current.mastery, nextReview: this.dueDate(record, scheduler) },
       today,
       rules,
+      { allowNotDue: request.focus === 'weak' },
     );
     if (!eligibility.eligible) {
       const why: Record<typeof eligibility.reason, string> = {

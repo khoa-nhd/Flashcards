@@ -122,7 +122,7 @@ export function ReviewPage() {
             id="review-focus"
             value={collectionId !== null ? `collection:${collectionId}` : (focus ?? '')}
             disabled={isSaving(state)}
-            title="Choose which of the due words to review. No choice brings a word forward."
+            title="Choose which words to review. The weakest words can be taken before they are due."
             className="h-9 max-w-[11rem] cursor-pointer rounded-full border border-line bg-surface px-3 text-sm font-medium text-muted disabled:cursor-not-allowed disabled:opacity-50"
             onChange={(event) => {
               const { value } = event.target;
