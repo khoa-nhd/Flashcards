@@ -8,6 +8,7 @@ import {
   analyticsResponseSchema,
   entryResponseSchema,
   queueResponseSchema,
+  reviewActionResponseSchema,
   weakWordsResponseSchema,
   type VocabularyEntry,
 } from '../../shared/api.js';
@@ -248,7 +249,7 @@ describe('focusing a review on the weakest words', () => {
     expect(focused.cards.map((card) => card.word)).toEqual(['overdue-a-month', 'overdue-a-week', 'weak-but-not-due']);
   });
 
-  it('lets a weak word be answered early, and schedules it from today', async () => {
+  it('lets a weak word be answered early, and leaves its mastery and date as they were', async () => {
     const app = on('2026-10-09');
     const word = await addWord(app, alice, { word: 'early', mastery: 3, reviewDate: '2026-10-20' });
 
@@ -273,8 +274,46 @@ describe('focusing a review on the weakest words', () => {
       },
     });
     expect(response.status).toBe(200);
+    expect(reviewActionResponseSchema.parse(await response.json())).toEqual({
+      outcome: 'applied',
+      state: { mastery: 3, nextReview: '2026-10-20' },
+    });
     const after = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${word.id}`)).json()).entry;
-    // Mastery 3 remembered on the 9th: mastery 4, due three days later, counted from today rather than the future date.
+    // Reviewing the weakest words is extra practice: Remember does not raise mastery or move the date.
+    expect(after).toMatchObject({ mastery: 3, reviewDate: '2026-10-20' });
+  });
+
+  it('leaves a due weak word unchanged on Not remember too, records the answer, and can be undone', async () => {
+    const app = on('2026-10-09');
+    const word = await addWord(app, alice, { word: 'shaky', mastery: 2, reviewDate: '2026-10-01' });
+    const requestId = newId();
+    const answer = () =>
+      call(app, alice, '/api/review-action', {
+        method: 'POST',
+        body: { pageId: word.id, action: 'not_remember', expected: { mastery: 2, nextReview: '2026-10-01' }, requestId, focus: 'weak' },
+      });
+    expect((await answer()).status).toBe(200);
+    // Sent again, it is recognised rather than saved twice.
+    expect(reviewActionResponseSchema.parse(await (await answer()).json()).outcome).toBe('already_applied');
+
+    const after = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${word.id}`)).json()).entry;
+    expect(after).toMatchObject({ mastery: 2, reviewDate: '2026-10-01' });
+
+    const undo = await call(app, alice, '/api/review-undo', { method: 'POST', body: { reviewRequestId: requestId, requestId: newId() } });
+    expect(undo.status).toBe(200);
+    const undone = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${word.id}`)).json()).entry;
+    expect(undone).toMatchObject({ mastery: 2, reviewDate: '2026-10-01' });
+  });
+
+  it('still raises mastery for the same word reviewed outside the weak focus', async () => {
+    const app = on('2026-10-09');
+    const word = await addWord(app, alice, { word: 'due', mastery: 3, reviewDate: '2026-10-09' });
+    const response = await call(app, alice, '/api/review-action', {
+      method: 'POST',
+      body: { pageId: word.id, action: 'remember', expected: { mastery: 3, nextReview: '2026-10-09' }, requestId: newId() },
+    });
+    expect(response.status).toBe(200);
+    const after = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${word.id}`)).json()).entry;
     expect(after).toMatchObject({ mastery: 4, reviewDate: '2026-10-12' });
   });
 

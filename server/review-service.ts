@@ -260,13 +260,22 @@ export class ReviewService {
       });
     }
 
-    const next = ruleFor(action, rules) === null ? null : applyAction(action, current, today, rules);
+    // Reviewing the weakest words is extra practice: the answer is recorded, but the word does not
+    // move. The owner's rule (2026-10-15): mastery, review date and FSRS state all stay as they are,
+    // for either answer. It is saved as an answer whose state after equals its state before, so
+    // Undo, statistics and the request-id guard against saving twice work as for any answer.
+    const practiceOnly = request.focus === 'weak';
+    const next =
+      ruleFor(action, rules) === null ? null : practiceOnly ? { ...current } : applyAction(action, current, today, rules);
     if (next === null || !(await this.writesEnabled())) return { outcome: 'dry_run', state: next };
 
-    const fsrs = this.fsrsFor(record, action);
-    // Beside the mastery schedule a failed FSRS calculation costs nothing. In charge, saving
-    // without it would leave the word exactly where it was, so the answer is refused instead.
+    const fsrs = practiceOnly ? this.unchangedFsrs(record, action) : this.fsrsFor(record, action);
     if (scheduler === 'fsrs' && fsrs === null) {
+      // With FSRS in charge the store will not take an answer without an FSRS state, and a word FSRS
+      // has never seen has none to keep. Giving it one would move it, so this answer is not recorded.
+      if (practiceOnly) return { outcome: 'dry_run', state: next };
+      // Beside the mastery schedule a failed FSRS calculation costs nothing. In charge, saving
+      // without it would leave the word exactly where it was, so the answer is refused instead.
       throw new HttpError(500, 'scheduler_failed', 'The next review could not be worked out, so nothing was saved. Try again.');
     }
 
@@ -432,6 +441,14 @@ export class ReviewService {
    * A failure is logged and reported as `null`; what that means for the answer
    * is the caller's decision.
    */
+  /** The FSRS part of an answer that leaves the word where it is: the state after is the state before. */
+  private unchangedFsrs(record: VocabularyRecord, action: ReviewAction): FsrsWrite | null {
+    const { fsrs } = this.options;
+    const before = record.fsrs ?? null;
+    if (fsrs == null || !this.fsrsRunning() || before === null) return null;
+    return { rating: ratingFor(action, fsrs.ratingMap), engine: before.engine, before, after: before.state };
+  }
+
   private fsrsFor(record: VocabularyRecord, action: ReviewAction): FsrsWrite | null {
     const { fsrs } = this.options;
     if (fsrs == null || !this.fsrsRunning()) return null;
