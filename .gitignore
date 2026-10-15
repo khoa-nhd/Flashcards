@@ -15,3 +15,6 @@ coverage/
 
 # Local data backups contain your vocabulary. Never commit them.
 backups/
+
+# Supabase CLI working files (project ref, pooler address)
+supabase/.temp/

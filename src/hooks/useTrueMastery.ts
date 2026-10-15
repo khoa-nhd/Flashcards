@@ -142,7 +142,7 @@ export function useTrueMastery(): UseTrueMasteryReturn {
         mastery: result.mastery,
         tier: getTrueMasteryTier(result.mastery),
         coverage: result.coverage,
-        coverageLabel: getEvidenceCoverageLabel(result.coverage),
+        coverageLabel: result.hasAnyPractice ? getEvidenceCoverageLabel(result.coverage) : 'Not practised yet',
         totalEffectiveEvidence: result.totalEffectiveEvidence,
         modesWithEvidence: result.modesWithEvidence,
         modes: result.modes,

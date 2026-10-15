@@ -64,8 +64,11 @@ export const DEFAULT_TRUE_MASTERY_CONFIG: TrueMasteryConfig = {
 /** One practice answer with full detail */
 export interface PracticeAnswer {
   vocabularyId: string;
-  /** Unique request ID from the practice attempt (for deduplication).
-   * Optional for backward compatibility with older schema versions. */
+  /**
+   * Unique request ID from the practice attempt, used to drop a repeated copy
+   * of the same answer. The practice history the server sends has none: it
+   * stores each request once, so every row there is already a distinct answer.
+   */
   requestId?: string;
   mode: string;
   correct: boolean;
@@ -253,13 +256,13 @@ function computeMode(
 ): ModeComputation {
   const baseWeight = cfg.modeWeights[mode] ?? 0;
 
-  // Filter out future dates and invalid events, sort by reviewedAt for session detection
-  // A valid event must have: requestId, reviewedOn, reviewedAt, mode, correct, grading
+  // Filter out future dates and invalid events, sort by reviewedAt for session detection.
+  // A valid event must have: reviewedOn, reviewedAt, mode, correct, grading. A request id
+  // is not required: the server's practice history does not carry one.
   const validAnswers = answers
     .filter((a) => {
       const d = daysBetween(a.reviewedOn, today);
       return d >= 0
-        && a.requestId != null && a.requestId !== ''
         && a.reviewedOn != null
         && a.reviewedAt != null
         && a.mode != null
@@ -286,13 +289,13 @@ function computeMode(
   }
 
   for (const [, sessionAnswers] of sessions) {
-    // Within a session, deduplicate by requestId (keep last answer for each unique requestId)
-    // For answers without requestId (older schema), fall back to reviewedAt as a key
+    // Within a session, deduplicate by requestId (keep last answer for each unique requestId).
+    // An answer without one is its own answer: nothing says it repeats another.
     const byRequestId = new Map<string, PracticeAnswer>();
-    for (const a of sessionAnswers) {
-      const key = a.requestId ?? `fallback:${a.reviewedAt}`;
+    sessionAnswers.forEach((a, index) => {
+      const key = a.requestId != null && a.requestId !== '' ? `request:${a.requestId}` : `row:${index}`;
       byRequestId.set(key, a);
-    }
+    });
     const uniqueAnswers = Array.from(byRequestId.values());
 
     // Cap effective evidence per session at sessionMaxEffectiveEvidence

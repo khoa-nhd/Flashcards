@@ -8,12 +8,12 @@ import { createContext, useContext, useEffect, useSyncExternalStore } from 'reac
 import type { ReviewFocus } from '../shared/api.js';
 import type { AppApi } from './lib/api-client.js';
 import { createLibraryStore, type LibraryState, type LibraryStore } from './lib/library-store.js';
+import { invalidateAllPracticeHistory } from './lib/practice-history-cache.js';
 import { createSessionController, type SessionController } from './lib/session-controller.js';
 import { saveIssue } from './lib/session-machine.js';
 import { createSettingsStore, type Settings, type SettingsStore } from './lib/settings.js';
 import { createToastStore, type ToastStore } from './lib/toasts.js';
 import { createVocabularyStore, type VocabularyState, type VocabularyStore } from './lib/vocabulary-store.js';
-import { MutationQueue } from './lib/mutation-queue.js';
 
 /** The signed-in account, where the app has accounts. */
 export interface AccountControls {
@@ -30,8 +30,6 @@ export interface AppServices {
   toasts: ToastStore;
   /** `null` with the built-in sample words, which need no account. */
   account: AccountControls | null;
-  /** The durable mutation queue for offline-first persistence. */
-  mutationQueue: MutationQueue;
   /**
    * Called when the Review tab is shown. Loads the queue on the first visit;
    * afterwards only a finished or failed session is replaced, so one in
@@ -53,9 +51,10 @@ export function createAppServices(
   account: AccountControls | null = null,
 ): AppServices {
   const vocabulary = createVocabularyStore(api);
-  const mutationQueue = new MutationQueue();
+  // The practice history cache lives outside these services; a new account must not start with the last one's.
+  invalidateAllPracticeHistory();
   // A saved answer changes mastery and dates, so the other pages must re-read.
-  const session = createSessionController(api, () => vocabulary.markStale(), mutationQueue);
+  const session = createSessionController(api, () => vocabulary.markStale());
   let reviewStarted = false;
   const library = createLibraryStore(api);
   const ensureReviewSession = (focus: ReviewFocus | null = null, collection: string | null = null) => {
@@ -73,22 +72,7 @@ export function createAppServices(
     }
   };
 
-  // Set the account ID on the mutation queue for isolation
-  const accountId = account?.email ?? 'anonymous';
-  mutationQueue.setAccountId(accountId);
-
-  // If we have an account with signOut, wrap it to clear the mutation queue
-  const wrappedAccount = account
-    ? {
-        ...account,
-        signOut: async () => {
-          await mutationQueue.clearAccount();
-          await account.signOut();
-        },
-      }
-    : null;
-
-  return { api, session, vocabulary, settings, toasts: createToastStore(), account: wrappedAccount, mutationQueue, ensureReviewSession, library };
+  return { api, session, vocabulary, settings, toasts: createToastStore(), account, ensureReviewSession, library };
 }
 
 const AppContext = createContext<AppServices | null>(null);
@@ -134,12 +118,6 @@ export function useLibrary(): LibraryState {
 export function useSettings(): Settings {
   const { settings } = useApp();
   return useSyncExternalStore(settings.subscribe, settings.getState);
-}
-
-/** Access the mutation queue for offline-first persistence. */
-export function useMutationQueue(): MutationQueue {
-  const { mutationQueue } = useApp();
-  return mutationQueue;
 }
 
 /** Access True Mastery data for vocabulary entries. */

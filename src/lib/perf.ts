@@ -7,9 +7,12 @@
  * in the way. Review and Practice both answer at once now, so the two numbers
  * can be compared with the old "wait for the server" behaviour.
  *
- * Only a fixed step name and a duration are ever kept: never a word, an answer,
- * an account or an id. Nothing at all is recorded in a production build, and
- * the recorder is exposed on `window.__flashcardsPerf` only in development.
+ * Only a fixed step name and a duration are ever kept, in memory and at most
+ * 200 of them: never a word, an answer, an account or an id, and nothing is
+ * sent anywhere. The recorder is exposed on `window.__flashcardsPerf` only
+ * when the app is served from this computer. Browser code never reads the
+ * environment (see tests/frontend-secrets.test.ts), so that is decided by the
+ * address rather than by the build.
  */
 
 export type PerfStep =
@@ -28,27 +31,22 @@ export interface PerfSample {
   ms: number;
 }
 
-const enabled = import.meta.env.DEV === true;
-
 /** Older samples fall off the end; a long session must not grow without bound. */
 const MAX_SAMPLES = 200;
 
 const samples: PerfSample[] = [];
 
-/** Records one timing. A no-op outside development. */
+/** Records one timing. */
 export function record(step: PerfStep, ms: number): void {
-  if (!enabled) return;
   if (samples.length >= MAX_SAMPLES) samples.shift();
   samples.push({ step, ms });
 }
 
 /**
  * Starts a timer. Call the returned function once the work it measures is
- * done; it records the elapsed time and returns it. Outside development the
- * returned function does nothing and reports zero.
+ * done; it records the elapsed time and returns it.
  */
 export function startTiming(step: PerfStep): () => number {
-  if (!enabled) return () => 0;
   const startedAt = performance.now();
   return () => {
     const ms = performance.now() - startedAt;
@@ -92,7 +90,8 @@ declare global {
   }
 }
 
-// Handy for measuring by hand in a dev build; never present in production.
-if (enabled && typeof window !== 'undefined') {
+// Handy for measuring by hand while developing; not offered on a deployed site.
+const LOCAL_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+if (typeof window !== 'undefined' && LOCAL_HOSTS.has(window.location.hostname)) {
   window.__flashcardsPerf = { samples: perfSamples, average: averageMs, clear: clearPerf };
 }

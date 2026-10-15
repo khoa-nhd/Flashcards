@@ -141,8 +141,9 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
         Card {done + 1} of {total}: {card.word}. {flipped ? 'Answer shown.' : ''}
       </p>
 
-      <div className="flex min-h-0 flex-1 flex-col py-2">
-        <div className="min-h-0 flex-1 flex items-center justify-center">
+      {/* The card scrolls here when its answer is taller than the screen, so it never runs under the buttons. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden py-2">
+        <div className="my-auto">
           <Flashcard
             key={card.id}
             card={card}
@@ -155,7 +156,6 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
             onGrade={grade}
             onBlockedGrade={showFlipHint}
             flipButtonRef={flipButton}
-            className="max-h-full w-full"
           />
         </div>
       </div>

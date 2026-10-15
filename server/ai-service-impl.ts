@@ -28,16 +28,22 @@ export interface AiService {
   updateConversationTitle(id: string, title: string): Promise<boolean>;
   /** Deletes a conversation. */
   deleteConversation(id: string): Promise<boolean>;
-  /** Lists messages for a conversation. */
+  /** Lists messages for a conversation, as the model is given them. */
   listMessages(conversationId: string, limit?: number, offset?: number): Promise<Array<{ role: 'user' | 'assistant' | 'system'; content: string }>>;
+  /** Lists messages for a conversation, as the page shows them. */
+  listMessageRecords(
+    conversationId: string,
+    limit?: number,
+    offset?: number,
+  ): Promise<Array<{ id: string; role: 'user' | 'assistant' | 'system'; content: string; metadata: Record<string, unknown>; createdAt: string }>>;
   /** Builds the conversation context for generation. */
   buildContext(conversationId: string, mode: AiMode, history: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>, newUserMessage: string): ConversationContext;
   /** Checks rate limits for a mode. */
   checkRateLimits(mode: AiMode): Promise<{ minute: RateLimitResult; day: RateLimitResult }>;
   /** Throws if rate limits are exceeded. */
   enforceRateLimits(limits: { minute: RateLimitResult; day: RateLimitResult }): void;
-  /** Generates a streaming response. */
-  generateResponse(conversationId: string, context: ConversationContext): AsyncGenerator<AiStreamChunk, void, unknown>;
+  /** Generates a streaming response. `signal` stops it, for example when the reader has gone. */
+  generateResponse(conversationId: string, context: ConversationContext, signal: AbortSignal): AsyncGenerator<AiStreamChunk, void, unknown>;
   /** Vocabulary Analysis: upsert analysis for a vocabulary entry. Needs schema version 11. */
   upsertVocabularyAnalysis(args: {
     vocabularyId: string;
@@ -108,6 +114,11 @@ export function createAiService(repository: VocabularyRepository, env: Record<st
       return rows.map((r) => ({ role: r.role, content: r.content }));
     },
 
+    async listMessageRecords(conversationId: string, limit = 200, offset = 0) {
+      const rows = await repository.listAiMessages(conversationId, limit, offset);
+      return rows.map((r) => ({ id: r.id, role: r.role, content: r.content, metadata: r.metadata, createdAt: r.created_at }));
+    },
+
     buildContext(conversationId: string, mode: AiMode, history: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>, newUserMessage: string) {
       return buildConversationContext(conversationId, mode, history, newUserMessage);
     },
@@ -120,8 +131,8 @@ export function createAiService(repository: VocabularyRepository, env: Record<st
       enforceRateLimits(limits);
     },
 
-    async *generateResponse(_conversationId: string, context: ConversationContext) {
-      yield* generateResponse(repository, context, config, new AbortSignal());
+    async *generateResponse(_conversationId: string, context: ConversationContext, signal: AbortSignal) {
+      yield* generateResponse(repository, context, config, signal);
     },
 
     async upsertVocabularyAnalysis(args: {

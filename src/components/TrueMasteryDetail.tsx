@@ -99,7 +99,7 @@ export function TrueMasteryDetail({
       {/* Confidence/evidence summary */}
       <p className="text-xs text-muted">
         Based on {totalEffectiveEvidence.toFixed(1)} effective evidence across {modesWithEvidence} mode{modesWithEvidence === 1 ? '' : 's'}.
-        {modesWithEvidence > 1 && ` Coverage: {coverageLabel}.`}
+        {modesWithEvidence > 1 && ` Coverage: ${coverageLabel}.`}
       </p>
 
       {/* Most recent practice activity */}

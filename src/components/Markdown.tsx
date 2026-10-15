@@ -1,187 +1,170 @@
 /**
- * Safe Markdown renderer with a small, audited subset.
- * Does not execute HTML or scripts.
+ * A small Markdown renderer for chat replies. Everything is built as React
+ * elements, so text is always escaped and no HTML from the reply is ever
+ * interpreted. Links are kept only when they point to http(s) addresses.
  */
-import { useMemo } from 'react';
-import { Fragment } from 'react';
+import { useMemo, type ReactNode } from 'react';
 
-/** Escape HTML special characters. */
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, '&#039;');
+/** Code spans, bold, italic and links, in that order of precedence. */
+const INLINE = /(`[^`\n]+`)|(\*\*[^*\n]+\*\*)|(\*[^*\s][^*\n]*\*)|(\[[^\]\n]+\]\(https?:\/\/[^\s)]+\))/g;
+const LINK = /^\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)$/;
+
+function inline(text: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  let last = 0;
+  for (const match of text.matchAll(INLINE)) {
+    const token = match[0];
+    const index = match.index;
+    if (index > last) nodes.push(text.slice(last, index));
+    const key = nodes.length;
+    if (token.startsWith('`')) {
+      nodes.push(
+        <code key={key} className="rounded bg-line px-1.5 font-mono text-[0.9em]">
+          {token.slice(1, -1)}
+        </code>,
+      );
+    } else if (token.startsWith('**')) {
+      nodes.push(<strong key={key}>{inline(token.slice(2, -2))}</strong>);
+    } else if (token.startsWith('*')) {
+      nodes.push(<em key={key}>{inline(token.slice(1, -1))}</em>);
+    } else {
+      const link = LINK.exec(token);
+      nodes.push(
+        link === null ? (
+          token
+        ) : (
+          <a key={key} href={link[2]} target="_blank" rel="noopener noreferrer" className="text-accent underline hover:no-underline">
+            {link[1]}
+          </a>
+        ),
+      );
+    }
+    last = index + token.length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
 }
 
-/** Parse inline markdown: **bold**, *italic*, `code`, [link](url). */
-function parseInline(text: string): string {
-  // Code spans first (protect content from other parsing)
-  let result = text.replace(/`([^`\n]+)`/g, '<code class="bg-line px-1.5 rounded text-sm font-mono">$1</code>');
+const BULLET = /^[-*]\s+(.*)$/;
+const NUMBERED = /^\d+[.)]\s+(.*)$/;
+const HEADING = /^(#{1,6})\s+(.+)$/;
 
-  // Bold
-  result = result.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
-
-  // Italic
-  result = result.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
-
-  // Links
-  result = result.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer" class="text-accent underline hover:no-underline">$1</a>');
-
-  return result;
+/** True for a line that starts a block of its own, so a paragraph stops before it. */
+function startsBlock(trimmed: string): boolean {
+  return (
+    trimmed.startsWith('```') ||
+    HEADING.test(trimmed) ||
+    BULLET.test(trimmed) ||
+    NUMBERED.test(trimmed) ||
+    trimmed.startsWith('> ') ||
+    trimmed === '---' ||
+    trimmed === '***'
+  );
 }
 
-/** Parse markdown blocks. */
-function parseBlocks(markdown: string): React.ReactNode[] {
-  const lines = markdown.split('\n');
-  const blocks: React.ReactNode[] = [];
+function blocks(markdown: string): ReactNode[] {
+  const lines = markdown.replace(/\r\n/g, '\n').split('\n');
+  const out: ReactNode[] = [];
   let i = 0;
 
   while (i < lines.length) {
-    const line = lines[i];
-    if (!line) {
-      i++;
+    const trimmed = (lines[i] ?? '').trim();
+    const key = out.length;
+
+    if (trimmed === '') {
+      i += 1;
       continue;
     }
-    const trimmed = line.trim();
 
-    // Code block
+    // Fenced code: everything up to the closing fence, blank lines included.
     if (trimmed.startsWith('```')) {
-      const lang = trimmed.slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length) {
-        const nextLine = lines[i];
-        if (!nextLine || nextLine.trim().startsWith('```')) break;
-        codeLines.push(nextLine);
-        i++;
+      const code: string[] = [];
+      i += 1;
+      while (i < lines.length && !(lines[i] ?? '').trim().startsWith('```')) {
+        code.push(lines[i] ?? '');
+        i += 1;
       }
-      const code = codeLines.join('\n');
-      blocks.push(
-        <pre key={blocks.length} className="bg-line/50 rounded-xl p-4 overflow-x-auto my-2">
-          <code className={`language-${lang || 'text'} text-sm font-mono`}>{escapeHtml(code)}</code>
-        </pre>
+      i += 1;
+      out.push(
+        <pre key={key} className="my-2 overflow-x-auto rounded-xl bg-line/50 p-3">
+          <code className="font-mono text-[0.85em]">{code.join('\n')}</code>
+        </pre>,
       );
-      i++;
       continue;
     }
 
-    // Headings
-    const headingMatch = trimmed.match(/^(#{1,3})\s+(.+)$/);
-    if (headingMatch && headingMatch[1] && headingMatch[2]) {
-      const level = headingMatch[1].length;
-      const text = headingMatch[2];
-      blocks.push(
-        <Fragment key={blocks.length}>
-          <h1 className={`font-semibold my-3 ${level === 1 ? 'text-xl' : level === 2 ? 'text-lg' : 'text-base'}`}>
-            {parseInline(text)}
-          </h1>
-        </Fragment>
+    const heading = HEADING.exec(trimmed);
+    if (heading !== null) {
+      // Headings inside a reply are styled, not page headings: the page already has its own.
+      out.push(
+        <p key={key} className={`mb-1 mt-3 font-semibold ${heading[1]!.length <= 2 ? 'text-base' : 'text-sm'}`}>
+          {inline(heading[2]!)}
+        </p>,
       );
-      i++;
+      i += 1;
       continue;
     }
 
-    // Unordered list
-    if (trimmed.startsWith('- ') || trimmed.startsWith('* ')) {
+    if (BULLET.test(trimmed) || NUMBERED.test(trimmed)) {
+      const ordered = NUMBERED.test(trimmed);
+      const pattern = ordered ? NUMBERED : BULLET;
       const items: string[] = [];
       while (i < lines.length) {
-        const nextLine = lines[i];
-        if (!nextLine || (!nextLine.trim().startsWith('- ') && !nextLine.trim().startsWith('* '))) break;
-        items.push(nextLine.trim().slice(2));
-        i++;
+        const match = pattern.exec((lines[i] ?? '').trim());
+        if (match === null) break;
+        items.push(match[1] ?? '');
+        i += 1;
       }
-      blocks.push(
-        <ul key={blocks.length} className="list-disc list-inside space-y-1 my-2 ml-4">
-          {items.map((item, idx) => (
-            <li key={idx} className="text-sm">{parseInline(item)}</li>
+      const List = ordered ? 'ol' : 'ul';
+      out.push(
+        <List key={key} className={`my-2 space-y-1 pl-5 ${ordered ? 'list-decimal' : 'list-disc'}`}>
+          {items.map((item, index) => (
+            <li key={index}>{inline(item)}</li>
           ))}
-        </ul>
+        </List>,
       );
       continue;
     }
 
-    // Ordered list
-    const orderedMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
-    if (orderedMatch && orderedMatch[1] && orderedMatch[2]) {
-      const items: string[] = [];
-      let expectedNum = parseInt(orderedMatch[1], 10);
-      while (i < lines.length) {
-        const nextLine = lines[i];
-        if (!nextLine) break;
-        const match = nextLine.trim().match(/^(\d+)\.\s+(.+)$/);
-        if (!match || !match[1] || !match[2] || parseInt(match[1], 10) !== expectedNum) break;
-        items.push(match[2]);
-        expectedNum++;
-        i++;
-      }
-      blocks.push(
-        <ol key={blocks.length} className="list-decimal list-inside space-y-1 my-2 ml-4">
-          {items.map((item, idx) => (
-            <li key={idx} className="text-sm">{parseInline(item)}</li>
-          ))}
-        </ol>
-      );
-      continue;
-    }
-
-    // Blockquote
     if (trimmed.startsWith('> ')) {
-      const quoteLines: string[] = [];
-      while (i < lines.length) {
-        const nextLine = lines[i];
-        if (!nextLine || !nextLine.trim().startsWith('> ')) break;
-        quoteLines.push(nextLine.trim().slice(2));
-        i++;
+      const quote: string[] = [];
+      while (i < lines.length && (lines[i] ?? '').trim().startsWith('> ')) {
+        quote.push((lines[i] ?? '').trim().slice(2));
+        i += 1;
       }
-      blocks.push(
-        <blockquote key={blocks.length} className="border-l-2 border-accent pl-4 my-2 italic text-muted">
-          {quoteLines.map((q, idx) => (
-            <p key={idx} className="text-sm">{parseInline(q)}</p>
-          ))}
-        </blockquote>
+      out.push(
+        <blockquote key={key} className="my-2 border-l-2 border-accent pl-3 text-muted">
+          {inline(quote.join(' '))}
+        </blockquote>,
       );
       continue;
     }
 
-    // Horizontal rule
     if (trimmed === '---' || trimmed === '***') {
-      blocks.push(<hr key={blocks.length} className="my-4 border-line" />);
-      i++;
+      out.push(<hr key={key} className="my-3 border-line" />);
+      i += 1;
       continue;
     }
 
-    // Paragraph
-    if (trimmed) {
-      const paragraphLines: string[] = [trimmed];
-      i++;
-      while (i < lines.length) {
-        const nextLine = lines[i];
-        if (!nextLine) break;
-        const nextTrimmed = nextLine.trim();
-        if (!nextTrimmed) break;
-        if (nextTrimmed.startsWith('```') || nextTrimmed.match(/^#{1,3}\s/) || nextTrimmed.startsWith('- ') || nextTrimmed.startsWith('* ') || nextTrimmed.match(/^\d+\.\s/) || nextTrimmed.startsWith('> ') || nextTrimmed === '---' || nextTrimmed === '***') break;
-        paragraphLines.push(nextTrimmed);
-        i++;
-      }
-      blocks.push(
-        <p key={blocks.length} className="my-2 text-sm leading-relaxed">
-          {parseInline(paragraphLines.join(' '))}
-        </p>
-      );
-      continue;
+    const paragraph: string[] = [trimmed];
+    i += 1;
+    while (i < lines.length) {
+      const next = (lines[i] ?? '').trim();
+      if (next === '' || startsBlock(next)) break;
+      paragraph.push(next);
+      i += 1;
     }
-
-    // Empty line
-    i++;
+    out.push(
+      <p key={key} className="my-2 leading-relaxed">
+        {inline(paragraph.join(' '))}
+      </p>,
+    );
   }
 
-  return blocks;
+  return out;
 }
 
 export function Markdown({ content, className = '' }: { content: string; className?: string }) {
-  const nodes = useMemo(() => parseBlocks(content), [content]);
-
-  return <div className={`prose prose-sm max-w-none ${className}`}>{nodes}</div>;
+  const nodes = useMemo(() => blocks(content), [content]);
+  return <div className={`min-w-0 wrap-anywhere [&>:first-child]:mt-0 [&>:last-child]:mb-0 ${className}`}>{nodes}</div>;
 }

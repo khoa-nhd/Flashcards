@@ -236,6 +236,25 @@ describe('True Mastery', () => {
     expect(result.modes[0]!.effectiveEvidence).toBeLessThan(2);
   });
 
+  it('counts answers as the server sends them, without a request id', () => {
+    // The practice history endpoint returns one row per stored answer and no request id.
+    const fromServer = (sessionId: string, reviewedAt: string, correct: boolean): PracticeAnswer => {
+      const row = makeAnswer({ sessionId, reviewedAt, correct });
+      delete row.requestId;
+      return row;
+    };
+    const answers = [
+      fromServer('11111111-1111-4111-8111-111111111111', '2026-10-10T10:00:00Z', true),
+      fromServer('11111111-1111-4111-8111-111111111111', '2026-10-10T10:01:00Z', false),
+      fromServer('22222222-2222-4222-8222-222222222222', '2026-10-11T09:00:00Z', true),
+    ];
+    const result = calculateTrueMastery(answers, TODAY, defaultConfig);
+    expect(result.mastery).not.toBeNull();
+    expect(result.coverage).not.toBe('insufficient');
+    expect(result.modes[0]!.correctAnswers).toBe(2);
+    expect(result.modes[0]!.incorrectAnswers).toBe(1);
+  });
+
   it('evidence coverage labels are correct', () => {
     expect(getEvidenceCoverageLabel('insufficient')).toBe('Insufficient data');
     expect(getEvidenceCoverageLabel('low')).toBe('Low evidence');

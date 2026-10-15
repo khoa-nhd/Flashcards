@@ -17,7 +17,6 @@ import {
   type SessionEvent,
   type SessionState,
 } from './session-machine.js';
-import { enqueueReviewAction, enqueueReviewUndo, type MutationQueue, type ReviewActionMutation, type ReviewUndoMutation, getGlobalTestMode } from './mutation-queue.js';
 
 export interface SessionController {
   getState(): SessionState;
@@ -69,8 +68,6 @@ export function createSessionController(
   api: Pick<ReviewApi, 'fetchQueue' | 'submitAction' | 'undoAction'>,
   /** Called once an answer is confirmed as saved, so other views know their data has changed. */
   onSaved: () => void = () => {},
-  /** Optional mutation queue for offline-first persistence. If not provided, falls back to direct API calls. */
-  mutationQueue?: MutationQueue,
 ): SessionController {
   let state = initialSessionState;
   let loadSequence = 0;
@@ -179,112 +176,52 @@ export function createSessionController(
     return true;
   };
 
-  // Mutation queue handlers - these execute the actual API calls
-  const executeReviewAction = async (payload: ReviewActionMutation['payload']): Promise<unknown> => {
-    const card = state.cards.find((c) => c.id === payload.pageId);
-    if (!card) {
-      throw new Error('Card no longer in queue');
-    }
-    const response = await api.submitAction({
-      pageId: card.id,
-      action: payload.action,
-      expected: { mastery: card.mastery, nextReview: card.nextReview },
-      requestId: payload.requestId,
-      durationMs: payload.durationMs,
-      sessionId: payload.sessionId,
-      ...(payload.focus == null ? {} : { focus: payload.focus }),
-      ...(payload.confidence === null ? {} : { confidence: payload.confidence }),
-    });
-    return response;
-  };
-
-  const executeReviewUndo = async (payload: ReviewUndoMutation['payload']): Promise<unknown> => {
-    const response = await api.undoAction({
-      reviewRequestId: payload.reviewRequestId,
-      requestId: payload.requestId,
-    });
-    return response;
-  };
-
-  // Register handlers if mutation queue is provided and not in test mode
-  const inTestMode = getGlobalTestMode();
-  if (mutationQueue && !inTestMode) {
-    mutationQueue.registerHandler<ReviewActionMutation['payload']>('review_action', executeReviewAction);
-    mutationQueue.registerHandler<ReviewUndoMutation['payload']>('review_undo', executeReviewUndo);
-  }
-
+  /**
+   * Sends one answer and reports back to the machine whatever happens: the
+   * session waits on `saving` until it hears, so every path here must end in
+   * SAVE_SETTLED, SAVE_CONFLICT or SAVE_FAILED.
+   */
   const save = async (attempt: PendingAnswer) => {
     const card = state.cards[attempt.index];
     if (card === undefined) {
       dispatch({ type: 'SAVE_FAILED', requestId: attempt.requestId, message: 'That card is no longer in the queue.' });
       return;
     }
-
-    if (mutationQueue && !inTestMode) {
-      // Enqueue for background sync - UI already updated optimistically
-      await enqueueReviewAction(mutationQueue, {
+    const done = startTiming('review.save');
+    try {
+      const response = await api.submitAction({
         pageId: card.id,
         action: attempt.action,
         expected: { mastery: card.mastery, nextReview: card.nextReview },
         requestId: attempt.requestId,
         durationMs: attempt.durationMs,
         sessionId,
-        confidence: attempt.confidence,
-        focus,
+        ...(focus == null ? {} : { focus }),
+        ...(attempt.confidence === null ? {} : { confidence: attempt.confidence }),
       });
-      // The mutation queue will handle retry, conflict, etc. via its own logic
-      // We still call onSaved to mark vocabulary as stale for other views
+      const undoable = response.outcome !== 'dry_run' && state.meta?.capabilities.undo === true;
+      dispatch({ type: 'SAVE_SETTLED', requestId: attempt.requestId, undoable });
       onSaved();
-    } else {
-      // Direct API call (for tests or non-queue mode)
-      const done = startTiming('review.save');
-      try {
-        const response = await api.submitAction({
-          pageId: card.id,
-          action: attempt.action,
-          expected: { mastery: card.mastery, nextReview: card.nextReview },
-          requestId: attempt.requestId,
-          durationMs: attempt.durationMs,
-          sessionId,
-          ...(focus == null ? {} : { focus }),
-          ...(attempt.confidence === null ? {} : { confidence: attempt.confidence }),
-        });
-        const undoable = response.outcome !== 'dry_run' && state.meta?.capabilities.undo === true;
-        dispatch({ type: 'SAVE_SETTLED', requestId: attempt.requestId, undoable });
-        onSaved();
-      } catch (error) {
-        if (error instanceof ApiError && error.code === 'conflict') {
-          dispatch({ type: 'SAVE_CONFLICT', requestId: attempt.requestId, message: error.message });
-        } else {
-          dispatch({ type: 'SAVE_FAILED', requestId: attempt.requestId, message: messageOf(error) });
-        }
-      } finally {
-        done();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'conflict') {
+        dispatch({ type: 'SAVE_CONFLICT', requestId: attempt.requestId, message: error.message });
+      } else {
+        dispatch({ type: 'SAVE_FAILED', requestId: attempt.requestId, message: messageOf(error) });
       }
+    } finally {
+      done();
     }
   };
 
   const runUndo = async (reviewRequestId: string) => {
     if (undoRequest?.of !== reviewRequestId) undoRequest = { of: reviewRequestId, requestId: newRequestId() };
-
-    // In test mode, use direct API calls to maintain test compatibility
-    const inTestMode = getGlobalTestMode();
-
-    if (mutationQueue && !inTestMode) {
-      await enqueueReviewUndo(mutationQueue, {
-        reviewRequestId,
-        requestId: undoRequest.requestId,
-      });
+    try {
+      await api.undoAction({ reviewRequestId, requestId: undoRequest.requestId });
+      dispatch({ type: 'UNDO_SUCCEEDED' });
       onSaved();
-    } else {
-      try {
-        await api.undoAction({ reviewRequestId, requestId: undoRequest.requestId });
-        dispatch({ type: 'UNDO_SUCCEEDED' });
-        onSaved();
-      } catch (error) {
-        const final = error instanceof ApiError && UNDO_IS_OVER.has(error.code);
-        dispatch({ type: 'UNDO_FAILED', message: messageOf(error), final });
-      }
+    } catch (error) {
+      const final = error instanceof ApiError && UNDO_IS_OVER.has(error.code);
+      dispatch({ type: 'UNDO_FAILED', message: messageOf(error), final });
     }
   };
 

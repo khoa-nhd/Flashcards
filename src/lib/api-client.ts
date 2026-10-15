@@ -276,6 +276,63 @@ async function request<T>(path: string, schema: ZodType<T> | null, init: CallOpt
   }
 }
 
+/**
+ * A POST answered with a stream of server-sent events. A refusal before the
+ * stream starts arrives as an ordinary JSON error. The timeout covers reaching
+ * the server, not the length of the reply, which may take longer to stream.
+ */
+async function openStream(path: string, body: unknown, timeoutMs: number, auth: ApiAuth | null): Promise<ReadableStream<Uint8Array>> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  const send = (token: string | null) =>
+    fetch(path, {
+      method: 'POST',
+      credentials: 'same-origin',
+      signal: controller.signal,
+      headers: {
+        Accept: 'text/event-stream',
+        'Content-Type': 'application/json',
+        ...(token === null ? {} : { Authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify(body),
+    });
+  const signedOut = () => {
+    auth?.onRejected();
+    return new ApiError('unauthorized', SIGNED_OUT_MESSAGE, 401);
+  };
+
+  let response: Response;
+  try {
+    let token = auth === null ? null : await auth.token();
+    if (auth !== null && token === null) throw signedOut();
+    response = await send(token);
+    // Refused before anything was done, so asking again with a renewed token cannot send the message twice.
+    if (auth !== null && response.status === 401) {
+      token = await auth.token({ forceRefresh: true });
+      if (token === null) throw signedOut();
+      response = await send(token);
+      if (response.status === 401) throw signedOut();
+    }
+  } catch (cause) {
+    if (cause instanceof ApiError) throw cause;
+    if (controller.signal.aborted) throw new ApiError('timeout', 'The server did not answer in time. Try again.');
+    throw new ApiError('network', 'Could not reach the server. Check your connection.');
+  } finally {
+    clearTimeout(timer);
+  }
+
+  if (!response.ok) {
+    const error = apiErrorSchema.safeParse(await response.json().catch(() => null));
+    throw new ApiError(
+      error.success ? error.data.error.code : 'http_error',
+      error.success ? error.data.error.message : `The server responded with an error (${response.status}).`,
+      response.status,
+    );
+  }
+  if (response.body === null) throw new ApiError('invalid_response', 'The server sent an empty reply.', response.status);
+  return response.body;
+}
+
 const SAVE_TIMEOUT_MESSAGE =
   'No confirmation arrived in time, so this change may or may not be saved. Check the word before trying again.';
 
@@ -521,7 +578,7 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
     // AI Chat
     listConversations: (limit, offset) =>
       call(
-        `/api/ai/conversations${new URLSearchParams({ limit: String(limit ?? 50), offset: String(offset ?? 0) })}`,
+        `/api/ai/conversations?${new URLSearchParams({ limit: String(limit ?? 50), offset: String(offset ?? 0) })}`,
         aiConversationListResponseSchema,
         {
           method: 'GET',
@@ -531,16 +588,16 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
       ),
 
     createConversation: (mode, title) =>
-      call('/api/ai/conversations', aiConversationSchema, {
+      call('/api/ai/conversations', z.object({ conversation: aiConversationSchema }), {
         method: 'POST',
         body: { mode, title },
         timeoutMs: TIMEOUTS.actionMs,
         timeoutMessage: 'Creating conversation took too long.',
-      }),
+      }).then((response) => response.conversation),
 
     getConversation: (id, limit, offset) =>
       call(
-        `/api/ai/conversations/${encodeURIComponent(id)}${new URLSearchParams({ limit: String(limit ?? 200), offset: String(offset ?? 0) })}`,
+        `/api/ai/conversations/${encodeURIComponent(id)}?${new URLSearchParams({ limit: String(limit ?? 200), offset: String(offset ?? 0) })}`,
         z.object({ conversation: aiConversationSchema, messages: z.array(aiMessageSchema) }),
         {
           method: 'GET',
@@ -565,16 +622,7 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
       }),
 
     sendMessage: (id, content) =>
-      call(
-        `/api/ai/conversations/${encodeURIComponent(id)}/messages`,
-        null,
-        {
-          method: 'POST',
-          body: { content },
-          timeoutMs: 120000, // Longer timeout for streaming
-          timeoutMessage: 'Message generation timed out.',
-        },
-      ).then((response) => response as unknown as ReadableStream<Uint8Array>),
+      openStream(`/api/ai/conversations/${encodeURIComponent(id)}/messages`, { content }, TIMEOUTS.queueMs, auth),
   };
 }
 

@@ -1,603 +1,460 @@
 /**
- * General AI Chat page: conversation list, message thread, and composer.
+ * AI Chat: the conversation list and one conversation's thread. On a phone
+ * they take turns on screen: the list until a conversation is opened, then the
+ * thread with a way back. On a wider screen they sit side by side.
  */
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import type { AiConversation, AiMessage, AiMode } from '../../shared/api.js';
 import { useApp } from '../app-context.js';
-import { Spinner } from '../components/Spinner.js';
-import { Icon } from '../components/Icon.js';
-import { ROUTES, navigate, useLocation, buildHref } from '../lib/router.js';
-import type { AiConversation, AiMessage, AiStreamChunk } from '../lib/api-client.js';
-import type { AiMode } from '../../shared/api.js';
-import { Markdown } from '../components/Markdown.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { Icon } from '../components/Icon.js';
+import { Markdown } from '../components/Markdown.js';
+import { Spinner } from '../components/Spinner.js';
+import { BUTTON_PRIMARY } from '../components/ui.js';
+import { ApiError } from '../lib/api-client.js';
+import { readChatStream } from '../lib/chat-stream.js';
+import { buildHref, navigate, ROUTES, useLocation } from '../lib/router.js';
 
-const MESSAGE_MAX_CHARS = 32000;
-const COMPOSER_MIN_HEIGHT = 56;
-const COMPOSER_MAX_HEIGHT = 200;
+/** The server's default limit for one message. */
+const MESSAGE_MAX_CHARS = 4000;
+
+const MODE_LABEL: Record<AiMode, string> = {
+  general: 'General',
+  vocabulary_expert: 'Vocabulary Expert',
+};
+
+const MODE_HINT: Record<AiMode, string> = {
+  general: 'Ask anything: writing, translation, grammar, or just chat.',
+  vocabulary_expert: 'Ask about an English word or phrase for its meaning, examples, collocations and common mistakes.',
+};
+
+const messageOf = (error: unknown, fallback: string) => (error instanceof ApiError ? error.message : fallback);
+
+const isMode = (value: string | null): value is AiMode => value === 'general' || value === 'vocabulary_expert';
+
+interface ListError {
+  message: string;
+  /** The server has no AI settings, so nothing here can work until it does. */
+  unavailable: boolean;
+}
+
+const listError = (error: unknown, fallback: string): ListError => ({
+  message: messageOf(error, fallback),
+  unavailable: error instanceof ApiError && error.code === 'ai_unavailable',
+});
+
+/** The opened conversation, tagged with the id it was loaded for so a late answer never lands on another. */
+interface Thread {
+  id: string;
+  conversation: AiConversation | null;
+  messages: AiMessage[];
+  error: string | null;
+}
 
 export function ChatPage() {
   const { api } = useApp();
-  const location = useLocation();
-  const conversationId = location.query.get('conversation');
-  const modeFromQuery = location.query.get('mode');
-  const initialMode = (modeFromQuery === 'general' || modeFromQuery === 'vocabulary_expert') ? modeFromQuery : 'general';
+  const { query } = useLocation();
+  const conversationId = query.get('conversation');
+  const queryMode = query.get('mode');
 
-  const [mode, setMode] = useState<AiMode>(initialMode);
-  const [conversations, setConversations] = useState<AiConversation[]>([]);
-  const [messages, setMessages] = useState<AiMessage[]>([]);
-  const [currentConversation, setCurrentConversation] = useState<AiConversation | null>(null);
-  const [composerValue, setComposerValue] = useState('');
-  const [composerHeight, setComposerHeight] = useState(COMPOSER_MIN_HEIGHT);
-  const [isLoading, setIsLoading] = useState(false);
-  const [isStreaming, setIsStreaming] = useState(false);
-  const [streamError, setStreamError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [confirmDelete, setConfirmDelete] = useState<{ id: string; title: string } | null>(null);
+  const [conversations, setConversations] = useState<AiConversation[] | null>(null);
+  const [listProblem, setListProblem] = useState<ListError | null>(null);
+  const [thread, setThread] = useState<Thread | null>(null);
+  const [draft, setDraft] = useState('');
+  const [sending, setSending] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<AiConversation | null>(null);
+  const [deleting, setDeleting] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const composerRef = useRef<HTMLTextAreaElement>(null);
-  const messagesContainerRef = useRef<HTMLDivElement>(null);
-  const userHasScrolledRef = useRef(false);
+  const composer = useRef<HTMLTextAreaElement>(null);
+  const messagesEnd = useRef<HTMLDivElement>(null);
 
-  // Load conversations on mount
-  useEffect(() => {
-    loadConversations();
-  }, []);
-
-  // Load conversation when ID changes
-  useEffect(() => {
-    if (conversationId) {
-      loadConversation(conversationId);
-    } else {
-      setCurrentConversation(null);
-      setMessages([]);
-    }
-  }, [conversationId]);
-
-  // Auto-scroll to bottom when new messages arrive (unless user scrolled up)
-  useEffect(() => {
-    if (!userHasScrolledRef.current && messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, isStreaming]);
-
-  // Handle composer height
-  const adjustComposerHeight = useCallback(() => {
-    if (!composerRef.current) return;
-    const textarea = composerRef.current;
-    textarea.style.height = 'auto';
-    const newHeight = Math.min(Math.max(textarea.scrollHeight, COMPOSER_MIN_HEIGHT), COMPOSER_MAX_HEIGHT);
-    textarea.style.height = `${newHeight}px`;
-    setComposerHeight(newHeight);
-  }, []);
-
-  // Track scroll position for auto-scroll behavior
-  const handleMessagesScroll = useCallback(() => {
-    if (!messagesContainerRef.current) return;
-    const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50;
-    userHasScrolledRef.current = !isAtBottom;
-  }, []);
+  const loaded = thread !== null && thread.id === conversationId ? thread : null;
+  const current = loaded?.conversation ?? null;
+  // An open conversation decides the mode; otherwise the address does.
+  const mode: AiMode = current?.mode ?? (isMode(queryMode) ? queryMode : 'general');
 
   const loadConversations = async () => {
     try {
       const response = await api.listConversations(50, 0);
-      setConversations(response.conversations.filter(c => c.mode === mode));
+      setConversations(response.conversations);
+      setListProblem(null);
     } catch (error) {
-      console.error('Failed to load conversations:', error);
+      setListProblem(listError(error, 'Could not load your conversations.'));
     }
   };
 
-  const loadConversation = async (id: string) => {
-    setIsLoading(true);
-    setStreamError(null);
-    try {
-      const response = await api.getConversation(id, 200, 0);
-      if (response.conversation.mode !== mode) {
-        setCurrentConversation(null);
-        setMessages([]);
-        return;
-      }
-      setCurrentConversation(response.conversation);
-      setMessages(response.messages);
-      userHasScrolledRef.current = false;
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
-      setStreamError('Failed to load conversation');
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleNewConversation = async () => {
-    const response = await api.createConversation(mode, 'New conversation');
-    const newId = response.id;
-    navigate(buildHref(ROUTES.chat, { conversation: newId, mode }));
-    setConversations([response, ...conversations]);
-  };
-
-  const handleDeleteConversation = async (id: string, title: string) => {
-    setConfirmDelete({ id, title });
-  };
-
-  const confirmDeleteConversation = async () => {
-    if (!confirmDelete) return;
-    await api.deleteConversation(confirmDelete.id);
-    setConversations((prev) => prev.filter((c) => c.id !== confirmDelete.id));
-    if (currentConversation?.id === confirmDelete.id) {
-      navigate(ROUTES.chat);
-    }
-    setConfirmDelete(null);
-  };
-
-  const handleSend = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!composerValue.trim() || isStreaming || !currentConversation) return;
-
-    const content = composerValue.trim();
-    setComposerValue('');
-    adjustComposerHeight();
-
-    // Optimistically add user message
-    const tempUserMessage: AiMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content,
-      metadata: {},
-      createdAt: new Date().toISOString(),
+  useEffect(() => {
+    let active = true;
+    api.listConversations(50, 0).then(
+      (response) => {
+        if (active) setConversations(response.conversations);
+      },
+      (error: unknown) => {
+        if (active) setListProblem(listError(error, 'Could not load your conversations.'));
+      },
+    );
+    return () => {
+      active = false;
     };
-    setMessages((prev) => [...prev, tempUserMessage]);
-    userHasScrolledRef.current = false;
+  }, [api]);
 
-    setIsStreaming(true);
-    setStreamError(null);
+  useEffect(() => {
+    if (conversationId === null) return;
+    let active = true;
+    api.getConversation(conversationId, 200, 0).then(
+      (response) => {
+        if (active) setThread({ id: conversationId, conversation: response.conversation, messages: response.messages, error: null });
+      },
+      (error: unknown) => {
+        if (active) setThread({ id: conversationId, conversation: null, messages: [], error: messageOf(error, 'Could not open this conversation.') });
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [api, conversationId]);
 
-    const assistantMessageId = crypto.randomUUID();
+  // Follow the reply as it arrives.
+  const messageCount = loaded?.messages.length ?? 0;
+  const lastLength = loaded?.messages.at(-1)?.content.length ?? 0;
+  useEffect(() => {
+    messagesEnd.current?.scrollIntoView?.({ block: 'end' });
+  }, [messageCount, lastLength]);
 
+  const open = (id: string | null, nextMode: AiMode = mode) => {
+    setSendError(null);
+    navigate(buildHref(ROUTES.chat, { conversation: id, mode: id === null ? nextMode : null }));
+  };
+
+  const createConversation = async () => {
+    if (creating) return;
+    setCreating(true);
     try {
-      const stream = await api.sendMessage(currentConversation.id, content);
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-      let assistantContent = '';
-      let assistantMetadata: Record<string, unknown> = {};
-
-      // Optimistically add assistant message placeholder
-      setMessages((prev) => [...prev, { id: assistantMessageId, role: 'assistant', content: '', metadata: {}, createdAt: new Date().toISOString() }]);
-      userHasScrolledRef.current = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.slice(6)) as AiStreamChunk;
-            if (data.type === 'delta') {
-              assistantContent += data.delta;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMessageId ? { ...m, content: assistantContent } : m
-                )
-              );
-            } else if (data.type === 'done') {
-              assistantMetadata = data.usage
-                ? { usage: data.usage, finish_reason: data.finishReason }
-                : {};
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === assistantMessageId ? { ...m, metadata: assistantMetadata } : m
-                )
-              );
-            } else if (data.type === 'error') {
-              setStreamError(data.message);
-            }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-      }
-
-      // Update conversation list with latest timestamp
-      setConversations((prev) =>
-        prev.map((c) =>
-          c.id === currentConversation.id ? { ...c, updatedAt: new Date().toISOString() } : c
-        )
-      );
+      const conversation = await api.createConversation(mode, 'New conversation');
+      setConversations((list) => [conversation, ...(list ?? [])]);
+      setListProblem(null);
+      setThread({ id: conversation.id, conversation, messages: [], error: null });
+      open(conversation.id);
     } catch (error) {
-      console.error('Stream error:', error);
-      setStreamError('Failed to send message');
-      // Remove the failed assistant message
-      setMessages((prev) => prev.filter((m) => m.id !== assistantMessageId));
+      setListProblem(listError(error, 'Could not start a conversation.'));
     } finally {
-      setIsStreaming(false);
+      setCreating(false);
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSend(e as unknown as React.FormEvent);
-    }
-  };
-
-  const handleComposerChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    const value = e.target.value.slice(0, MESSAGE_MAX_CHARS);
-    setComposerValue(value);
-    adjustComposerHeight();
-  };
-
-  const copyMessage = async (content: string) => {
-    await navigator.clipboard.writeText(content);
-    // Could show a toast here
-  };
-
-  const handleRetry = () => {
-    if (messages.length === 0) return;
-    const lastAssistantIndex = messages.findLastIndex((m) => m.role === 'assistant');
-    if (lastAssistantIndex === -1) return;
-    // Remove the failed assistant message and re-send the last user message
-    const lastUserMessage = messages.findLast((m) => m.role === 'user');
-    if (!lastUserMessage) return;
-    setMessages((prev) => prev.slice(0, lastAssistantIndex));
-    setComposerValue(lastUserMessage.content);
-    adjustComposerHeight();
-    // Trigger send on next tick
-    setTimeout(() => handleSend({ preventDefault: () => {} } as React.FormEvent), 0);
-  };
-
-  const handleSaveVocabulary = async (assistantMessageContent: string) => {
-    if (!currentConversation) return;
-    
+  const deleteConversation = async () => {
+    if (confirmDelete === null) return;
+    setDeleting({ busy: true, error: null });
     try {
-      const stream = await api.sendMessage(currentConversation.id, `Save this vocabulary analysis: ${assistantMessageContent}`);
-      const reader = stream.getReader();
-      const decoder = new TextDecoder();
-
-      // We just need to confirm the save was successful
-      let confirmed = false;
-      while (!confirmed) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const lines = decoder.decode(value, { stream: true }).split('\n');
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          try {
-            const data = JSON.parse(line.slice(6)) as AiStreamChunk;
-            if (data.type === 'done' || data.type === 'error') {
-              // Save confirmed
-              confirmed = true;
-              break;
-            }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-      }
+      await api.deleteConversation(confirmDelete.id);
+      setConversations((list) => (list ?? []).filter((item) => item.id !== confirmDelete.id));
+      if (conversationId === confirmDelete.id) open(null, confirmDelete.mode);
+      setConfirmDelete(null);
+      setDeleting({ busy: false, error: null });
     } catch (error) {
-      console.error('Failed to save vocabulary:', error);
-      // Could show an error toast here
+      setDeleting({ busy: false, error: messageOf(error, 'Could not delete this conversation.') });
     }
   };
 
+  const updateMessages = (id: string, change: (messages: AiMessage[]) => AiMessage[]) =>
+    setThread((latest) => (latest === null || latest.id !== id ? latest : { ...latest, messages: change(latest.messages) }));
+
+  const send = async () => {
+    const content = draft.trim();
+    if (content === '' || sending || current === null) return;
+    const id = current.id;
+    const now = new Date().toISOString();
+    const question: AiMessage = { id: crypto.randomUUID(), role: 'user', content, metadata: {}, createdAt: now };
+    const answer: AiMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', metadata: {}, createdAt: now };
+    setSending(true);
+    setSendError(null);
+    setDraft('');
+    resizeComposer('');
+    updateMessages(id, (messages) => [...messages, question, answer]);
+
+    let text = '';
+    let failure: string | null = null;
+    try {
+      const stream = await api.sendMessage(id, content);
+      const end = await readChatStream(stream, (delta) => {
+        text += delta;
+        updateMessages(id, (messages) => messages.map((message) => (message.id === answer.id ? { ...message, content: text } : message)));
+      });
+      if (!end.ok) failure = end.message;
+    } catch (error) {
+      failure = messageOf(error, 'Could not send the message.');
+    }
+
+    if (failure !== null) {
+      // Nothing of a failed exchange is kept, so the message goes back into the box to send again.
+      updateMessages(id, (messages) => messages.filter((message) => message.id !== question.id && message.id !== answer.id));
+      setDraft((latest) => (latest === '' ? content : latest));
+      setSendError(failure);
+    } else {
+      // The first message names the conversation; the list shows the new name.
+      void loadConversations();
+    }
+    setSending(false);
+  };
+
+  const resizeComposer = (value: string) => {
+    const box = composer.current;
+    if (box === null) return;
+    box.style.height = 'auto';
+    if (value !== '') box.style.height = `${Math.min(box.scrollHeight, 200)}px`;
+  };
+
+  const onSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    void send();
+  };
+
+  const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+      event.preventDefault();
+      void send();
+    }
+  };
+
+  const shown = (conversations ?? []).filter((conversation) => conversation.mode === mode);
+  const threadOpen = conversationId !== null;
+
   return (
-    <div className="flex h-full flex-col">
-      {/* Mobile header */}
-      <header className="md:hidden flex items-center justify-between gap-2 border-b border-line px-4 py-2">
-        <div className="flex items-center gap-2">
-          <h1 className="text-base font-semibold tracking-tight">AI Chat</h1>
+    <div className="flex h-full min-h-0">
+      <aside
+        aria-label="Conversations"
+        className={`${threadOpen ? 'hidden md:flex' : 'flex'} w-full min-w-0 shrink-0 flex-col border-line md:w-72 md:border-r`}
+      >
+        <div className="flex items-center gap-2 border-b border-line p-3">
+          <label htmlFor="chat-mode" className="sr-only">
+            Assistant
+          </label>
           <select
+            id="chat-mode"
             value={mode}
-            onChange={(e) => {
-              const newMode = e.target.value as AiMode;
-              setMode(newMode);
-              navigate(buildHref(ROUTES.chat, { mode: newMode }));
-            }}
-            className="h-8 cursor-pointer rounded-full border border-line bg-surface px-3 text-sm font-medium text-muted"
+            onChange={(event) => open(null, event.target.value as AiMode)}
+            className="h-10 min-w-0 flex-1 cursor-pointer rounded-xl border border-line bg-surface px-3 text-sm font-medium text-ink"
           >
-            <option value="general">General</option>
-            <option value="vocabulary_expert">Vocabulary Expert</option>
+            <option value="general">{MODE_LABEL.general}</option>
+            <option value="vocabulary_expert">{MODE_LABEL.vocabulary_expert}</option>
           </select>
+          <button
+            type="button"
+            onClick={() => void createConversation()}
+            disabled={creating || listProblem?.unavailable === true}
+            className={`${BUTTON_PRIMARY} shrink-0 px-3`}
+          >
+            {creating ? <Spinner /> : <Icon name="add" className="size-4" />}
+            New
+          </button>
         </div>
-        <button
-          type="button"
-          className="p-2 rounded-lg text-muted hover:bg-line/40"
-          onClick={() => setSidebarOpen(!sidebarOpen)}
-          aria-label={sidebarOpen ? 'Close sidebar' : 'Open sidebar'}
-        >
-          <Icon name={sidebarOpen ? 'left' : 'list'} className="size-5" />
-        </button>
-      </header>
 
-      <div className="flex min-h-0 flex-1">
-        {/* Conversation sidebar */}
-        <aside
-          className={`md:flex md:w-80 shrink-0 flex-col border-r border-line bg-surface/50 transition-transform duration-200 ${
-            sidebarOpen ? 'translate-x-0' : '-translate-x-full'
-          }`}
-          aria-label="Conversations"
-        >
-          <div className="flex items-center justify-between gap-2 p-3 border-b border-line">
-            <div className="flex items-center gap-2">
-              <h2 className="font-semibold text-sm">Conversations</h2>
-              <select
-                value={mode}
-                onChange={(e) => {
-                  const newMode = e.target.value as AiMode;
-                  setMode(newMode);
-                  navigate(buildHref(ROUTES.chat, { mode: newMode }));
-                }}
-                className="h-8 cursor-pointer rounded-full border border-line bg-surface px-3 text-sm font-medium text-muted"
-              >
-                <option value="general">General</option>
-                <option value="vocabulary_expert">Vocabulary Expert</option>
-              </select>
-            </div>
-            <button
-              type="button"
-              onClick={handleNewConversation}
-              className="flex h-8 cursor-pointer items-center gap-1.5 rounded-xl bg-accent px-3 text-sm font-medium text-white dark:text-paper"
-            >
-              <Icon name="add" className="size-4" />
-              <span className="hidden sm:inline">New</span>
-            </button>
-          </div>
-
-          <nav className="flex-1 overflow-y-auto p-2">
-            {conversations.length === 0 ? (
-              <p className="text-center text-sm text-muted py-8">
-                {mode === 'vocabulary_expert' ? 'No vocabulary conversations yet. Ask me about any word!' : 'No conversations yet'}
-              </p>
-            ) : (
-              <ul className="flex flex-col gap-1" role="list">
-                {conversations.map((conv) => (
-                  <li key={conv.id}>
-                    <button
-                      type="button"
-                      onClick={() => navigate(buildHref(ROUTES.chat, { conversation: conv.id }))}
-                      className={`w-full flex items-center justify-between gap-2 rounded-xl px-3 py-2 text-sm font-medium text-left transition ${
-                        currentConversation?.id === conv.id
-                          ? 'bg-accent-soft text-accent'
-                          : 'text-muted hover:bg-line/40 hover:text-ink'
-                      }`}
-                    >
-                      <span className="truncate flex-1">{conv.title || 'Untitled'}</span>
-                      <span className="text-xs text-muted whitespace-nowrap">
-                        {new Date(conv.updatedAt).toLocaleDateString()}
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </nav>
-        </aside>
-
-        {/* Mobile sidebar overlay */}
-        {sidebarOpen && (
-          <div
-            className="md:hidden fixed inset-0 z-40 bg-black/50"
-            onClick={() => setSidebarOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-
-        {/* Main chat area */}
-        <main className="flex min-w-0 flex-1 flex-col md:flex-row">
-          <div className="flex min-w-0 flex-1 flex-col">
-            {/* Conversation header */}
-            <header className="flex items-center justify-between gap-2 border-b border-line px-4 py-2 shrink-0">
-              <div className="flex min-w-0 items-center gap-2">
-                <Icon name="chat" className="size-5 text-accent" />
-                <h1 className="truncate text-base font-semibold tracking-tight">
-                  {currentConversation?.title || 'Select a conversation'}
-                </h1>
-                {currentConversation && (
-                  <span className="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent capitalize">
-                    {currentConversation.mode.replace('_', ' ')}
-                  </span>
-                )}
-              </div>
-              <div className="flex items-center gap-1">
-                {currentConversation && (
-                  <button
-                    type="button"
-                    onClick={() => handleDeleteConversation(currentConversation.id, currentConversation.title)}
-                    className="p-2 rounded-lg text-muted hover:bg-line/40 hover:text-bad"
-                    aria-label="Delete conversation"
-                  >
-                    <Icon name="trash" className="size-4" />
-                  </button>
-                )}
-              </div>
-            </header>
-
-            {/* Messages */}
-            <div
-              ref={messagesContainerRef}
-              onScroll={handleMessagesScroll}
-              className="flex min-h-0 flex-1 flex-col overflow-y-auto px-4 py-4 gap-4"
-            >
-              {isLoading && (
-                <div className="flex items-center justify-center gap-2 text-muted py-8">
-                  <Spinner className="size-5" />
-                  Loading conversation…
-                </div>
-              )}
-
-              {messages.length === 0 && !isLoading && !isStreaming && (
-                <div className="flex flex-1 items-center justify-center text-center px-6">
-                  <div className="max-w-md">
-                    <Icon name="chat" className="mx-auto size-12 text-muted/30 mb-4" />
-                    <h2 className="font-serif text-xl font-semibold mb-2">Start a conversation</h2>
-                    <p className="text-muted text-sm">
-                      {mode === 'vocabulary_expert'
-                        ? 'Ask me about any English word, phrase, or expression — I\'ll give you a detailed analysis with definitions, examples, collocations, and more.'
-                        : 'Ask me anything — programming, math, writing, translation, or just chat.'}
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              {messages.map((msg) => (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  mode={mode}
-                  conversationId={conversationId}
-                  onCopy={() => copyMessage(msg.content)}
-                  onSaveVocabulary={handleSaveVocabulary}
-                />
-              ))}
-
-              {isStreaming && messages.length > 0 && messages[messages.length - 1]?.role === 'assistant' && (
-                <div className="flex items-center gap-2 text-xs text-muted py-2">
-                  <Spinner className="size-4" />
-                  <span>Generating…</span>
-                </div>
-              )}
-
-              {streamError && (
-                <div className="flex items-center justify-center gap-2 text-sm text-bad-ink bg-bad-soft rounded-xl px-3 py-2">
-                  <Icon name="warning" className="size-4 flex-shrink-0" />
-                  <span>{streamError}</span>
-                  <button
-                    type="button"
-                    onClick={handleRetry}
-                    className="ml-2 text-sm font-semibold text-bad-ink hover:underline"
-                  >
-                    Retry
-                  </button>
-                </div>
-              )}
-
-              <div ref={messagesEndRef} />
-            </div>
-
-            {/* Composer */}
-            <form onSubmit={handleSend} className="shrink-0 border-t border-line p-4">
-              <div className="relative">
-                <textarea
-                  ref={composerRef}
-                  value={composerValue}
-                  onChange={handleComposerChange}
-                  onKeyDown={handleKeyDown}
-                  placeholder={isStreaming ? 'Waiting for response…' : mode === 'vocabulary_expert' ? 'Enter a word or phrase to analyze (Enter to send, Shift+Enter for new line)' : 'Message (Enter to send, Shift+Enter for new line)'}
-                  disabled={isStreaming || !currentConversation}
-                  rows={1}
-                  className={`w-full resize-none rounded-2xl border border-line bg-surface px-4 py-3 text-base font-normal transition focus:ring-2 focus:ring-accent/30 focus:border-accent disabled:opacity-50 disabled:cursor-not-allowed ${composerHeight > COMPOSER_MIN_HEIGHT ? 'min-h-[100px]' : ''}`}
-                  style={{ height: `${composerHeight}px` }}
-                  aria-label="Message"
-                />
-                {!isStreaming && currentConversation && composerValue.trim() && (
-                  <button
-                    type="submit"
-                    className="absolute right-2 bottom-2 flex h-8 w-8 items-center justify-center rounded-xl bg-accent text-white disabled:opacity-50"
-                    aria-label="Send message"
-                  >
-                    <Icon name="right" className="size-4" />
-                  </button>
-                )}
-              </div>
-              <p className="mt-2 text-xs text-muted text-center">
-                {composerValue.length} / {MESSAGE_MAX_CHARS}
-              </p>
-            </form>
-          </div>
-        </main>
-      </div>
-
-      {confirmDelete && (
-        <ConfirmDialog
-          onCancel={() => setConfirmDelete(null)}
-          onConfirm={confirmDeleteConversation}
-          title="Delete conversation"
-          children={`Are you sure you want to delete "${confirmDelete?.title}"? This cannot be undone.`}
-          confirmLabel="Delete"
-          tone="danger"
-        />
-      )}
-    </div>
-  );
-}
-
-function MessageBubble({
-  message,
-  onCopy,
-  mode,
-  conversationId,
-  onSaveVocabulary,
-}: {
-  message: AiMessage;
-  onCopy: () => void;
-  mode: AiMode;
-  conversationId: string | null;
-  onSaveVocabulary?: (content: string) => Promise<void>;
-}) {
-  const isUser = message.role === 'user';
-  const isVocabularyExpert = mode === 'vocabulary_expert';
-  const isLastAssistantMessage = !isUser;
-
-  return (
-    <div
-      className={`flex gap-3 ${isUser ? 'flex-row-reverse' : ''}`}
-      data-testid={`message-${message.role}`}
-    >
-      {!isUser && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent-soft text-accent">
-          <Icon name="chat" className="size-4" />
-        </div>
-      )}
-      <div className={`flex-1 min-w-0 ${isUser ? 'text-right' : ''}`}>
-        <div
-          className={`inline-block max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
-            isUser
-              ? 'bg-accent text-white dark:text-paper rounded-tr-sm'
-              : 'bg-surface border border-line rounded-tl-sm'
-          }`}
-        >
-          <Markdown content={message.content} />
-        </div>
-        <div className="flex items-center gap-1.5 mt-1.5 text-xs text-muted">
-          {!isUser && (
-            <>
-              <button
-                type="button"
-                onClick={onCopy}
-                className="p-1 rounded-lg hover:bg-line/40"
-                aria-label="Copy response"
-                title="Copy"
-              >
-                <Icon name="table" className="size-3.5" />
-              </button>
-              {isVocabularyExpert && isLastAssistantMessage && conversationId && onSaveVocabulary && (
-                <button
-                  type="button"
-                  onClick={() => onSaveVocabulary(message.content)}
-                  className="p-1 rounded-lg hover:bg-line/40"
-                  aria-label="Save to Vocabulary Bank"
-                  title="Save to Vocabulary Bank"
-                >
-                  <Icon name="bank" className="size-3.5" />
+        <div className="min-h-0 flex-1 overflow-y-auto p-2">
+          {listProblem !== null ? (
+            <div role="alert" className="m-1 rounded-xl border border-bad/30 bg-bad-soft p-3 text-sm text-bad-ink">
+              <p className="font-semibold">{listProblem.unavailable ? 'AI chat is not set up yet' : 'Something went wrong'}</p>
+              <p className="mt-1">{listProblem.message}</p>
+              {listProblem.unavailable ? (
+                <p className="mt-2 text-xs">
+                  The server needs AI_PROVIDER, AI_MODEL and a key (AI_API_KEY) in its settings, for example in the
+                  Vercel project’s environment variables, and then a new deployment.
+                </p>
+              ) : (
+                <button type="button" onClick={() => void loadConversations()} className="mt-2 cursor-pointer font-semibold underline">
+                  Try again
                 </button>
               )}
-              <time dateTime={message.createdAt}>
-                {new Date(message.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-              </time>
-            </>
+            </div>
+          ) : conversations === null ? (
+            <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted">
+              <Spinner /> Loading conversations…
+            </p>
+          ) : shown.length === 0 ? (
+            <p className="px-3 py-8 text-center text-sm text-muted">No conversations yet. Press New to start one.</p>
+          ) : (
+            <ul className="flex flex-col gap-1">
+              {shown.map((conversation) => (
+                <li key={conversation.id}>
+                  <button
+                    type="button"
+                    onClick={() => open(conversation.id)}
+                    aria-current={conversation.id === conversationId ? 'true' : undefined}
+                    className={`flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
+                      conversation.id === conversationId ? 'bg-accent-soft text-accent' : 'text-ink hover:bg-line/40'
+                    }`}
+                  >
+                    <span className="min-w-0 flex-1 truncate">{conversation.title || 'Untitled'}</span>
+                    <span className="shrink-0 text-xs font-normal text-muted">{new Date(conversation.updatedAt).toLocaleDateString()}</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
-      </div>
-      {isUser && (
-        <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-accent text-white">
-          <Icon name="check" className="size-4" />
+      </aside>
+
+      <section aria-label="Conversation" className={`${threadOpen ? 'flex' : 'hidden md:flex'} min-w-0 flex-1 flex-col`}>
+        <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-line px-2 md:px-4">
+          {threadOpen && (
+            <button
+              type="button"
+              onClick={() => open(null)}
+              aria-label="Back to conversations"
+              className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-line/40 md:hidden"
+            >
+              <Icon name="left" className="size-5" />
+            </button>
+          )}
+          <h2 className="min-w-0 flex-1 truncate text-base font-semibold tracking-tight">
+            {current === null ? (threadOpen ? '' : 'AI Chat') : (conversations?.find((item) => item.id === current.id)?.title ?? current.title)}
+          </h2>
+          {current !== null && (
+            <>
+              <span className="hidden shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent sm:inline">
+                {MODE_LABEL[current.mode]}
+              </span>
+              <button
+                type="button"
+                onClick={() => {
+                  setDeleting({ busy: false, error: null });
+                  setConfirmDelete(current);
+                }}
+                aria-label="Delete conversation"
+                className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-line/40 hover:text-bad"
+              >
+                <Icon name="trash" className="size-4" />
+              </button>
+            </>
+          )}
+        </header>
+
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-3 py-4 md:px-6">
+          {!threadOpen ? (
+            <Intro mode={mode} />
+          ) : loaded === null ? (
+            <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted">
+              <Spinner /> Loading conversation…
+            </p>
+          ) : loaded.error !== null ? (
+            <p role="alert" className="rounded-xl bg-bad-soft px-3 py-2 text-sm text-bad-ink">
+              {loaded.error}
+            </p>
+          ) : loaded.messages.length === 0 ? (
+            <Intro mode={mode} />
+          ) : (
+            loaded.messages.map((message) => (
+              <MessageBubble key={message.id} message={message} pending={sending && message === loaded.messages.at(-1)} />
+            ))
+          )}
+          <div ref={messagesEnd} />
         </div>
+
+        {current !== null && (
+          <form onSubmit={onSubmit} className="shrink-0 border-t border-line p-3 md:px-6">
+            {sendError !== null && (
+              <p role="alert" className="mb-2 rounded-xl bg-bad-soft px-3 py-2 text-sm text-bad-ink">
+                {sendError}
+              </p>
+            )}
+            <div className="flex items-end gap-2">
+              <label htmlFor="chat-message" className="sr-only">
+                Message
+              </label>
+              <textarea
+                id="chat-message"
+                ref={composer}
+                value={draft}
+                rows={1}
+                maxLength={MESSAGE_MAX_CHARS}
+                onChange={(event) => {
+                  setDraft(event.target.value);
+                  resizeComposer(event.target.value);
+                }}
+                onKeyDown={onKeyDown}
+                placeholder={mode === 'vocabulary_expert' ? 'A word or phrase…' : 'Message…'}
+                className="max-h-[200px] min-h-11 min-w-0 flex-1 resize-none rounded-xl border border-line bg-surface px-3 py-2.5 text-base leading-snug text-ink placeholder:text-muted/70"
+              />
+              <button
+                type="submit"
+                disabled={sending || draft.trim() === ''}
+                aria-label="Send message"
+                className={`${BUTTON_PRIMARY} size-11 shrink-0 px-0`}
+              >
+                {sending ? <Spinner /> : <Icon name="right" className="size-5" />}
+              </button>
+            </div>
+            <p className="mt-1.5 hidden text-xs text-muted keyboard:block">Enter to send · Shift+Enter for a new line</p>
+          </form>
+        )}
+      </section>
+
+      {confirmDelete !== null && (
+        <ConfirmDialog
+          title="Delete this conversation?"
+          confirmLabel="Delete"
+          tone="danger"
+          busy={deleting.busy}
+          error={deleting.error}
+          onConfirm={() => void deleteConversation()}
+          onCancel={() => setConfirmDelete(null)}
+        >
+          “{confirmDelete.title}” and all its messages will be deleted. This cannot be undone.
+        </ConfirmDialog>
       )}
     </div>
   );
 }
 
-export { ROUTES, buildHref, navigate } from '../lib/router.js';
+function Intro({ mode }: { mode: AiMode }) {
+  return (
+    <div className="m-auto max-w-sm px-4 py-8 text-center">
+      <Icon name="chat" className="mx-auto mb-3 size-10 text-muted/40" />
+      <p className="font-serif text-lg font-semibold">{MODE_LABEL[mode]}</p>
+      <p className="mt-1 text-sm text-muted">{MODE_HINT[mode]}</p>
+    </div>
+  );
+}
+
+function MessageBubble({ message, pending }: { message: AiMessage; pending: boolean }) {
+  const mine = message.role === 'user';
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(message.content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // Copying can be refused by the browser; the text is still there to select.
+    }
+  };
+
+  return (
+    <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`} data-testid={`message-${message.role}`}>
+      <div className={`flex min-w-0 max-w-[88%] flex-col gap-1 md:max-w-[75%] ${mine ? 'items-end' : 'items-start'}`}>
+        <div
+          className={`min-w-0 max-w-full rounded-2xl px-4 py-2.5 text-sm ${
+            mine ? 'whitespace-pre-wrap wrap-anywhere rounded-br-md bg-accent text-white dark:text-paper' : 'rounded-bl-md border border-line bg-surface'
+          }`}
+        >
+          {mine ? (
+            message.content
+          ) : message.content === '' && pending ? (
+            <span className="flex items-center gap-2 text-muted">
+              <Spinner /> Thinking…
+            </span>
+          ) : (
+            <Markdown content={message.content} />
+          )}
+        </div>
+        {!mine && message.content !== '' && !pending && (
+          <button type="button" onClick={() => void copy()} className="cursor-pointer rounded-lg px-1.5 py-0.5 text-xs text-muted hover:bg-line/40 hover:text-ink">
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}

@@ -33,40 +33,38 @@ export interface UsePracticeStatsReturn {
  * Hook to compute practice statistics per word from practice history.
  * Shows correct/total answers per mode for each word.
  */
+const EMPTY: PracticeAnswer[] = [];
+
 export function usePracticeStats(): UsePracticeStatsReturn {
   const { api } = useApp();
   const { entries, meta } = useVocabulary();
 
-  const [history, setHistory] = useState<PracticeAnswer[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const loadHistory = useCallback(async () => {
-    const today = meta?.today;
-    if (!today) {
-      setHistory([]);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await api.fetchPracticeHistory(null);
-      if (response.available) {
-        setHistory(response.answers);
-      } else {
-        setHistory([]);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load practice history');
-    } finally {
-      setLoading(false);
-    }
-  }, [api, meta?.today]);
+  const today = meta?.today ?? null;
+  const [reloads, setReloads] = useState(0);
+  /** The latest answer, tagged with the load it belongs to so a stale one is never shown as current. */
+  const [result, setResult] = useState<{ key: string; history: PracticeAnswer[]; error: string | null } | null>(null);
+  const key = `${today}:${reloads}`;
 
   useEffect(() => {
-    void loadHistory();
-  }, [loadHistory]);
+    if (today === null) return;
+    let active = true;
+    api.fetchPracticeHistory(null).then(
+      (response) => {
+        if (active) setResult({ key, history: response.available ? response.answers : [], error: null });
+      },
+      (err: unknown) => {
+        if (active) setResult((latest) => ({ key, history: latest?.history ?? [], error: err instanceof Error ? err.message : 'Failed to load practice history' }));
+      },
+    );
+    return () => {
+      active = false;
+    };
+  }, [api, today, key]);
+
+  const history = result?.history ?? EMPTY;
+  const loading = today !== null && result?.key !== key;
+  const error = result?.key === key ? result.error : null;
+  const reload = useCallback(() => setReloads((count) => count + 1), []);
 
   const statsMap = useMemo(() => {
     const map = new Map<string, WordPracticeStats>();
@@ -136,6 +134,6 @@ export function usePracticeStats(): UsePracticeStatsReturn {
     statsMap,
     loading,
     error,
-    reload: loadHistory,
+    reload,
   };
 }

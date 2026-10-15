@@ -2,7 +2,6 @@ import { useEffect, useRef, type ReactNode } from 'react';
 import { ROUTES, type RouteKey } from '../lib/router.js';
 import { Icon, type IconName } from './Icon.js';
 import { Link } from './Link.js';
-import { SyncStatus } from './SyncStatus.js';
 
 interface NavItem {
   route: RouteKey;
@@ -78,7 +77,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex h-dvh">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface/50 p-3 md:flex">
         <div className="flex items-center gap-2 px-3 pb-4 pt-2">
           <span className="font-serif text-lg font-semibold tracking-tight">Vocabulary</span>
@@ -105,9 +104,6 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
             </button>
           </div>
         )}
-        <div className="mt-auto pt-3 border-t border-line px-3">
-          <SyncStatus />
-        </div>
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -121,7 +117,6 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
             )}
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
-            <SyncStatus />
             {SECONDARY.map((item) => (
               <Link
                 key={item.route}
@@ -153,7 +148,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
 
         <nav
           aria-label="Main"
-          className="grid grid-cols-5 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
+          className="grid grid-cols-6 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
         >
           {PRIMARY.map((item) => {
             const current = item.route === section;

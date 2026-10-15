@@ -38,6 +38,7 @@ import type { ReviewService } from './review-service.js';
 import { DatabaseError } from './supabase/supabase-database.js';
 import type { VocabularyService } from './vocabulary-service.js';
 import { type AiService } from './ai-service-impl.js';
+import { AiError, AiErrorCode } from './ai-service.js';
 import { AI_MODES } from './ai-service.js';
 
 export interface AppDependencies {
@@ -96,6 +97,19 @@ function databaseErrorToHttp(error: DatabaseError): HttpError {
   }
 }
 
+/** The status an AI failure is reported with: its own where it is a real HTTP error status. */
+function aiStatus(error: AiError): number {
+  if (error.code === AiErrorCode.CONFIG_MISSING) return 503;
+  return Number.isInteger(error.status) && error.status >= 400 && error.status <= 599 ? error.status : 502;
+}
+
+/** A conversation's name, taken from its first message. */
+function titleFrom(message: string): string {
+  const line = message.trim().split('\n')[0]?.trim() ?? '';
+  const title = line.length > 60 ? `${line.slice(0, 57).trimEnd()}…` : line;
+  return title === '' ? 'New conversation' : title;
+}
+
 async function parseBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
   let raw: unknown;
   try {
@@ -149,6 +163,10 @@ export function createApp({
 
   app.onError((error, c) => {
     if (error instanceof HttpError) return errorResponse(c, error);
+    if (error instanceof AiError) {
+      const headers = error.retryAfter === undefined ? undefined : { 'Retry-After': String(error.retryAfter) };
+      return errorResponse(c, new HttpError(aiStatus(error), error.code, error.message, { headers }));
+    }
     if (error instanceof DatabaseError) {
       // The code says what went wrong without quoting any stored value.
       if (error.failure !== 'unauthorized') {
@@ -536,7 +554,10 @@ export function createApp({
     const offset = Number(c.req.query('offset') ?? '0');
     const conversation = await requireAi(c).getConversation(conversationId);
     if (!conversation) throw new HttpError(404, 'not_found', 'Conversation not found.');
-    const messages = await requireAi(c).listMessages(conversationId, limit, offset);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 500 || !Number.isInteger(offset) || offset < 0) {
+      throw new HttpError(400, 'invalid_request', 'limit must be 1 to 500 and offset 0 or more.');
+    }
+    const messages = await requireAi(c).listMessageRecords(conversationId, limit, offset);
     return c.json({ conversation, messages });
   });
 
@@ -566,29 +587,47 @@ export function createApp({
     const conversation = await ai.getConversation(conversationId);
     if (!conversation) throw new HttpError(404, 'not_found', 'Conversation not found.');
 
-    // Build history
-    const history = await ai.listMessages(conversationId);
-    const context = ai.buildContext(conversationId, conversation.mode, history, content);
+    if (content.trim().length > ai.config.maxInputChars) {
+      throw new HttpError(400, 'message_too_long', `Messages can be at most ${ai.config.maxInputChars} characters.`);
+    }
 
-    // Check rate limits
+    const history = await ai.listMessages(conversationId);
+    const context = ai.buildContext(conversationId, conversation.mode, history, content.trim());
+
+    // Refused before anything is streamed, so the reason arrives as an ordinary error response.
     const limits = await ai.checkRateLimits(conversation.mode);
     ai.enforceRateLimits(limits);
 
-    // Stream response as SSE
-    c.header('Content-Type', 'text/event-stream');
-    c.header('Cache-Control', 'no-store');
-    c.header('Connection', 'keep-alive');
+    // A new conversation is named after its first message.
+    if (history.length === 0 && conversation.title === 'New conversation') {
+      await ai.updateConversationTitle(conversationId, titleFrom(content));
+    }
 
-    const generator = ai.generateResponse(conversationId, context);
-    const readable = new ReadableStream({
+    // Server-sent events, one JSON object each, in the shape the page reads (AiStreamChunk in shared/api.ts):
+    // `delta` pieces of the reply, then `done`, or `error` if it could not be finished.
+    const encoder = new TextEncoder();
+    const event = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
+    const generator = ai.generateResponse(conversationId, context, c.req.raw.signal);
+    const readable = new ReadableStream<Uint8Array>({
       async start(controller) {
+        let usage: unknown = null;
+        let finishReason: string | null = null;
         try {
           for await (const chunk of generator) {
-            const data = `data: ${JSON.stringify(chunk)}\n\n`;
-            controller.enqueue(new TextEncoder().encode(data));
+            if (chunk.delta !== '') controller.enqueue(event({ type: 'delta', delta: chunk.delta }));
+            if (chunk.usage !== null) usage = chunk.usage;
+            if (chunk.finishReason !== null) finishReason = chunk.finishReason;
           }
+          controller.enqueue(event({ type: 'done', usage, finishReason }));
         } catch (error) {
-          controller.error(error);
+          if (error instanceof AiError) {
+            controller.enqueue(event({ type: 'error', code: error.code, message: error.message }));
+          } else {
+            // Unknown failures may carry internals: the log gets the kind, the reader a plain sentence.
+            const kind = error instanceof DatabaseError ? `database ${error.failure}` : error instanceof Error ? error.name : 'non-error';
+            console.error(`AI reply failed: ${kind}`);
+            controller.enqueue(event({ type: 'error', code: 'internal_error', message: 'The reply could not be finished. Try again.' }));
+          }
         } finally {
           controller.close();
         }
@@ -596,12 +635,12 @@ export function createApp({
     });
 
     return new Response(readable, {
-        headers: {
-          'Content-Type': 'text/event-stream',
-          'Cache-Control': 'no-store',
-          Connection: 'keep-alive',
-        },
-      });
+      headers: {
+        'Content-Type': 'text/event-stream; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Accel-Buffering': 'no',
+      },
+    });
   });
 
   // Save vocabulary from Vocabulary Expert response

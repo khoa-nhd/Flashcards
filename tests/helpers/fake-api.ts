@@ -2,6 +2,8 @@
 import { vi } from 'vitest';
 import type {
   AccountSettings,
+  AiConversation,
+  AiMessage,
   AnalyticsResponse,
   DayPlanResponse,
   ImportResponse,
@@ -25,7 +27,6 @@ import { PRACTICE_MASTERY_MAX, STUDY_MODES, judge, practiceMasteryOf, type Study
 import { normalizeWord } from '../../shared/text.js';
 import { ApiError, type AppApi } from '../../src/lib/api-client.js';
 import { TIME_ZONE, TODAY, deferred, pageId, queueResponse, type Deferred } from './fixtures.js';
-import { MutationQueue, type ReviewActionMutation, type ReviewUndoMutation, type PracticeAnswerMutation } from '../../src/lib/mutation-queue.js';
 
 export function entry(n: number, overrides: Partial<VocabularyEntry> = {}): VocabularyEntry {
   return {
@@ -260,42 +261,7 @@ export function createFakeApi({
     ...account,
   };
   let nextId = 500;
-
-  // Create a mutation queue for tests
-  const mutationQueue = new MutationQueue();
-  mutationQueue.setAccountId('test-account');
-
-  // Register handlers for the mutation queue
-  mutationQueue.registerHandler<ReviewActionMutation['payload']>('review_action', async (payload) => {
-    // Call the mock to record the call for test assertions and return its promise
-    const { focus, ...rest } = payload;
-    const apiPayload = {
-      ...rest,
-      confidence: payload.confidence ?? undefined,
-      ...(focus == null ? {} : { focus }),
-    };
-    return api.submitAction(apiPayload);
-  });
-
-  mutationQueue.registerHandler<ReviewUndoMutation['payload']>('review_undo', async () => ({
-    outcome: 'undone',
-    pageId: cards[0]?.id ?? pageId(1),
-    state: { mastery: 3, nextReview: TODAY },
-  }));
-
-  mutationQueue.registerHandler<PracticeAnswerMutation['payload']>('practice_answer', async (payload) => {
-    const found = store.find((item) => item.id === payload.pageId);
-    const judged = found === undefined ? null : judge(payload.mode, found, payload.answer);
-    if (judged === null) throw new ApiError('invalid_request', 'That answer does not fit this study mode.', 400);
-    const key = `${payload.pageId} ${payload.mode}`;
-    return {
-      outcome: 'recorded',
-      correct: judged.correct,
-      typed: judged.typed,
-      expected: judged.expected,
-      modeMastery: practiceMasteryOf((practiceCorrect.get(key) ?? 0) + (judged.correct ? 1 : 0)),
-    };
-  });
+  const chats = new Map<string, { conversation: AiConversation; messages: AiMessage[] }>();
 
   const find = (id: string) => {
     const found = store.find((item) => item.id === id);
@@ -313,7 +279,7 @@ export function createFakeApi({
           : { id: wanted, name: library.collections.find((item) => item.id === wanted)?.name ?? 'Collection' };
       return queueResponse(cards, { focus: options?.focus ?? null, collection, ...queue });
     }),
-    submitAction: vi.fn<AppApi['submitAction']>((_payload) => {
+    submitAction: vi.fn<AppApi['submitAction']>(() => {
       const pending = deferred<ReviewActionResponse>();
       saves.push(pending);
       return pending.promise;
@@ -569,72 +535,53 @@ export function createFakeApi({
       return { ...settings };
     }),
 
-    // ---- AI Chat (mock) ----
-    listConversations: vi.fn<AppApi['listConversations']>(async (limit = 50, offset = 0) => ({
-      conversations: [],
-      limit,
-      offset,
-    })),
-    createConversation: vi.fn<AppApi['createConversation']>(async (mode, title) => ({
-      id: pageId(nextId++),
-      mode,
-      title: title ?? 'New conversation',
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    })),
-    getConversation: vi.fn<AppApi['getConversation']>(async (id, limit = 200, offset = 0) => ({
-      conversation: {
-        id,
-        mode: 'general',
-        title: 'Test conversation',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-      messages: [],
-      limit,
-      offset,
-    })),
-    updateConversation: vi.fn<AppApi['updateConversation']>(async () => {
-      // Mock implementation
+    // ---- AI Chat: kept in memory; a reply repeats the message, sent in awkwardly cut pieces ----
+    listConversations: vi.fn<AppApi['listConversations']>(async () => ({ conversations: [...chats.values()].map((chat) => chat.conversation) })),
+    createConversation: vi.fn<AppApi['createConversation']>(async (mode, title) => {
+      const at = new Date().toISOString();
+      const conversation = { id: pageId(nextId++), mode, title: title ?? 'New conversation', createdAt: at, updatedAt: at };
+      chats.set(conversation.id, { conversation, messages: [] });
+      return conversation;
     }),
-    deleteConversation: vi.fn<AppApi['deleteConversation']>(async () => {
-      // Mock implementation
+    getConversation: vi.fn<AppApi['getConversation']>(async (id) => {
+      const chat = chats.get(id);
+      if (chat === undefined) throw new ApiError('not_found', 'Conversation not found.', 404);
+      return { conversation: chat.conversation, messages: [...chat.messages] };
     }),
-    sendMessage: vi.fn<AppApi['sendMessage']>(async (_id, content) => {
-      const encoder = new TextEncoder();
-      const stream = new ReadableStream<Uint8Array>({
+    updateConversation: vi.fn<AppApi['updateConversation']>(async (id, title) => {
+      const chat = chats.get(id);
+      if (chat !== undefined) chat.conversation = { ...chat.conversation, title };
+    }),
+    deleteConversation: vi.fn<AppApi['deleteConversation']>(async (id) => {
+      chats.delete(id);
+    }),
+    sendMessage: vi.fn<AppApi['sendMessage']>(async (id, content) => {
+      const chat = chats.get(id);
+      if (chat === undefined) throw new ApiError('not_found', 'Conversation not found.', 404);
+      const reply = `You said **${content}**.`;
+      const at = new Date().toISOString();
+      if (chat.messages.length === 0) chat.conversation = { ...chat.conversation, title: content.slice(0, 60) };
+      chat.messages.push(
+        { id: pageId(nextId++), role: 'user', content, metadata: {}, createdAt: at },
+        { id: pageId(nextId++), role: 'assistant', content: reply, metadata: {}, createdAt: at },
+      );
+      const events =
+        `data: ${JSON.stringify({ type: 'delta', delta: reply.slice(0, 5) })}\n\n` +
+        `data: ${JSON.stringify({ type: 'delta', delta: reply.slice(5) })}\n\n` +
+        `data: ${JSON.stringify({ type: 'done', usage: null, finishReason: 'stop' })}\n\n`;
+      const bytes = new TextEncoder().encode(events);
+      // Cut mid-event, as a network may.
+      const cut = Math.floor(bytes.length / 3);
+      return new ReadableStream<Uint8Array>({
         start(controller) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'delta', content })}\n\n`));
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ type: 'done' })}\n\n`));
+          controller.enqueue(bytes.slice(0, cut));
+          controller.enqueue(bytes.slice(cut, cut * 2));
+          controller.enqueue(bytes.slice(cut * 2));
           controller.close();
         },
       });
-      return stream;
     }),
   } satisfies AppApi;
 
-  /** Flushes all pending mutations synchronously for tests. */
-  const flushMutations = async () => {
-    const all = await mutationQueue.getAll();
-    const pending = all.filter((m) => m.status === 'pending' || m.status === 'transient' || m.status === 'syncing');
-    for (const _mutation of pending) {
-      // Find and call the handler
-      // The handlers are registered globally, so we just need to trigger the queue processing
-      // For tests, we can just wait for the queue to process by calling the internal sync
-      // But since we're in a test, let's just wait for the mutation to be marked as synced
-      // The mutation queue processes asynchronously, so we need to wait
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    }
-    // Wait for all pending to become synced
-    let attempts = 0;
-    while (attempts < 100) {
-      const current = await mutationQueue.getAll();
-      const stillPending = current.some((m) => m.status === 'pending' || m.status === 'transient' || m.status === 'syncing');
-      if (!stillPending) break;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-      attempts++;
-    }
-  };
-
-  return { api, saves, store, mutationQueue, flushMutations };
+  return { api, saves, store };
 }

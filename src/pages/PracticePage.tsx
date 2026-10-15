@@ -18,8 +18,7 @@ import {
   type PracticeWord,
   type StudyMode,
 } from '../../shared/study-modes.js';
-import { useApp, useLibrary, useSettings, useVocabulary, useMutationQueue } from '../app-context.js';
-import type { PracticeResponse } from '../../shared/api.js';
+import { useApp, useLibrary, useSettings, useVocabulary } from '../app-context.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { PracticeCard, Verdict, type PracticeVerdict } from '../components/PracticeCards.js';
@@ -27,6 +26,7 @@ import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { useRemote } from '../hooks/useRemote.js';
 import { usePracticeStats, type WordPracticeStats } from '../hooks/usePracticeStats.js';
+import { invalidateAllPracticeHistory } from '../lib/practice-history-cache.js';
 import { ApiError } from '../lib/api-client.js';
 import { count } from '../lib/format.js';
 import { formatDate } from '../components/badges.js';
@@ -34,7 +34,6 @@ import { startTiming } from '../lib/perf.js';
 import { newRequestId } from '../lib/request-id.js';
 import { ROUTES, buildHref, openWord, useLocation } from '../lib/router.js';
 import { SPEECH_LANGUAGES, speechAvailable, type SpeechLanguage } from '../lib/speech.js';
-import { enqueuePracticeAnswer, getGlobalTestMode, type PracticeAnswerMutation, type MutationQueue } from '../lib/mutation-queue.js';
 
 const SOURCES = ['due', 'weak', 'recent', 'all'] as const;
 /** One of the built-in sets, or one collection. */
@@ -99,7 +98,6 @@ interface Run {
  */
 export function PracticePage() {
   const { api, settings: preferences } = useApp();
-  const mutationQueue = useMutationQueue();
   const { speechLang } = useSettings();
   const state = useVocabulary();
   const { query } = useLocation();
@@ -165,18 +163,6 @@ export function PracticePage() {
 
   const silent = mode === 'listening' && !canSpeak;
 
-  // Register mutation handler for practice answers
-  // This runs once per component mount; the queue is shared so we only need to register once.
-  // We use a ref to avoid re-registering on every render.
-  const handlerRegistered = useRef(false);
-  if (!handlerRegistered.current) {
-    handlerRegistered.current = true;
-    mutationQueue.registerHandler<PracticeAnswerMutation['payload']>('practice_answer', async (payload) => {
-      const result = await api.submitPractice(payload);
-      return result;
-    });
-  }
-
   const start = () => {
     if (silent) return;
     const { words } = selectForPractice(mode, sortedCandidates, pool, length, Math.random);
@@ -235,11 +221,11 @@ export function PracticePage() {
       error: null,
     });
     done();
-    void enqueueAndPersist(current, word, given, requestId, durationMs, ticket);
+    void persist(current, word, given, requestId, durationMs, ticket);
   };
 
-  /** Enqueues the practice answer for background sync and updates UI when confirmed. */
-  const enqueueAndPersist = async (
+  /** Sends the answer to be recorded and shows what the server confirmed, or why it could not. */
+  const persist = async (
     current: Run,
     word: PracticeWord,
     given: PracticeAnswer,
@@ -247,12 +233,8 @@ export function PracticePage() {
     durationMs: number,
     ticket: string,
   ) => {
-    // In test mode, use direct API calls to maintain test compatibility
-    const inTestMode = getGlobalTestMode();
-
-    if (!inTestMode) {
-      // Enqueue for background persistence - UI already updated optimistically
-      const mutationId = await enqueuePracticeAnswer(mutationQueue, {
+    try {
+      const result = await api.submitPractice({
         pageId: word.id,
         mode: current.mode,
         answer: given,
@@ -260,12 +242,8 @@ export function PracticePage() {
         sessionId: current.sessionId,
         durationMs,
       });
-
-      // Wait for the mutation to complete (synced or permanent failure)
-      // The mutation queue handler calls api.submitPractice and stores the response
-      const result = await waitForMutationResult(mutationQueue, mutationId, ticket);
-      if (result === null) return; // Ticket expired (user moved to next question)
-
+      // A recorded answer changes True Mastery, which is computed from this history.
+      if (result.outcome !== 'dry_run') invalidateAllPracticeHistory();
       rememberOutcome(current.index, { word, correct: result.correct, recorded: result.outcome !== 'dry_run' });
       if (asked.current !== ticket) return;
       setRun((latest) =>
@@ -283,76 +261,16 @@ export function PracticePage() {
               },
             },
       );
-    } else {
-      // Test mode: direct API call for compatibility
-      try {
-        const result = await api.submitPractice({
-          pageId: word.id,
-          mode: current.mode,
-          answer: given,
-          requestId,
-          sessionId: current.sessionId,
-          durationMs,
-        });
-        rememberOutcome(current.index, { word, correct: result.correct, recorded: result.outcome !== 'dry_run' });
-        if (asked.current !== ticket) return;
-        setRun((latest) =>
-          latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
-            ? latest
-            : {
-                ...latest,
-                error: null,
-                verdict: {
-                  correct: result.correct,
-                  typed: result.typed,
-                  expected: result.expected,
-                  modeMastery: result.modeMastery,
-                  outcome: result.outcome,
-                },
-              },
-        );
-      } catch (cause) {
-        const shown = outcomes.current.get(current.index);
-        rememberOutcome(current.index, { word, correct: shown?.correct ?? false, recorded: false });
-        if (asked.current !== ticket) return;
-        setRun((latest) =>
-          latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
-            ? latest
-            : { ...latest, error: cause instanceof ApiError ? cause.message : 'Could not check that answer.' },
-        );
-      }
+    } catch (cause) {
+      const shown = outcomes.current.get(current.index);
+      rememberOutcome(current.index, { word, correct: shown?.correct ?? false, recorded: false });
+      if (asked.current !== ticket) return;
+      setRun((latest) =>
+        latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
+          ? latest
+          : { ...latest, error: cause instanceof ApiError ? cause.message : 'Could not check that answer.' },
+      );
     }
-  };
-
-  /** Polls the mutation queue until the mutation reaches a terminal state. */
-  const waitForMutationResult = async (
-    queue: MutationQueue,
-    mutationId: string,
-    ticket: string,
-    timeoutMs = 30000,
-  ): Promise<PracticeResponse | null> => {
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      if (asked.current !== ticket) return null; // User moved on
-      const mutations = await queue.getAll();
-      const mutation = mutations.find((m) => m.id === mutationId);
-      if (!mutation) {
-        // Mutation not found (shouldn't happen), wait a bit
-        await new Promise((r) => setTimeout(r, 100));
-        continue;
-      }
-      if (mutation.status === 'synced' && mutation.serverResponse) {
-        return mutation.serverResponse as PracticeResponse;
-      }
-      if (mutation.status === 'permanent') {
-        // Surface permanent error
-        throw new ApiError('permanent_failure', mutation.lastError ?? 'Practice answer was not saved.', 0);
-      }
-      // Still pending/transient/syncing - wait and poll again
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    // Timeout - treat as transient error (queue will retry in background)
-    throw new ApiError('timeout', 'No confirmation arrived in time. The answer may still be saved.', 0);
   };
 
   /** Repeats the answer that failed, with the same request id, so one that did arrive is not recorded twice. */
@@ -363,7 +281,7 @@ export function PracticePage() {
     const ticket = `${run.sessionId}:${run.index}:${run.requestId}`;
     asked.current = ticket;
     setRun({ ...run, error: null });
-    void enqueueAndPersist(run, word, run.given, run.requestId, run.durationMs, ticket);
+    void persist(run, word, run.given, run.requestId, run.durationMs, ticket);
   };
 
   const next = () => {
@@ -512,7 +430,7 @@ export function PracticePage() {
                       ))}
                     </select>
                     <p id="practice-accent-help" className={HELP}>
-                      The word is read by this browser's own voice. Nothing is sent anywhere, and no recording is used,
+                      The word is read by this browser’s own voice. Nothing is sent anywhere, and no recording is used,
                       so how it sounds depends on your device, which may not have a voice for every accent.
                     </p>
                   </div>
