@@ -142,7 +142,7 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
       </p>
 
       <div className="flex min-h-0 flex-1 flex-col py-2">
-        <div className="my-auto">
+        <div className="min-h-0 flex-1 flex items-center justify-center">
           <Flashcard
             key={card.id}
             card={card}
@@ -155,6 +155,7 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
             onGrade={grade}
             onBlockedGrade={showFlipHint}
             flipButtonRef={flipButton}
+            className="max-h-full w-full"
           />
         </div>
       </div>

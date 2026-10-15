@@ -22,6 +22,7 @@ export interface FlashcardProps {
   /** An answer was attempted while the card was still on its front. */
   onBlockedGrade: () => void;
   flipButtonRef?: Ref<HTMLButtonElement>;
+  className?: string;
 }
 
 const ACTION_LABEL: Record<ReviewAction, string> = {
@@ -52,6 +53,7 @@ export function Flashcard({
   onGrade,
   onBlockedGrade,
   flipButtonRef,
+  className,
 }: FlashcardProps) {
   const reducedMotion = useReducedMotion();
 
@@ -94,7 +96,7 @@ export function Flashcard({
     <div
       data-testid="flashcard"
       data-flipped={flipped}
-      className="card-enter relative w-full cursor-pointer touch-pan-y pointer-coarse:select-none"
+      className={`card-enter relative w-full cursor-pointer touch-pan-y pointer-coarse:select-none ${className ?? ''}`}
       style={dragStyle}
       onClick={handleClick}
       {...swipe.handlers}
@@ -108,7 +110,7 @@ export function Flashcard({
               </span>
               {due !== null && <span>{due}</span>}
             </div>
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6 text-center">
+            <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6 text-center overflow-y-auto max-h-full">
               <h2 className="font-serif text-4xl font-semibold tracking-tight wrap-anywhere sm:text-5xl">
                 {card.word}
               </h2>
@@ -137,7 +139,7 @@ export function Flashcard({
               <span className="font-serif text-lg font-semibold wrap-anywhere">{card.word}</span>
             </div>
             {revealed && (
-              <div className="flex flex-1 flex-col justify-center gap-5 py-5">
+              <div className="flex flex-1 flex-col justify-center gap-5 py-5 overflow-y-auto max-h-full">
                 {card.back.map((field) => (
                   <div key={field.key}>
                     <div className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
