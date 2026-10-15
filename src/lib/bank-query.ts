@@ -8,6 +8,7 @@ import { addDays, compareDates, isIsoDate, type IsoDate } from '../../shared/dat
 import { matchesQuery } from '../../shared/text.js';
 import type { ReviewStatus, TextFieldKey } from '../../shared/vocabulary.js';
 import { SORT_KEYS, type SortDirection, type SortKey } from './settings.js';
+import type { TrueMasteryEntry } from '../../hooks/useTrueMastery.js';
 
 /** `learning` is every word that is not yet mastered and has a usable mastery. */
 export const STATUS_FILTERS = ['due_today', 'overdue', 'upcoming', 'mastered', 'learning', 'unscheduled'] as const;
@@ -171,12 +172,21 @@ export function sortEntries(
   entries: readonly VocabularyEntry[],
   sort: SortKey,
   direction: SortDirection,
+  trueMasteryMap?: Map<string, TrueMasteryEntry>,
 ): VocabularyEntry[] {
   const sign = direction === 'asc' ? 1 : -1;
   const byWord = (a: VocabularyEntry, b: VocabularyEntry) => collator.compare(a.word, b.word);
 
   return [...entries].sort((a, b) => {
     if (sort === 'word') return sign * byWord(a, b);
+    if (sort === 'trueMastery') {
+      const tmA = trueMasteryMap?.get(a.id);
+      const tmB = trueMasteryMap?.get(b.id);
+      const masteryA = tmA?.mastery ?? -1;
+      const masteryB = tmB?.mastery ?? -1;
+      if (masteryA === masteryB) return byWord(a, b);
+      return sign * (masteryA - masteryB);
+    }
     const left = a[sort];
     const right = b[sort];
     if (left === null || right === null) {

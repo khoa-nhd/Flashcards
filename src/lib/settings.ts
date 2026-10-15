@@ -5,7 +5,7 @@
 import { z } from 'zod';
 import { DEFAULT_SPEECH_LANGUAGE, SPEECH_LANGUAGES } from './speech.js';
 
-export const SORT_KEYS = ['word', 'dateAdded', 'reviewDate', 'mastery'] as const;
+export const SORT_KEYS = ['word', 'dateAdded', 'reviewDate', 'mastery', 'trueMastery'] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 export type SortDirection = 'asc' | 'desc';
 

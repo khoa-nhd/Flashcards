@@ -32,6 +32,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   dateAdded: 'Date added',
   reviewDate: 'Review date',
   mastery: 'Mastery',
+  trueMastery: 'True Mastery',
 };
 
 function FilterSelect({
@@ -106,7 +107,14 @@ function BankTable({
               Meaning
             </th>
             {header('mastery', 'w-24')}
-            <th scope="col" className="w-32 px-3 py-2 font-medium">True Mastery</th>
+            <th scope="col" className="w-32 px-3 py-2 font-medium">
+              <span className="flex items-center gap-1">
+                {header('trueMastery', 'w-32')}
+                <span className="text-muted" aria-label="True Mastery is an evidence-based estimate (0–100) of how well you know a word, based on your practice history across modes. It is separate from Review Mastery (which drives the schedule) and Practice Mastery (per-mode progress up to 3).">
+                  <span className="text-[0.7rem]">ⓘ</span>
+                </span>
+              </span>
+            </th>
             {header('reviewDate', 'w-40')}
             {header('dateAdded', 'hidden w-32 sm:table-cell')}
           </tr>
@@ -159,6 +167,16 @@ function BankTable({
                             ? 'bg-bad-soft text-bad-ink'
                             : 'bg-line/50 text-muted'
                         }`}
+                        title={
+                          `True Mastery: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
+                          `Evidence: ${trueMastery.coverageLabel} (${trueMastery.totalEffectiveEvidence.toFixed(1)} effective evidence across ${trueMastery.modesWithEvidence} mode${trueMastery.modesWithEvidence === 1 ? '' : 's'})\n` +
+                          (trueMastery.modeStats?.length > 0
+                            ? trueMastery.modeStats
+                                .filter(s => s.total > 0)
+                                .map(s => `${s.mode}: ${s.correct}/${s.total} correct (${Math.round(s.accuracy * 100)}%), ${s.effectiveEvidence.toFixed(1)} evidence`)
+                                .join('\n')
+                            : '')
+                        }
                       >
                         {trueMastery.tier} ({trueMastery.mastery})
                       </span>
@@ -168,7 +186,7 @@ function BankTable({
                     </span>
                   )}
                   {trueMastery && trueMastery.mastery === null && (
-                    <span className="text-xs text-muted">
+                    <span className="text-xs text-muted" title={trueMastery.coverageLabel}>
                       {trueMastery.coverageLabel}
                     </span>
                   )}
@@ -233,6 +251,16 @@ function BankList({ entries, today, trueMasteryMap }: BankListProps) {
                         ? 'bg-bad-soft text-bad-ink'
                         : 'bg-line/50 text-muted'
                     }`}
+                    title={
+                      `True Mastery: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
+                      `Evidence: ${trueMastery.coverageLabel} (${trueMastery.totalEffectiveEvidence.toFixed(1)} effective evidence across ${trueMastery.modesWithEvidence} mode${trueMastery.modesWithEvidence === 1 ? '' : 's'})\n` +
+                      (trueMastery.modeStats?.length > 0
+                        ? trueMastery.modeStats
+                            .filter(s => s.total > 0)
+                            .map(s => `${s.mode}: ${s.correct}/${s.total} correct (${Math.round(s.accuracy * 100)}%), ${s.effectiveEvidence.toFixed(1)} evidence`)
+                            .join('\n')
+                        : '')
+                    }
                   >
                     {trueMastery.tier} ({trueMastery.mastery})
                   </span>
@@ -275,6 +303,9 @@ export function BankPage() {
   const query = useMemo(() => parseBankQuery(location.query, defaults), [location.query, defaults]);
   const today = state.meta?.today ?? null;
 
+  // Use the True Mastery hook early so it's available for sorting
+  const { trueMasteryMap } = useTrueMastery();
+
   // A collection narrows the bank beside its own filters. It is kept in the address like they are.
   const library = useLibrary();
   const collectionId = location.query.get('collection');
@@ -287,11 +318,8 @@ export function BankPage() {
     return collectionId === null ? matching : matching.filter((entry) => members?.has(entry.id) ?? false);
   }, [state.entries, query, collectionId, members]);
   const filtering = hasActiveFilters(query) || collectionId !== null;
-  const sorted = useMemo(() => sortEntries(filtered, query.sort, query.direction), [filtered, query.sort, query.direction]);
+  const sorted = useMemo(() => sortEntries(filtered, query.sort, query.direction, trueMasteryMap), [filtered, query.sort, query.direction, trueMasteryMap]);
   const page = useMemo(() => paginate(sorted, query.page, settings.bankPageSize), [sorted, query.page, settings.bankPageSize]);
-
-  // Use the new True Mastery hook
-  const { trueMasteryMap } = useTrueMastery();
 
   /** Applies a change to the filters or sorting. Anything but a page change starts again at page 1. */
   const update = (patch: Partial<BankQuery>, options: { replace?: boolean; collection?: string | null } = {}) => {

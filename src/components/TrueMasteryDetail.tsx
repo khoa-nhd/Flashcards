@@ -1,4 +1,4 @@
-import { STUDY_MODE_LABELS } from '../../shared/study-modes.js';
+import { STUDY_MODE_LABELS, STUDY_MODES } from '../../shared/study-modes.js';
 import {
   calculateTrueMastery,
   getEvidenceCoverageLabel,
@@ -6,6 +6,7 @@ import {
   type PracticeAnswer,
   type ModeBreakdown,
 } from '../../shared/true-mastery.js';
+import { formatDate, relativeDay } from '../../shared/dates.js';
 
 /** Detailed True Mastery breakdown for a single vocabulary item. */
 export function TrueMasteryDetail({
@@ -19,6 +20,7 @@ export function TrueMasteryDetail({
     ? calculateTrueMastery(answers, today)
     : null;
 
+  // Insufficient data or no answers
   if (!result || result.mastery === null) {
     return (
       <section aria-labelledby="true-mastery-heading" className="flex flex-col gap-2 border-t border-line pt-4">
@@ -39,7 +41,7 @@ export function TrueMasteryDetail({
     );
   }
 
-  const { mastery, coverage } = result;
+  const { mastery, coverage, totalEffectiveEvidence, modesWithEvidence, modes } = result;
 
   const tier = getTrueMasteryTier(mastery);
   const coverageLabel = getEvidenceCoverageLabel(coverage);
@@ -50,6 +52,17 @@ export function TrueMasteryDetail({
   // Find the mode breakdown for a given mode
   const getModeBreakdown = (mode: string): ModeBreakdown | undefined =>
     result.modes.find(m => m.mode === mode);
+
+  // All modes in order
+  const allModes: Array<typeof STUDY_MODES[number]> = ['recognition', 'recall', 'typing', 'cloze', 'listening'];
+
+  // Find the most recent practice activity across all modes
+  const mostRecent = answers
+    .filter(a => a.reviewedOn !== null)
+    .sort((a, b) => b.reviewedAt.localeCompare(a.reviewedAt))[0];
+
+  // Find modes with evidence
+  const modesWithEvidenceSet = new Set(modes.map(m => m.mode));
 
   return (
     <section aria-labelledby="true-mastery-heading" className="flex flex-col gap-2 border-t border-line pt-4">
@@ -77,7 +90,7 @@ export function TrueMasteryDetail({
           </span>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-accent-soft">
+          <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-accent-soft" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mastery} aria-label={`True Mastery ${mastery} out of 100`}>
             <span className="block h-full rounded-full bg-accent" style={{ width: `${mastery}%` }} />
           </div>
         </div>
@@ -85,41 +98,58 @@ export function TrueMasteryDetail({
 
       {/* Confidence/evidence summary */}
       <p className="text-xs text-muted">
-        Based on {result.totalEffectiveEvidence.toFixed(1)} effective evidence across {result.modesWithEvidence} mode{result.modesWithEvidence === 1 ? '' : 's'}.
-        {result.modesWithEvidence > 1 && ` Coverage: {coverageLabel}.`}
+        Based on {totalEffectiveEvidence.toFixed(1)} effective evidence across {modesWithEvidence} mode{modesWithEvidence === 1 ? '' : 's'}.
+        {modesWithEvidence > 1 && ` Coverage: {coverageLabel}.`}
       </p>
+
+      {/* Most recent practice activity */}
+      {mostRecent && (
+        <p className="text-xs text-muted">
+          Most recent: {getModeLabel(mostRecent.mode)} on {formatDate(mostRecent.reviewedOn, 'short')} ({relativeDay(mostRecent.reviewedOn, today ?? '')})
+          {mostRecent.correct ? ' — correct' : ' — incorrect'}
+        </p>
+      )}
 
       {/* Mode breakdown */}
       <div className="grid grid-cols-2 gap-2">
-        {result.modes.map(({ mode, accuracy, effectiveEvidence, lastAttemptedOn }) => {
+        {allModes.map(mode => {
           const breakdown = getModeBreakdown(mode);
-          const confidence = breakdown?.confidence ?? 0;
+          const hasEvidence = !!breakdown && breakdown.totalAnswers > 0;
+
+          if (hasEvidence) {
+            const confidence = breakdown?.confidence ?? 0;
+            const confidencePercent = Math.round(confidence * 100);
+            return (
+              <div key={mode} className="rounded-xl border border-line bg-surface/50 p-3">
+                <div className="flex items-center justify-between gap-2 mb-1">
+                  <span className="font-medium text-sm">{getModeLabel(mode)}</span>
+                  <span className="text-xs text-muted">{breakdown?.correctAnswers ?? 0}/{breakdown?.totalAnswers ?? 0} correct</span>
+                </div>
+                <div className="h-1.5 overflow-hidden rounded-full bg-accent-soft" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(breakdown?.accuracy * 100)} aria-label={`${getModeLabel(mode)} accuracy ${Math.round(breakdown?.accuracy * 100)}%`}>
+                  <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.round(breakdown?.accuracy * 100)}%` }} />
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted mt-1">
+                  <span>Evidence: {breakdown?.effectiveEvidence.toFixed(1) ?? '0'}</span>
+                  <span>Confidence: {confidencePercent}%</span>
+                </div>
+                <div className="flex items-center justify-between text-xs text-muted mt-0.5">
+                  <span>{breakdown?.grading === 'self' ? 'Self-graded' : 'Auto-graded'}</span>
+                  {breakdown?.lastAttemptedOn && (
+                    <span>Last: {formatDate(breakdown.lastAttemptedOn, 'short')}</span>
+                  )}
+                </div>
+              </div>
+            );
+          }
+
+          // Mode without evidence
           return (
-            <div key={mode} className="rounded-xl border border-line bg-surface/50 p-3">
-              <div className="flex items-center justify-between gap-2 mb-1">
-                <span className="font-medium text-sm">{getModeLabel(mode)}</span>
-                <span className="text-xs text-muted">{breakdown?.correctAnswers ?? 0}/{breakdown?.totalAnswers ?? 0} correct</span>
-              </div>
-              <div className="h-1.5 overflow-hidden rounded-full bg-accent-soft">
-                <span className="block h-full rounded-full bg-accent" style={{ width: `${Math.round(accuracy * 100)}%` }} />
-              </div>
-              <div className="flex items-center justify-between text-xs text-muted mt-1">
-                <span>Evidence: {effectiveEvidence.toFixed(1)}</span>
-                <span>Confidence: {Math.round(confidence * 100)}%</span>
-              </div>
-              {lastAttemptedOn && (
-                <p className="text-xs text-muted mt-1">Last tried: {lastAttemptedOn}</p>
-              )}
+            <div key={mode} className="col-span-2 rounded-xl border border-line bg-surface/50 p-3 text-center text-xs text-muted">
+              {getModeLabel(mode)}: No practice data yet.
+              {mode === 'recall' && <span className="ml-1 text-accent">(self-graded)</span>}
             </div>
           );
         })}
-
-        {/* Modes with no evidence */}
-        {['recognition', 'recall', 'typing', 'cloze', 'listening'].filter(mode => !result.modes.some(m => m.mode === mode)).map(mode => (
-          <div key={mode} className="col-span-2 rounded-xl border border-line bg-surface/50 p-3 text-center text-xs text-muted">
-            {getModeLabel(mode)}: No practice data yet.
-          </div>
-        ))}
       </div>
 
       {/* Explanation and next steps */}
@@ -134,7 +164,7 @@ export function TrueMasteryDetail({
           </p>
           <p>
             Evidence decays over time (30-day half-life). Recent correct answers count more than old ones.
-            Self-graded Recall answers are included but weighted appropriately.
+            Self-graded Recall answers are included but weighted at 50% compared to auto-graded modes.
           </p>
           <p>
             Confidence grows with more independent evidence. Duplicates in the same session don't inflate it.
@@ -144,7 +174,7 @@ export function TrueMasteryDetail({
             {result.modes.length === 0
               ? 'Start practising any mode to begin building evidence.'
               : result.modesWithEvidence < 3
-                ? `Try a mode you haven't practised yet (e.g., ${getModeLabel(['recognition', 'recall', 'typing', 'cloze', 'listening'].find(m => !result.modes.some(mod => mod.mode === m))!)}) to broaden the evidence base.`
+                ? `Try a mode you haven't practised yet (e.g., ${getModeLabel(allModes.find(m => !modesWithEvidenceSet.has(m))!)}) to broaden the evidence base.`
                 : result.modes.some(m => m.confidence < 0.5)
                   ? `Focus on ${result.modes.filter(m => m.confidence < 0.5).map(m => getModeLabel(m.mode)).join(', ')} where evidence is thin.`
                   : result.modes.some(m => m.accuracy < 0.7)

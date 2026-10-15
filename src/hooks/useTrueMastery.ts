@@ -23,6 +23,14 @@ export interface TrueMasteryEntry {
   modesWithEvidence: number;
   modes: TrueMasteryResult['modes'];
   hasAnyPractice: boolean;
+  /** Per-mode stats for display in the vocabulary bank tooltip */
+  modeStats: Array<{
+    mode: string;
+    correct: number;
+    total: number;
+    accuracy: number;
+    effectiveEvidence: number;
+  }>;
 }
 
 export interface UseTrueMasteryReturn {
@@ -107,6 +115,13 @@ export function useTrueMastery(): UseTrueMasteryReturn {
         modesWithEvidence: result.modesWithEvidence,
         modes: result.modes,
         hasAnyPractice: result.hasAnyPractice,
+        modeStats: result.modes.map(m => ({
+          mode: m.mode,
+          correct: m.correctAnswers,
+          total: m.totalAnswers,
+          accuracy: m.accuracy,
+          effectiveEvidence: m.effectiveEvidence,
+        })),
       });
     }
 
