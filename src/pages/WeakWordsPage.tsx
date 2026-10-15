@@ -10,6 +10,7 @@ import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, PAGE } from '../component
 import { useRemote } from '../hooks/useRemote.js';
 import { ROUTES, buildHref, openWord } from '../lib/router.js';
 import { useTrueMastery } from '../hooks/useTrueMastery.js';
+import { STUDY_MODE_LABELS } from '../../shared/study-modes.js';
 
 type Severity = WeakWordView['severity'];
 
@@ -17,6 +18,10 @@ interface WeakWordWithTrueMastery extends WeakWordView {
   trueMasteryTier?: string;
   trueMasteryScore?: number;
   trueMasteryCoverage?: string;
+  /** Recommended practice mode based on evidence */
+  recommendedMode?: string;
+  /** Reason for recommendation */
+  recommendationReason?: string;
 }
 
 const SEVERITY_TEXT: Record<Severity, string> = { high: 'High', medium: 'Medium', low: 'Low' };
@@ -48,11 +53,44 @@ export function WeakWordsPage() {
     return words.map(word => {
       const tm = trueMasteryMap.get(word.id);
       if (!tm || tm.mastery === null) return word as WeakWordWithTrueMastery;
+
+      // Determine recommended practice mode based on evidence
+      // Prefer modes with low confidence (need more practice) but some evidence
+      let recommendedMode: string | undefined;
+      let recommendationReason: string | undefined;
+
+      if (tm.modes && tm.modes.length > 0) {
+        // Find modes with evidence but low confidence
+        const modesWithEvidence = tm.modes.filter(m => m.totalAnswers > 0);
+        if (modesWithEvidence.length > 0) {
+          // Sort by confidence (ascending) - practice modes with lowest confidence first
+          modesWithEvidence.sort((a, b) => a.confidence - b.confidence);
+          const weakest = modesWithEvidence[0];
+          recommendedMode = weakest.mode;
+          if (weakest.confidence < 0.5) {
+            recommendationReason = `Low confidence (${Math.round(weakest.confidence * 100)}%) in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
+          } else if (weakest.accuracy < 0.7) {
+            recommendationReason = `Low accuracy (${Math.round(weakest.accuracy * 100)}%) in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
+          } else {
+            recommendationReason = `Needs more practice in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
+          }
+        } else if (tm.modes.length > 0) {
+          // No modes with evidence yet - recommend first untested mode
+          const untested = tm.modes.find(m => m.totalAnswers === 0);
+          if (untested) {
+            recommendedMode = untested.mode;
+            recommendationReason = `No practice data yet for ${STUDY_MODE_LABELS[untested.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
+          }
+        }
+      }
+
       return {
         ...word,
         trueMasteryTier: tm.tier,
         trueMasteryScore: tm.mastery,
         trueMasteryCoverage: tm.coverage,
+        recommendedMode,
+        recommendationReason,
       };
     });
   }, [words, trueMasteryMap]);
@@ -222,6 +260,13 @@ export function WeakWordsPage() {
                           <span className="text-muted">Suggested: </span>
                           {word.action}
                         </p>
+                        {tm.recommendedMode && tm.recommendationReason && (
+                          <p className="text-xs text-accent">
+                            <span className="font-medium">Recommended practice: </span>
+                            {STUDY_MODE_LABELS[tm.recommendedMode as keyof typeof STUDY_MODE_LABELS] ?? tm.recommendedMode}
+                            <span className="text-muted"> — {tm.recommendationReason}</span>
+                          </p>
+                        )}
                       </li>
                     );
                   })}

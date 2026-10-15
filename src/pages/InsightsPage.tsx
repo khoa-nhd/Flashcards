@@ -293,7 +293,12 @@ function PracticeStatistics() {
                   return (
                     <tr key={mode.mode} className="border-t border-line">
                       <th scope="row" className="py-1.5 text-left font-normal">
-                        {STUDY_MODE_LABELS[mode.mode as keyof typeof STUDY_MODE_LABELS] ?? mode.mode}
+                        <span className="flex items-center gap-1">
+                          {STUDY_MODE_LABELS[mode.mode as keyof typeof STUDY_MODE_LABELS] ?? mode.mode}
+                          {mode.mode === 'recall' && (
+                            <span className="text-xs text-muted" title="Self-graded: you judge your own answer">(self-graded)</span>
+                          )}
+                        </span>
                       </th>
                       <td className="py-1.5 text-right">{mode.answers}</td>
                       <td className="py-1.5 text-right">{mode.correct}</td>
