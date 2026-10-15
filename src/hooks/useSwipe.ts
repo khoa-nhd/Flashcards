@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
 import { decideAxis, swipeDirection, type GestureAxis, type SwipeDirection } from '../lib/gesture.js';
 
 export interface SwipeOptions {
@@ -91,6 +91,13 @@ export function useSwipe({ thresholdPx, slopPx, onSwipe }: SwipeOptions) {
     () => performance.now() - dragEndedAt.current < TRAILING_CLICK_MS,
     [],
   );
+
+  // Reset gesture state on unmount to prevent stale state from leaking across remounts.
+  useEffect(() => {
+    return () => {
+      gesture.current = null;
+    };
+  }, []);
 
   return {
     offset,
