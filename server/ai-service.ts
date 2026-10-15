@@ -16,6 +16,8 @@ export interface AiConfig {
   provider: AiProvider;
   model: string;
   apiKey: string;
+  /** Overrides the provider's base URL, for an OpenAI-compatible endpoint. */
+  baseUrl?: string;
   maxTokens: number;
   temperature: number;
   /** Per-minute request limit per user per mode. */
@@ -98,8 +100,12 @@ export function loadAiConfig(env: Record<string, string | undefined> = process.e
   const model = env.AI_MODEL?.trim() ?? '';
   if (!model) issues.push('AI_MODEL is not set.');
 
-  const apiKey = (provider === 'openai' ? env.OPENAI_API_KEY : env.ANTHROPIC_API_KEY)?.trim() ?? '';
-  if (!apiKey) issues.push(`${provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY'} is not set.`);
+  const providerKeyName = provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_API_KEY';
+  const apiKey =
+    env.AI_API_KEY?.trim() ||
+    (provider === 'openai' ? env.OPENAI_API_KEY : env.ANTHROPIC_API_KEY)?.trim() ||
+    '';
+  if (!apiKey) issues.push(`${providerKeyName} (or AI_API_KEY) is not set.`);
 
   const maxTokens = Number(env.AI_MAX_TOKENS ?? '2000');
   if (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > 8192) {
@@ -130,6 +136,13 @@ export function loadAiConfig(env: Record<string, string | undefined> = process.e
     issues.push('AI_REQUEST_TIMEOUT_MS must be an integer between 1000 and 120000.');
   }
 
+  // Optional. Points the OpenAI-compatible provider at another compatible
+  // endpoint: Google Gemini's free tier, Groq, a local Ollama server, and so on.
+  const baseUrl = env.AI_BASE_URL?.trim() || undefined;
+  if (baseUrl !== undefined && !(URL.canParse(baseUrl) && /^https?:$/.test(new URL(baseUrl).protocol))) {
+    issues.push('AI_BASE_URL must be a valid http(s) URL.');
+  }
+
   if (issues.length > 0) {
     throw new AiError(AiErrorCode.CONFIG_MISSING, `AI configuration invalid: ${issues.join('; ')}`, 503);
   }
@@ -138,6 +151,7 @@ export function loadAiConfig(env: Record<string, string | undefined> = process.e
     provider,
     model,
     apiKey,
+    baseUrl,
     maxTokens,
     temperature,
     rateLimitPerMinute,
@@ -500,7 +514,7 @@ export class AnthropicClient implements AiProviderClient {
 export function createProviderClient(config: AiConfig): AiProviderClient {
   switch (config.provider) {
     case 'openai':
-      return new OpenAiCompatibleClient('https://api.openai.com/v1', config.apiKey);
+      return new OpenAiCompatibleClient(config.baseUrl ?? 'https://api.openai.com/v1', config.apiKey);
     case 'anthropic':
       return new AnthropicClient(config.apiKey);
     default:

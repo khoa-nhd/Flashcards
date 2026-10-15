@@ -215,9 +215,10 @@ Copy `.env.example` to `.env` and fill in:
 | `DATA_MODE` | Optional. `supabase` or `mock`. Empty means Supabase in a deployment or when `SUPABASE_URL` is set, sample data otherwise. |
 | `REVIEW_TIMEZONE` | Optional. The zone a new account starts with if its browser reports none. |
 | `REVIEW_WRITES_ENABLED` | Optional. Exactly `false` freezes all changes; anything else leaves saving on. |
-| `AI_PROVIDER` | Optional. `openai` or `anthropic`. Without it AI Chat stays off. |
-| `AI_MODEL` | Optional. The model id the provider expects, e.g. `gpt-4o-mini` or `claude-3-5-sonnet-latest`. |
-| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional. The key for the provider chosen; set only the one in use. Server-side only; never sent to the browser. |
+| `AI_PROVIDER` | Optional. `openai` (anything OpenAI-compatible) or `anthropic`. Without it AI Chat stays off. |
+| `AI_MODEL` | Optional. The model id the provider expects, e.g. `gpt-4o-mini`, `gemini-2.5-flash` or `claude-3-5-sonnet-latest`. |
+| `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional. The key for the provider chosen; set only the one in use. `AI_API_KEY` is a generic alias. Server-side only; never sent to the browser. |
+| `AI_BASE_URL` | Optional. Points `openai` at another OpenAI-compatible endpoint, such as Google Gemini's free tier or a local Ollama server. See "Running AI Chat for free". |
 
 Both Supabase values are public by design: the server hands them to the
 browser. **Never use the secret / `service_role` key.** The server refuses to
@@ -372,6 +373,25 @@ npm start
 `npm start` serves the built frontend and the API from one Node process on
 `PORT` (default 8787). Set `NODE_ENV=production` and the variables above in
 the environment, and put it behind HTTPS.
+
+### Running AI Chat for free
+
+`AI_PROVIDER=openai` means "anything OpenAI-compatible", so a free endpoint
+works by pointing `AI_BASE_URL` at it.
+
+- **Google Gemini free tier.** Create a key at Google AI Studio, then set
+  `AI_PROVIDER=openai`, `AI_MODEL=gemini-2.5-flash`,
+  `AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/` and
+  the key in `OPENAI_API_KEY` (or `AI_API_KEY`). Works on Vercel.
+- **Local, with Ollama.** Run `ollama serve` and pull a model, then set
+  `AI_BASE_URL=http://localhost:11434/v1` with any non-empty key. Free and
+  private, but the app must run on the same machine, so not on a Vercel
+  deployment.
+- **Groq, Cerebras, OpenRouter, Mistral and GitHub Models** all offer
+  OpenAI-compatible endpoints with free tiers, used the same way.
+
+Free tiers are rate-limited, and some use your data for training. A local model
+has neither problem but needs the app to run where it does.
 
 ## Project layout
 
