@@ -66,13 +66,16 @@ export function WeakWordsPage() {
           // Sort by confidence (ascending) - practice modes with lowest confidence first
           modesWithEvidence.sort((a, b) => a.confidence - b.confidence);
           const weakest = modesWithEvidence[0];
-          recommendedMode = weakest.mode;
-          if (weakest.confidence < 0.5) {
-            recommendationReason = `Low confidence (${Math.round(weakest.confidence * 100)}%) in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
-          } else if (weakest.accuracy < 0.7) {
-            recommendationReason = `Low accuracy (${Math.round(weakest.accuracy * 100)}%) in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
-          } else {
-            recommendationReason = `Needs more practice in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
+          // TypeScript needs help here - we know modesWithEvidence.length > 0
+          if (weakest) {
+            recommendedMode = weakest.mode;
+            if (weakest.confidence < 0.5) {
+              recommendationReason = `Low confidence (${Math.round(weakest.confidence * 100)}%) in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
+            } else if (weakest.accuracy < 0.7) {
+              recommendationReason = `Low accuracy (${Math.round(weakest.accuracy * 100)}%) in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
+            } else {
+              recommendationReason = `Needs more practice in ${STUDY_MODE_LABELS[weakest.mode as keyof typeof STUDY_MODE_LABELS]?.toLowerCase()}`;
+            }
           }
         } else if (tm.modes.length > 0) {
           // No modes with evidence yet - recommend first untested mode
