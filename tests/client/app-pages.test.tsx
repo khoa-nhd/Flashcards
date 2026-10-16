@@ -2,12 +2,12 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it } from 'vitest';
-import type { ReviewCard, VocabularyEntry, VocabularyListResponse } from '../../shared/api.js';
+import type { ReviewActionResponse, ReviewCard, VocabularyEntry, VocabularyListResponse } from '../../shared/api.js';
 import { App } from '../../src/App.js';
 import { ApiError } from '../../src/lib/api-client.js';
 import { createSettingsStore } from '../../src/lib/settings.js';
 import { createFakeApi, entry } from '../helpers/fake-api.js';
-import { TODAY, card } from '../helpers/fixtures.js';
+import { TODAY, card, type Deferred } from '../helpers/fixtures.js';
 
 // TODAY is Friday 9 October 2026; its week runs Monday 5 to Sunday 11.
 const WORDS: VocabularyEntry[] = [
@@ -128,13 +128,20 @@ describe('navigation', () => {
 
 describe('review within the app', () => {
   const press = (key: string) => fireEvent.keyDown(document.body, { key, code: key === ' ' ? 'Space' : key });
+  /** Answers are sent in the background; the outbox has to have made the request before it can be settled. */
+  const settle = async (saves: Array<Deferred<ReviewActionResponse>>, at = 0) => {
+    await waitFor(() => expect(saves.length).toBeGreaterThan(at));
+    await act(async () => {
+      saves[at]?.resolve({ outcome: 'applied', state: null });
+    });
+  };
 
   it('keeps a session going when leaving the Review tab and returning', async () => {
     const { api, saves, user } = await open('/review', { cards: [card(1), card(2), card(3)] });
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
+    await settle(saves);
     expect(screen.getByText(/Card 2 of 3: word-2\./)).toBeInTheDocument();
 
     await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
@@ -166,7 +173,7 @@ describe('review within the app', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
+    await settle(saves);
 
     await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
     await waitFor(() => expect(api.fetchVocabulary).toHaveBeenCalledTimes(2));
@@ -177,7 +184,7 @@ describe('review within the app', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowLeft');
-    await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
+    await settle(saves);
     expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
 
     await user.click(nav().getByRole('link', { name: /^Dashboard/ }));

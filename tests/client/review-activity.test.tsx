@@ -393,7 +393,7 @@ describe('reviewing only the weakest words', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowLeft');
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction.mock.calls[0]?.[0]).toMatchObject({
       pageId: card(1).id,
       action: 'not_remember',
@@ -421,6 +421,7 @@ describe('reviewing only the weakest words', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
 
     await user.click(nav().getByRole('link', { name: /^Weak words/ }));
@@ -434,12 +435,15 @@ describe('reviewing only the weakest words', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    await act(async () => saves[0]?.reject(unreachable()));
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
+    await act(async () => saves[0]?.reject(new ApiError('forbidden', 'The database refused this change.', 403)));
     expect(screen.getByText(/was not saved/)).toBeInTheDocument();
 
+    // Choosing another selection is a new sitting, but the refused answer is
+    // not dropped: it still waits here for a retry or a dismissal.
     await user.click(nav().getByRole('link', { name: /^Review/ }));
-    expect(screen.getByText(/was not saved/)).toBeInTheDocument();
-    expect(api.fetchQueue).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.fetchQueue).toHaveBeenCalledTimes(2));
+    expect(await screen.findByText(/was not saved/)).toBeInTheDocument();
   });
 
   it('explains an empty selection without claiming that nothing at all is due', async () => {
@@ -450,10 +454,11 @@ describe('reviewing only the weakest words', () => {
   });
 
   it('says what was reviewed when it finishes', async () => {
-    const { saves } = await open('/review?focus=weak', { cards: [card(1)] });
+    const { api, saves } = await open('/review?focus=weak', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
     expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
     expect(screen.getByText(/They were your weakest words\./)).toBeInTheDocument();

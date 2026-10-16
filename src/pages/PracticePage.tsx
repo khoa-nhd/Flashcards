@@ -1,5 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
-import { RECENTLY_ADDED_DAYS, pageIdSchema, type VocabularyEntry } from '../../shared/api.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { RECENTLY_ADDED_DAYS, pageIdSchema, type PracticeResponse, type VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates } from '../../shared/dates.js';
 import {
   EXPERIMENTAL_MODES,
@@ -27,7 +27,7 @@ import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITL
 import { useRemote } from '../hooks/useRemote.js';
 import { usePracticeStats, type WordPracticeStats } from '../hooks/usePracticeStats.js';
 import { invalidateAllPracticeHistory } from '../lib/practice-history-cache.js';
-import { ApiError } from '../lib/api-client.js';
+import type { PracticePayload } from '../lib/offline/ops.js';
 import { count } from '../lib/format.js';
 import { formatDate } from '../components/badges.js';
 import { startTiming } from '../lib/perf.js';
@@ -97,7 +97,7 @@ interface Run {
  * reviewer's statistics and nothing here changes a word's schedule.
  */
 export function PracticePage() {
-  const { api, settings: preferences } = useApp();
+  const { api, settings: preferences, sync } = useApp();
   const { speechLang } = useSettings();
   const state = useVocabulary();
   const { query } = useLocation();
@@ -112,10 +112,12 @@ export function PracticePage() {
   const [length, setLength] = useState<number>(10);
   const [run, setRun] = useState<Run | null>(null);
   const [finished, setFinished] = useState<{ mode: StudyMode; outcomes: Outcome[] } | null>(null);
-  /** Names the question an answer was sent for, so a late reply cannot land on a later one. */
-  const asked = useRef('');
   /** Every answered question's outcome, kept outside `run` so a confirmation still lands after moving on. */
   const outcomes = useRef<Map<number, Outcome>>(new Map());
+  /** Where each answer sent to the outbox belongs, so its fate can be applied whenever it comes back. */
+  const sent = useRef(new Map<string, { sessionId: string; index: number; word: PracticeWord; correct: boolean }>());
+  /** The sitting on screen; a late confirmation from an older one (or a new one) is ignored. */
+  const liveSession = useRef<string | null>(null);
 
   const today = state.meta?.today ?? null;
   const pool = useMemo(() => state.entries.map(toPracticeWord), [state.entries]);
@@ -167,11 +169,14 @@ export function PracticePage() {
     if (silent) return;
     const { words } = selectForPractice(mode, sortedCandidates, pool, length, Math.random);
     if (words.length === 0) return;
+    const sessionId = newRequestId();
     setFinished(null);
     outcomes.current = new Map();
+    sent.current.clear();
+    liveSession.current = sessionId;
     setRun({
       mode,
-      sessionId: newRequestId(),
+      sessionId,
       words,
       choices: words.map((word) => (mode === 'recognition' ? buildChoices(word, pool, Math.random) : null)),
       index: 0,
@@ -191,21 +196,36 @@ export function PracticePage() {
   };
 
   /**
-   * Judges the answer here and shows it at once, then sends it to be recorded.
-   * The verdict comes from the same rules the server judges by, so it never
-   * waits for a round trip; the request confirms what was recorded and how the
-   * word's mastery in this mode moved.
+   * Judges the answer here and shows it at once, then records it in this
+   * device's outbox. The verdict comes from the same rules the server judges
+   * by, so it never waits for a round trip; the write reaches the server when
+   * it can, and its confirmation says what was recorded and how the word's
+   * mastery in this mode moved.
    */
-  const answer = (current: Run, given: PracticeAnswer, requestId: string, durationMs: number) => {
+  const answer = (current: Run, given: PracticeAnswer, durationMs: number) => {
     const word = current.words[current.index];
     if (word === undefined) return;
     const judged = judge(current.mode, word, given);
     if (judged === null) return;
     // Judged here, from the same rules the server uses: the verdict does not wait.
     const done = startTiming('practice.verdict');
-    const ticket = `${current.sessionId}:${current.index}:${requestId}`;
-    asked.current = ticket;
     rememberOutcome(current.index, { word, correct: judged.correct, recorded: state.meta?.writesEnabled !== false });
+    const payload: PracticePayload = {
+      pageId: word.id,
+      mode: current.mode,
+      answer: given,
+      sessionId: current.sessionId,
+      durationMs,
+      confidence: null,
+    };
+    // Recorded before it is sent: the next question never waits on the network.
+    const requestId = sync.enqueue({ kind: 'practice', entity: word.id, payload });
+    sent.current.set(requestId, {
+      sessionId: current.sessionId,
+      index: current.index,
+      word,
+      correct: judged.correct,
+    });
     setRun({
       ...current,
       given,
@@ -221,73 +241,83 @@ export function PracticePage() {
       error: null,
     });
     done();
-    void persist(current, word, given, requestId, durationMs, ticket);
   };
 
-  /** Sends the answer to be recorded and shows what the server confirmed, or why it could not. */
-  const persist = async (
-    current: Run,
-    word: PracticeWord,
-    given: PracticeAnswer,
-    requestId: string,
-    durationMs: number,
-    ticket: string,
-  ) => {
-    try {
-      const result = await api.submitPractice({
-        pageId: word.id,
-        mode: current.mode,
-        answer: given,
-        requestId,
-        sessionId: current.sessionId,
-        durationMs,
-      });
-      // A recorded answer changes True Mastery, which is computed from this history.
-      if (result.outcome !== 'dry_run') invalidateAllPracticeHistory();
-      rememberOutcome(current.index, { word, correct: result.correct, recorded: result.outcome !== 'dry_run' });
-      if (asked.current !== ticket) return;
-      setRun((latest) =>
-        latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
-          ? latest
-          : {
-              ...latest,
-              error: null,
-              verdict: {
-                correct: result.correct,
-                typed: result.typed,
-                expected: result.expected,
-                modeMastery: result.modeMastery,
-                outcome: result.outcome,
-              },
-            },
-      );
-    } catch (cause) {
-      const shown = outcomes.current.get(current.index);
-      rememberOutcome(current.index, { word, correct: shown?.correct ?? false, recorded: false });
-      if (asked.current !== ticket) return;
-      setRun((latest) =>
-        latest === null || latest.sessionId !== current.sessionId || latest.index !== current.index
-          ? latest
-          : { ...latest, error: cause instanceof ApiError ? cause.message : 'Could not check that answer.' },
-      );
-    }
-  };
+  // What became of every practice answer this page recorded. A confirmation
+  // matters even once the next question is up, so it is applied by request id.
+  useEffect(
+    () =>
+      sync.subscribeEvents((event) => {
+        if (event.op.kind !== 'practice') return;
+        const record = sent.current.get(event.op.id);
+        if (record === undefined) return;
+        if (event.type === 'settled') {
+          sent.current.delete(event.op.id);
+          const result = event.value as PracticeResponse | undefined;
+          // A recorded answer changes True Mastery, which is computed from this history.
+          if (result !== undefined && result.outcome !== 'dry_run') invalidateAllPracticeHistory();
+          if (liveSession.current === record.sessionId) {
+            rememberOutcome(record.index, {
+              word: record.word,
+              correct: result?.correct ?? record.correct,
+              recorded: result !== undefined && result.outcome !== 'dry_run',
+            });
+          }
+          const confirmed: PracticeVerdict | null =
+            result === undefined
+              ? null
+              : {
+                  correct: result.correct,
+                  typed: result.typed,
+                  expected: result.expected,
+                  modeMastery: result.modeMastery,
+                  outcome: result.outcome,
+                };
+          setRun((latest) =>
+            latest === null || latest.sessionId !== record.sessionId || latest.requestId !== event.op.id
+              ? latest
+              : { ...latest, error: null, verdict: confirmed ?? latest.verdict },
+          );
+        } else if (event.type === 'refused') {
+          // Kept in `sent`: a retry still has to know where the answer belongs.
+          if (liveSession.current === record.sessionId) {
+            rememberOutcome(record.index, { word: record.word, correct: record.correct, recorded: false });
+          }
+          const message = event.op.lastError ?? 'Could not record that answer.';
+          setRun((latest) =>
+            latest === null || latest.sessionId !== record.sessionId || latest.requestId !== event.op.id
+              ? latest
+              : { ...latest, error: message },
+          );
+        }
+      }),
+    // The event subscription is long-lived; the remembered helpers only touch refs and setState.
+    [sync],
+  );
 
-  /** Repeats the answer that failed, with the same request id, so one that did arrive is not recorded twice. */
+  /** Sends a refused answer again, under the same id, so one that did arrive is never recorded twice. */
   const retry = () => {
-    if (run === null) return;
-    const word = run.words[run.index];
-    if (word === undefined || run.given === null || run.requestId === null) return;
-    const ticket = `${run.sessionId}:${run.index}:${run.requestId}`;
-    asked.current = ticket;
-    setRun({ ...run, error: null });
-    void persist(run, word, run.given, run.requestId, run.durationMs, ticket);
+    if (run === null || run.requestId === null) return;
+    const record = sent.current.get(run.requestId);
+    if (record !== undefined) {
+      rememberOutcome(record.index, {
+        word: record.word,
+        correct: record.correct,
+        recorded: state.meta?.writesEnabled !== false,
+      });
+    }
+    sync.retry(run.requestId);
+    setRun({
+      ...run,
+      error: null,
+      verdict: run.verdict === null ? null : { ...run.verdict, outcome: 'pending' },
+    });
   };
 
   const next = () => {
     if (run === null) return;
-    asked.current = '';
     if (run.index + 1 >= run.words.length) {
+      liveSession.current = null;
       setFinished({ mode: run.mode, outcomes: [...outcomes.current.values()] });
       setRun(null);
       return;
@@ -317,7 +347,7 @@ export function PracticePage() {
               type="button"
               className={BUTTON_SECONDARY}
               onClick={() => {
-                asked.current = '';
+                liveSession.current = null;
                 setFinished(outcomes.current.size > 0 ? { mode: run.mode, outcomes: [...outcomes.current.values()] } : null);
                 setRun(null);
               }}
@@ -345,7 +375,7 @@ export function PracticePage() {
               onAnswer={(given) => {
                 if (run.verdict !== null) return;
                 const elapsed = Math.min(Math.max(Date.now() - run.shownAt, 0), 86_400_000);
-                answer(run, given, newRequestId(), elapsed);
+                answer(run, given, elapsed);
               }}
             />
             {run.error !== null && (

@@ -10,7 +10,6 @@ import { Spinner } from '../components/Spinner.js';
 import { EVERYTHING_LABEL, FOCUS_TEXT, focusFromQuery } from '../lib/review-focus.js';
 import { ROUTES, buildHref, navigate, useLocation } from '../lib/router.js';
 import type { SessionMeta } from '../lib/session-machine.js';
-import { isSaving } from '../lib/session-machine.js';
 
 function ModeBadge({ meta }: { meta: SessionMeta | null }) {
   if (meta === null) return null;
@@ -88,13 +87,12 @@ export function ReviewPage() {
         sessionId={session.sessionId()}
         onReload={reload}
         onUndo={() => session.undo()}
-        onRetry={() => session.retrySave()}
-        onDiscard={() => session.cancelSave()}
-        onSkip={() => session.skipCard()}
+        onRetry={(requestId) => session.retryRefusal(requestId)}
+        onDismiss={(requestId) => session.dismissRefusal(requestId)}
       />
     );
   } else {
-    content = <ReviewScreen state={state} session={session} onReload={reload} onHelp={() => setHelpOpen(true)} paused={helpOpen} />;
+    content = <ReviewScreen state={state} session={session} onHelp={() => setHelpOpen(true)} paused={helpOpen} />;
   }
 
   // What is actually loaded decides the banner; the address only asks for it.
@@ -121,7 +119,6 @@ export function ReviewPage() {
           <select
             id="review-focus"
             value={collectionId !== null ? `collection:${collectionId}` : (focus ?? '')}
-            disabled={isSaving(state)}
             title="Choose which words to review. The weakest words can be taken before they are due."
             className="h-9 max-w-[11rem] cursor-pointer rounded-full border border-line bg-surface px-3 text-sm font-medium text-muted disabled:cursor-not-allowed disabled:opacity-50"
             onChange={(event) => {
@@ -166,7 +163,7 @@ export function ReviewPage() {
           <button
             type="button"
             onClick={reload}
-            aria-disabled={isSaving(state) || status === 'loading'}
+            aria-disabled={status === 'loading'}
             title="Reload the queue. Does not change any review data."
             className={HEADER_BUTTON}
           >

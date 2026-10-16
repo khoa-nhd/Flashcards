@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { CreateEntryInput, VocabularyEntry, VocabularyListResponse } from '../../shared/api.js';
-import { ApiError } from '../../src/lib/api-client.js';
+import { ApiError, type AppApi } from '../../src/lib/api-client.js';
+import { createSender } from '../../src/lib/offline/send.js';
+import { createMemoryStore } from '../../src/lib/offline/storage.js';
+import { createSyncEngine } from '../../src/lib/offline/sync-engine.js';
 import { DEFAULT_SETTINGS, createSettingsStore } from '../../src/lib/settings.js';
 import { MAX_AGE_MS, createVocabularyStore } from '../../src/lib/vocabulary-store.js';
 import { entry, vocabularyList } from '../helpers/fake-api.js';
@@ -17,8 +20,33 @@ function setup(entries = [entry(1), entry(2)]) {
     return { ...found };
   });
   const deleteEntry = vi.fn(async () => {});
-  const store = createVocabularyStore({ fetchVocabulary, createEntry, updateEntry, deleteEntry }, () => clock);
-  return { store, fetchVocabulary, createEntry, updateEntry, deleteEntry, advance: (ms: number) => (clock += ms) };
+  const api = { fetchVocabulary, createEntry, updateEntry, deleteEntry };
+  const local = createMemoryStore();
+  const ids = new Map<string, string>();
+  const engine = createSyncEngine({
+    accountId: 'test',
+    store: local,
+    sender: createSender(api as unknown as AppApi, (id) => ids.get(id) ?? id),
+    // Real, short retries: the pump is exercised without waiting seconds.
+    backoffMs: { base: 10, max: 20 },
+  });
+  const store = createVocabularyStore({
+    api,
+    engine,
+    store: local,
+    accountId: 'test',
+    ids,
+    now: () => clock,
+  });
+  return {
+    store,
+    engine,
+    fetchVocabulary,
+    createEntry,
+    updateEntry,
+    deleteEntry,
+    advance: (ms: number) => (clock += ms),
+  };
 }
 
 const settled = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -156,17 +184,18 @@ describe('local changes', () => {
   });
 });
 
-describe('optimistic writes', () => {
+describe('saving writes', () => {
   it('adds a word at once and replaces it with the stored record', async () => {
     const { store, createEntry } = setup();
     await store.reload();
     const pending = deferred<VocabularyEntry>();
     createEntry.mockReturnValueOnce(pending.promise);
 
-    const { localId, result } = store.create({ word: 'luminous', requestId: 'r1' });
+    const { localId, result } = store.create({ word: 'luminous' });
     expect(store.getState().entries[0]?.word).toBe('luminous');
     expect(store.getState().pending).toEqual([{ id: localId, operation: 'create', status: 'saving', error: null }]);
-    expect(createEntry).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'r1' }));
+    // The word is sent under the operation's own id, so a repeat can never create it twice.
+    await vi.waitFor(() => expect(createEntry).toHaveBeenCalledWith(expect.objectContaining({ requestId: localId })));
 
     pending.resolve(entry(50, { word: 'luminous' }));
     await expect(result).resolves.toMatchObject({ ok: true });
@@ -180,7 +209,7 @@ describe('optimistic writes', () => {
     await store.reload();
     createEntry.mockRejectedValueOnce(new ApiError('forbidden', 'The database refused this change.', 403));
 
-    const { localId, result } = store.create({ word: 'zeal', requestId: 'r1' });
+    const { localId, result } = store.create({ word: 'zeal' });
     expect(store.getState().entries.some((item) => item.word === 'zeal')).toBe(true);
 
     const outcome = await result;
@@ -191,12 +220,28 @@ describe('optimistic writes', () => {
     ]);
   });
 
-  it('sends a failed word again under the same request id', async () => {
+  it('retries on its own when the server cannot be reached, keeping the same request id', async () => {
     const { store, createEntry } = setup();
     await store.reload();
     createEntry.mockRejectedValueOnce(new ApiError('network', 'Could not reach the server.'));
-    const { localId, result } = store.create({ word: 'zeal', requestId: 'r1' });
-    await result;
+    createEntry.mockResolvedValueOnce(entry(50, { word: 'zeal' }));
+
+    const { localId, result } = store.create({ word: 'zeal' });
+    expect(store.getState().entries.some((item) => item.word === 'zeal')).toBe(true);
+
+    await expect(result).resolves.toMatchObject({ ok: true });
+    expect(store.getState().entries[0]?.id).toBe(pageId(50));
+    expect(createEntry.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(createEntry.mock.calls.every((call) => call[0].requestId === localId)).toBe(true);
+    expect(store.getState().pending).toHaveLength(0);
+  });
+
+  it('sends a refused word again under the same request id when asked', async () => {
+    const { store, createEntry } = setup();
+    await store.reload();
+    createEntry.mockRejectedValueOnce(new ApiError('forbidden', 'The database refused this change.', 403));
+    const { localId, result } = store.create({ word: 'zeal' });
+    await expect(result).resolves.toMatchObject({ ok: false });
 
     createEntry.mockResolvedValueOnce(entry(50, { word: 'zeal' }));
     const retried = store.retry(localId);
@@ -205,7 +250,7 @@ describe('optimistic writes', () => {
 
     await expect(retried).resolves.toMatchObject({ ok: true });
     expect(store.getState().entries[0]?.id).toBe(pageId(50));
-    expect(createEntry.mock.calls.every((call) => call[0].requestId === 'r1')).toBe(true);
+    expect(createEntry.mock.calls.every((call) => call[0].requestId === localId)).toBe(true);
     expect(store.getState().pending).toHaveLength(0);
   });
 
@@ -215,7 +260,7 @@ describe('optimistic writes', () => {
     const pending = deferred<VocabularyEntry>();
     createEntry.mockReturnValueOnce(pending.promise);
 
-    const { result } = store.create({ word: 'luminous', requestId: 'r1' });
+    const { result } = store.create({ word: 'luminous' });
     await store.reload();
     expect(store.getState().entries.some((item) => item.word === 'luminous')).toBe(true);
 
@@ -252,8 +297,8 @@ describe('optimistic writes', () => {
   it('clears a failed write the user gives up on', async () => {
     const { store, createEntry } = setup();
     await store.reload();
-    createEntry.mockRejectedValueOnce(new ApiError('forbidden', 'no'));
-    const { localId, result } = store.create({ word: 'zeal', requestId: 'r1' });
+    createEntry.mockRejectedValueOnce(new ApiError('forbidden', 'no', 403));
+    const { localId, result } = store.create({ word: 'zeal' });
     await result;
     expect(store.getState().pending).toHaveLength(1);
 

@@ -75,6 +75,11 @@ export interface ReviewServiceOptions {
 /** A record on its way into the queue: judged by the date in charge, carrying the stored date for the card. */
 type Candidate = VocabularyRecord & { storedReview: IsoDate | null };
 
+/** How far ahead of the server's own clock an answer's stated instant may be. */
+const ANSWER_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
+/** How old an answer may be. Older than this it is refused rather than dated to an ancient day. */
+const ANSWER_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
 /**
  * A way to narrow the queue. `weak` and `recent` name the words to keep
  * (`weak` also sets their order); the others are read off the review date.
@@ -119,6 +124,30 @@ export class ReviewService {
 
   private today(): IsoDate {
     return calendarDateInTimeZone(this.now(), this.options.timeZone);
+  }
+
+  /**
+   * The instant an answer was given. Without `answeredAt` that is now; with it,
+   * the browser's clock has to be close enough to the server's to be believed:
+   * an answer from the future or from more than a month ago is refused rather
+   * than filed under a misleading day. This is what makes an answer given
+   * offline land on the day it was answered, not the day it synced.
+   */
+  private answeredInstant(answeredAt: string | undefined): Date {
+    if (answeredAt === undefined) return this.now();
+    const instant = new Date(answeredAt);
+    const time = instant.getTime();
+    if (!Number.isFinite(time)) {
+      throw new HttpError(400, 'invalid_request', 'The answer carried a timestamp the server could not read.');
+    }
+    const now = this.now().getTime();
+    if (time > now + ANSWER_CLOCK_SKEW_MS) {
+      throw new HttpError(400, 'invalid_request', 'The answer is dated in the future, so nothing was saved.');
+    }
+    if (time < now - ANSWER_MAX_AGE_MS) {
+      throw new HttpError(400, 'invalid_request', 'The answer is more than a month old, so nothing was saved.');
+    }
+    return instant;
   }
 
   private async writesEnabled(): Promise<boolean> {
@@ -210,8 +239,11 @@ export class ReviewService {
   private async applyDecision(pageId: string, request: ReviewSubmission): Promise<ReviewActionResponse> {
     const { action, expected } = request;
     const requestId = request.requestId ?? randomUUID();
-    const { repository, rules } = this.options;
-    const today = this.today();
+    const { repository, rules, timeZone } = this.options;
+    // The day the answer was given, which is the browser's day for an answer
+    // made offline: everything below is worked out as of that day.
+    const answeredAt = this.answeredInstant(request.answeredAt);
+    const today = calendarDateInTimeZone(answeredAt, timeZone);
 
     const record = await repository.getRecord(pageId);
     if (record === null) {
@@ -269,7 +301,7 @@ export class ReviewService {
       ruleFor(action, rules) === null ? null : practiceOnly ? { ...current } : applyAction(action, current, today, rules);
     if (next === null || !(await this.writesEnabled())) return { outcome: 'dry_run', state: next };
 
-    const fsrs = practiceOnly ? this.unchangedFsrs(record, action) : this.fsrsFor(record, action);
+    const fsrs = practiceOnly ? this.unchangedFsrs(record, action) : this.fsrsFor(record, action, answeredAt);
     if (scheduler === 'fsrs' && fsrs === null) {
       // With FSRS in charge the store will not take an answer without an FSRS state, and a word FSRS
       // has never seen has none to keep. Giving it one would move it, so this answer is not recorded.
@@ -356,7 +388,7 @@ export class ReviewService {
       correct: judged.correct,
       grading: judged.grading,
       submitted: judged.submitted,
-      reviewedOn: this.today(),
+      reviewedOn: calendarDateInTimeZone(this.answeredInstant(request.answeredAt), this.options.timeZone),
       durationMs: request.durationMs ?? null,
       confidence: request.confidence ?? null,
     });
@@ -449,7 +481,7 @@ export class ReviewService {
     return { rating: ratingFor(action, fsrs.ratingMap), engine: before.engine, before, after: before.state };
   }
 
-  private fsrsFor(record: VocabularyRecord, action: ReviewAction): FsrsWrite | null {
+  private fsrsFor(record: VocabularyRecord, action: ReviewAction, at: Date): FsrsWrite | null {
     const { fsrs } = this.options;
     if (fsrs == null || !this.fsrsRunning()) return null;
     try {
@@ -459,7 +491,7 @@ export class ReviewService {
         rating,
         engine: FSRS_ENGINE,
         before,
-        after: fsrsReview(before?.state ?? null, rating, this.now(), fsrs.settings),
+        after: fsrsReview(before?.state ?? null, rating, at, fsrs.settings),
       };
     } catch (error) {
       console.error('FSRS calculation failed:', error instanceof Error ? error.message : 'unknown error');

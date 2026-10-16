@@ -4,10 +4,10 @@ import { useApp } from '../app-context.js';
 import { formatDuration } from '../lib/format.js';
 import { FOCUS_TEXT, type FocusText } from '../lib/review-focus.js';
 import { ROUTES } from '../lib/router.js';
-import { canUndo, isSaving, saveIssue, type SessionState } from '../lib/session-machine.js';
+import { canUndo, type SessionState } from '../lib/session-machine.js';
 import { GoalProgress, hasGoal } from './GoalStatus.js';
 import { Link } from './Link.js';
-import { SaveIssuePanel } from './SaveIssuePanel.js';
+import { RefusedAnswersPanel } from './RefusedAnswersPanel.js';
 import { SkippedNotice } from './SkippedNotice.js';
 
 export interface CompletionScreenProps {
@@ -16,27 +16,23 @@ export interface CompletionScreenProps {
   sessionId: string;
   onReload: () => void;
   onUndo: () => void;
-  /** Repeats an answer that would not save. */
-  onRetry: () => void;
-  /** Gives up on an answer that would not save. */
-  onDiscard: () => void;
-  /** Passes a card whose record changed elsewhere. */
-  onSkip: () => void;
+  /** Sends a refused answer again. */
+  onRetry: (requestId: string) => void;
+  /** Gives up on a refused answer for good. */
+  onDismiss: (requestId: string) => void;
 }
 
 type Loaded = { for: string; summary: SessionSummary | null };
 
-export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, onDiscard, onSkip }: CompletionScreenProps) {
+export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, onDismiss }: CompletionScreenProps) {
   const { api } = useApp();
   const { meta, tally } = state;
   const total = state.cards.length;
   const preview = meta !== null && !meta.writesEnabled;
   const answered = tally.remember + tally.notRemember;
-  const saving = isSaving(state);
-  const issue = saveIssue(state);
-  const issueWord = state.failed === null ? null : (state.cards[state.failed.index]?.word ?? null);
+  const pending = state.pending.length;
   // Re-read once the last answer has settled, so the counts are the server's own.
-  const settled = saving ? 'saving' : 'settled';
+  const settled = pending > 0 ? 'saving' : 'settled';
   // The server's own account of the session, where it keeps one. Asked for again whenever the count changes.
   const wanted =
     meta?.capabilities.sessions === true && !preview && answered > 0 ? `${sessionId}:${answered}:${settled}` : null;
@@ -174,7 +170,7 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
           {tally.skipped > 0 && (
             <div className="col-span-2 rounded-2xl bg-warn-soft px-4 py-3 text-warn-ink">
               <dd className="text-2xl font-semibold tabular-nums">{tally.skipped}</dd>
-              <dt className="text-sm">Skipped because they changed on another device</dt>
+              <dt className="text-sm">Not saved, so left out of the counts</dt>
             </div>
           )}
         </dl>
@@ -199,19 +195,16 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
         </p>
       )}
 
-      {saving && <p className="text-sm text-muted">Saving your last answer…</p>}
+      {pending > 0 && (
+        <p className="text-sm text-muted">
+          Saving {pending === 1 ? 'your last answer' : `${pending} answers`}… They are kept on this device if the
+          connection drops.
+        </p>
+      )}
 
-      {issue !== null && (
+      {state.refused.length > 0 && (
         <div className="w-full text-left">
-          <SaveIssuePanel
-            kind={issue.kind}
-            message={issue.message}
-            word={issueWord}
-            onRetry={onRetry}
-            onDiscard={onDiscard}
-            onReload={onReload}
-            onSkip={onSkip}
-          />
+          <RefusedAnswersPanel answers={state.refused} onRetry={onRetry} onDismiss={onDismiss} />
         </div>
       )}
 

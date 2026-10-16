@@ -7,7 +7,7 @@ in on.
 | Tab | What it does |
 | --- | --- |
 | **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
-| **Review** | Flashcards: flip, then answer Remember or Not remember. Narrow the queue (weakest, overdue, due today, recently added, one collection). Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. |
+| **Review** | Flashcards: flip, then answer Remember or Not remember. Narrow the queue (weakest, overdue, due today, recently added, one collection). Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. Answers are recorded on the device first and sent in the background, so nothing waits on the network. |
 | **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, and listening (experimental). Recorded for your statistics; never changes mastery or a review date. |
 | **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
 | **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples and related words. |
@@ -26,7 +26,7 @@ Reference documents:
 - [docs/supabase-migration.md](docs/supabase-migration.md) — the record of the move from Notion to Supabase.
 - [docs/import-and-export.md](docs/import-and-export.md) — importing a list, the export format, and backup and recovery.
 - [docs/upgrade-plan.md](docs/upgrade-plan.md) — the plan for turning this into a fuller learning system, and how far it has got.
-- [docs/offline-mode-design.md](docs/offline-mode-design.md) — what offline review would take. Not built.
+- [docs/offline-mode-design.md](docs/offline-mode-design.md) — how the app keeps working without a connection: the outbox, what is offline and what is not.
 
 ## Try it with sample data
 
@@ -74,7 +74,15 @@ the calendar day in your account's time zone. (If you put FSRS in charge, the
 date that decides is FSRS's instead; see Scheduling and FSRS below.)
 
 A review session survives switching tabs: come back and it is where you left
-it. A finished session reloads the queue when you return.
+it. A finished session reloads the queue when you return. A sitting also
+survives a reload of the page, even without a connection.
+
+Every answer is recorded on the device the moment it is given and sent to the
+server in the background — the next card never waits for the database. While
+answers are still on their way the sidebar (and the mobile header) says so.
+An answer the server refuses — usually because the word was answered on
+another device first — is listed beside the current card, where it can be
+sent again or let go; it never blocks the rest of the session.
 
 **Undo** takes back the most recent saved answer: the word returns to exactly
 the mastery and date it had, and the card comes back. It works only while that
@@ -216,7 +224,7 @@ Copy `.env.example` to `.env` and fill in:
 | `REVIEW_TIMEZONE` | Optional. The zone a new account starts with if its browser reports none. |
 | `REVIEW_WRITES_ENABLED` | Optional. Exactly `false` freezes all changes; anything else leaves saving on. |
 | `AI_PROVIDER` | Optional. `openai` (anything OpenAI-compatible) or `anthropic`. Without it AI Chat stays off. |
-| `AI_MODEL` | Optional. The model id the provider expects, e.g. `gpt-4o-mini`, `gemini-2.5-flash` or `claude-3-5-sonnet-latest`. |
+| `AI_MODEL` | Optional. The model id the provider expects, e.g. `gpt-4o-mini`, `gemini-3.8-flash` or `claude-sonnet-5-5`. A retired model answers HTTP 404, which the app reports as a model-or-address problem. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional. The key for the provider chosen; set only the one in use. `AI_API_KEY` is a generic alias. Server-side only; never sent to the browser. |
 | `AI_BASE_URL` | Optional. Points `openai` at another OpenAI-compatible endpoint, such as Google Gemini's free tier or a local Ollama server. See "Running AI Chat for free". |
 
@@ -260,7 +268,10 @@ email if your project asks for it.
 - **Quick add** reduces the form to word and meaning; Enter saves and returns
   the cursor to the word field. In the full form, Ctrl + Enter saves from any
   field.
-- Success is shown only after the server has confirmed the new word.
+- The word appears at once and the save happens behind it. The "was added"
+  confirmation appears when the server has confirmed the new word; until then
+  (or if the save fails) it is listed under the form, with Retry and Edit —
+  what was typed is never lost, and nothing already typed has to be retyped.
 
 ## Vocabulary bank
 
@@ -319,8 +330,10 @@ mastery or review date in the file is ignored.
 - **No privileged key exists anywhere in the app.** A test reads the source to
   keep it that way: browser code may not read the environment, name a secret
   key or import server code.
-- **Every write is confirmed.** The app shows success only when the server has
-  returned the stored record.
+- **Every write is confirmed.** A change is recorded on the device first and
+  shown at once, but success is only ever shown when the server has returned
+  the stored record — or not shown at all, and the change listed with a Retry,
+  when it could not be saved. Nothing that looks saved is quietly dropped.
 - **Automated tests never touch a real project.** They run the real schema on
   an in-process PostgreSQL.
 
@@ -334,9 +347,22 @@ Sign in with the same account on each device. The data is the same everywhere.
 - If you answer the same card on two devices, the first answer is saved. The
   second device is told the card changed on another device and offers to skip
   it. Nothing is counted twice.
-- There is no offline mode. An answer given without a connection stays on
-  screen with a Retry. What building one would take is written up in
-  [docs/offline-mode-design.md](docs/offline-mode-design.md).
+
+## Without a connection
+
+The app records changes on the device first and sends them when it can, so
+reviewing, practising and editing vocabulary all keep working offline. What
+you answered offline is scheduled by the day you answered it, not the day it
+was sent. Anything that could not be saved is never silently dropped: it is
+listed where it was made (or shown by the sync indicator in the sidebar and
+the mobile header), waiting for a Retry or a Dismiss. A sitting in progress
+survives a reload; a queue fetched within the last week can be shown again
+without a connection. The service worker is registered in production builds
+only, so the app itself opens offline as well.
+
+Full detail, including what is **not** available offline (import, AI Chat,
+account settings, library writes), is in
+[docs/offline-mode-design.md](docs/offline-mode-design.md).
 
 ## Deploying
 
@@ -360,6 +386,13 @@ links work.
 
 To show the app with sample data only, set `DATA_MODE=mock`.
 
+The build includes the service worker (`dist/sw.js`), which is what lets the
+app open without a connection. Nothing needs to be configured for it; it is
+registered only when the built page says `app-mode: production`, so local
+development and the test suite are unaffected. If a deployment serves the app
+from somewhere `public/` files are not copied — a custom setup, not Vercel or
+`npm start` — copy `dist/sw.js` alongside `dist/index.html`.
+
 ### Self-hosted
 
 ```bash
@@ -380,7 +413,7 @@ the environment, and put it behind HTTPS.
 works by pointing `AI_BASE_URL` at it.
 
 - **Google Gemini free tier.** Create a key at Google AI Studio, then set
-  `AI_PROVIDER=openai`, `AI_MODEL=gemini-2.5-flash`,
+  `AI_PROVIDER=openai`, `AI_MODEL=gemini-3.8-flash`,
   `AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/` and
   the key in `OPENAI_API_KEY` (or `AI_API_KEY`). Works on Vercel.
 - **Local, with Ollama.** Run `ollama serve` and pull a model, then set
@@ -389,6 +422,13 @@ works by pointing `AI_BASE_URL` at it.
   deployment.
 - **Groq, Cerebras, OpenRouter, Mistral and GitHub Models** all offer
   OpenAI-compatible endpoints with free tiers, used the same way.
+
+Model ids age: providers retire them over time, and a retired model answers
+HTTP 404. The app reports that as a model-or-address problem naming `AI_MODEL`
+and `AI_BASE_URL` — set the provider's current model and redeploy; no code
+change is needed. Current lists:
+[Gemini](https://ai.google.dev/gemini-api/docs/deprecations),
+[Anthropic](https://platform.claude.com/docs/en/about-claude/model-deprecations).
 
 Free tiers are rate-limited, and some use your data for training. A local model
 has neither problem but needs the app to run where it does.
@@ -429,7 +469,9 @@ src/                        React interface
   pages/                      One file per tab
   components/                 Flashcard, charts, word panel, sign-in, navigation
   lib/                        Router, API client, sign-in, stores, bank query, export
+    offline/                    Outbox storage, the sync engine, cached reads, the service worker
   hooks/                      Keyboard shortcuts, swipe detection
+public/sw.js                The service worker (production builds only)
 scripts/                    supabase-import, supabase-verify
 tests/                      Vitest: logic, database, server, API, pages
 docs/                       Review logic, schema and security, metric definitions
@@ -487,7 +529,12 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 
 ## Limitations
 
-- Sync is refresh-based, not real-time, and there is no offline mode.
+- Sync is refresh-based, not real-time. Offline covers review answers,
+  practice answers and vocabulary add/edit/delete in full; import, AI Chat,
+  account settings and library writes (collections, examples, relations) need
+  a connection. Numbers on other pages are shown from this device's last copy
+  while offline, so they can be as old as the last time the page could read
+  the server; see [docs/offline-mode-design.md](docs/offline-mode-design.md).
 - The whole vocabulary is loaded at once and searched in the browser. That is
   comfortable into the low thousands of words; beyond that it would need
   server-side search.
@@ -537,6 +584,9 @@ what it left out.
   `REVIEW_WRITES_ENABLED=false` and restart or redeploy.
 - **You are signed out unexpectedly:** sign in again. If it keeps happening,
   check `/api/health` and the Supabase project's status.
+- **AI Chat says the model or address is missing:** `AI_MODEL` has probably
+  been retired, or `AI_BASE_URL` is wrong. The reply names both; set the
+  provider's current model and redeploy. No code change is needed.
 - **The public key may have been swapped for a secret one:** the server
   refuses to start and `/api/health` says why. Replace it with the publishable
   key and rotate the secret key in Supabase.

@@ -3,7 +3,6 @@ import type { SchedulerReport } from '../../shared/api.js';
 import { SCHEDULER_NAMES, type SchedulerId } from '../../shared/scheduler/active.js';
 import { useApp } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
-import { saveIssue } from '../lib/session-machine.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { ScheduleSimulation } from './ScheduleSimulation.js';
 import { BUTTON_SECONDARY, CARD, HELP, INPUT, SECTION_TITLE } from './ui.js';
@@ -76,10 +75,10 @@ export function SchedulerSection() {
       setAsking(null);
       toasts.show({ message: `${SCHEDULER_NAMES[updated.active]} is now in charge of your reviews.` });
       // What is due has just changed everywhere: the word list is read again, and so is a review
-      // queue that was already loaded. An answer still being saved is left to finish first.
+      // queue that was already loaded. Answers still on their way are in the outbox, so a reload
+      // cannot lose them.
       void vocabulary.reload();
-      const review = session.getState();
-      if (review.meta !== null && review.saving === null && saveIssue(review) === null) void session.load();
+      if (session.getState().meta !== null) void session.load();
     } catch (cause) {
       setSwitchError(messageOf(cause, 'Could not change the schedule.'));
     } finally {

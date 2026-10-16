@@ -16,7 +16,7 @@ code, passing tests and an update to this file.
 | 7 Import, export, backup | **Built**: preview-based import of CSV, text, Excel (.xlsx) and the app's own exports; full JSON export; backup and recovery notes. No database change. |
 | 8 Retention estimate and simulation | **Built**: FSRS's own recall estimate per word, and a what-if comparison replayed from saved answers. No database change. |
 | 9 Final verification | **Done for everything that can be checked without the live project** (below). The live check is the owner's to run. |
-| Offline mode | **Not built.** Design note: [offline-mode-design.md](offline-mode-design.md). |
+| Offline mode | **Built.** Answers, practice and vocabulary changes are recorded on the device first and synced; design: [offline-mode-design.md](offline-mode-design.md). |
 
 ### How it was checked
 
@@ -107,7 +107,8 @@ stand now is under "Status" at the top.
 React 19 + TypeScript + Vite + Tailwind (browser), Hono (API, one Vercel
 function), Supabase Auth + PostgreSQL with Row Level Security, Zod contracts,
 Vitest. npm. No charting library: charts are small in-house SVG components
-(`BarChart.tsx`). No offline support.
+(`BarChart.tsx`). Offline mode is built: a durable outbox in IndexedDB and a
+service worker, described in [offline-mode-design.md](offline-mode-design.md).
 
 ### What exists
 
@@ -290,14 +291,15 @@ card.
 Full test run, build, a security pass over every policy, the live check
 script, deployment notes, and the final report.
 
-### Deferred: offline mode
+### Offline mode (was deferred, now built)
 
-Not built. The app has no offline behaviour to preserve. What it would take is
-written up in [offline-mode-design.md](offline-mode-design.md): local storage
-per account, an outbox, the server change that lets an answer carry the moment
-it was given, idempotent synchronisation on the request ids already in place,
-the conflict rule (unchanged: a stale answer is not applied), sign-in and
-session handling, and how unsaved answers are shown.
+The design note in [offline-mode-design.md](offline-mode-design.md) said what
+it would take: local storage per account, an outbox, the server change that
+lets an answer carry the moment it was given, idempotent synchronisation on
+the request ids already in place, the conflict rule (unchanged: a stale
+answer is not applied), sign-in and session handling, and how unsaved answers
+are shown. All of it is built; the note now describes what was built. What is
+**not** offline is listed there too.
 
 ## 4. Decisions
 

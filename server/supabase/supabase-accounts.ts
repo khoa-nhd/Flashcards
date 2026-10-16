@@ -105,6 +105,11 @@ export interface SupabaseAccountsOptions {
 const FALLBACK_TIME_ZONE = 'UTC';
 const SCHEMA_RECHECK_MS = 60_000;
 
+// Why a server has no AI chat does not change while it runs, so the reasons
+// reach the log once rather than on every request. They name variables and
+// constraints, never their values.
+let aiConfigProblemLogged = false;
+
 export function createSupabaseAccounts(options: SupabaseAccountsOptions): AccountGateway {
   const { url, publicKey, rules, cardFields, defaults, defaultTimeZone, writesRequested, now } = options;
   const verifier = options.verifier ?? createSupabaseVerifier(url, publicKey);
@@ -236,6 +241,10 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
             return createAiService(repository);
           } catch (error) {
             if (error instanceof AiError && error.code === AiErrorCode.CONFIG_MISSING) {
+              if (!aiConfigProblemLogged) {
+                aiConfigProblemLogged = true;
+                console.error(`AI chat is unavailable: ${error.message}`);
+              }
               return null; // AI not configured; service will be unavailable
             }
             throw error;

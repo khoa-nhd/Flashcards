@@ -1,7 +1,10 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useSync } from '../app-context.js';
 import { ROUTES, type RouteKey } from '../lib/router.js';
+import { ConfirmDialog } from './ConfirmDialog.js';
 import { Icon, type IconName } from './Icon.js';
 import { Link } from './Link.js';
+import { SyncStatus } from './SyncStatus.js';
 
 interface NavItem {
   route: RouteKey;
@@ -79,11 +82,12 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
   return (
     <div className="flex h-dvh">
       <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface/50 p-3 md:flex">
-        <div className="flex items-center gap-2 px-3 pb-4 pt-2">
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-4 pt-2">
           <span className="font-serif text-lg font-semibold tracking-tight">Vocabulary</span>
           {badge !== null && (
             <span className="rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn-ink">{badge}</span>
           )}
+          <SyncStatus />
         </div>
         <nav aria-label="Main" className="flex flex-1 flex-col gap-1 overflow-y-auto">
           {PRIMARY.map(sideLink)}
@@ -95,13 +99,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
             <span className="truncate" title={account.email ?? undefined}>
               {account.email ?? 'Signed in'}
             </span>
-            <button
-              type="button"
-              className="cursor-pointer self-start font-semibold text-accent underline-offset-2 hover:underline"
-              onClick={() => void account.signOut().catch(() => undefined)}
-            >
-              Sign out
-            </button>
+            <SignOut account={account} />
           </div>
         )}
       </aside>
@@ -117,6 +115,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
             )}
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
+            <SyncStatus />
             {SECONDARY.map((item) => (
               <Link
                 key={item.route}
@@ -178,5 +177,44 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
         </nav>
       </div>
     </div>
+  );
+}
+
+/**
+ * Signing out is safe for anything already sent, but it leaves the outbox
+ * behind: changes still waiting would go next time this account signs in on
+ * this device, and ones the server refused would wait for a decision that can
+ * only be made while signed in. So unsent work asks first.
+ */
+function SignOut({ account }: { account: NonNullable<AppShellProps['account']> }) {
+  const { pending, refused } = useSync();
+  const [asking, setAsking] = useState(false);
+  const outstanding = pending + refused;
+  const signOut = () => void account.signOut().catch(() => undefined);
+
+  return (
+    <>
+      <button
+        type="button"
+        className="cursor-pointer self-start font-semibold text-accent underline-offset-2 hover:underline"
+        onClick={() => (outstanding === 0 ? signOut() : setAsking(true))}
+      >
+        Sign out
+      </button>
+      {asking && (
+        <ConfirmDialog
+          title="Sign out with unsent changes?"
+          confirmLabel="Sign out anyway"
+          onConfirm={signOut}
+          onCancel={() => setAsking(false)}
+        >
+          <p>
+            {outstanding === 1 ? 'One change has' : `${outstanding} changes have`} not reached the server. They stay on
+            this device, under this account, and are sent the next time you sign in here as the same person. Anything the
+            server refused waits for a retry or a dismissal, which you can only give while signed in.
+          </p>
+        </ConfirmDialog>
+      )}
+    </>
   );
 }

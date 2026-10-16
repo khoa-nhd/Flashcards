@@ -76,7 +76,18 @@ beforeEach(async () => {
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
 });
+
+/** Collects the provider-failure lines the server logs, keeping them out of the test output. */
+function captureServerErrors() {
+  const spy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  return {
+    providerFailures: () =>
+      spy.mock.calls.map(([first]) => String(first)).filter((line) => line.startsWith('AI provider failure')),
+    all: () => spy.mock.calls.map(([first]) => String(first)),
+  };
+}
 
 describe('AI chat API', () => {
   it('lists, creates and opens conversations in the shapes the page reads', async () => {
@@ -149,6 +160,83 @@ describe('AI chat API', () => {
 
     const opened = (await (await call(app, alice, `/api/ai/conversations/${id}`)).json()) as { messages: unknown[] };
     expect(opened.messages).toEqual([]);
+  });
+
+  it('names a retired model (404) as a model-or-address problem, without retrying it', async () => {
+    const logged = captureServerErrors();
+    // What Google answers for a model that has been retired, word for word.
+    provider.mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          error: {
+            code: 404,
+            message:
+              'This model models/gemini-2.5-flash is no longer available. Please update your code to use a newer model for the latest features and improvements.',
+            status: 'NOT_FOUND',
+          },
+        }),
+        { status: 404 },
+      ),
+    );
+    const { id } = await newConversation(alice);
+    const events = await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'error', code: 'provider_not_found' });
+    const message = String(events[0]?.message);
+    // It says where to look without pretending to know which is wrong...
+    expect(message).toContain('AI_MODEL');
+    expect(message).toContain('AI_BASE_URL');
+    expect(message).toContain('404');
+    // ...and keeps the provider's own words.
+    expect(message).toContain('no longer available');
+
+    // A permanent failure is never retried automatically.
+    expect(provider).toHaveBeenCalledTimes(1);
+
+    // The failed exchange is not kept, so sending again does not duplicate it.
+    const opened = (await (await call(app, alice, `/api/ai/conversations/${id}`)).json()) as { messages: unknown[] };
+    expect(opened.messages).toEqual([]);
+
+    // The log says what failed, where, and never the key.
+    const line = logged.providerFailures()[0] ?? '';
+    expect(line).toContain('provider=openai');
+    expect(line).toContain('model=test-model');
+    expect(line).toContain('status=404');
+    expect(line).toContain('/v1/chat/completions');
+    expect(line).not.toContain('test-key-not-real');
+  });
+
+  it('tells a rejected request (400) apart from a missing model (404)', async () => {
+    const logged = captureServerErrors();
+    provider.mockImplementation(async () => new Response(JSON.stringify({ error: { message: 'Invalid API key' } }), { status: 400 }));
+    const { id } = await newConversation(alice);
+    const events = await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'error', code: 'provider_bad_request' });
+    expect(String(events[0]?.message)).toContain('HTTP 400');
+    expect(logged.providerFailures()[0]).toContain('status=400');
+  });
+
+  it('reports rate limiting (429) with its own guidance', async () => {
+    provider.mockImplementation(async () => new Response(JSON.stringify({ error: { message: 'rate limit exceeded' } }), { status: 429 }));
+    const { id } = await newConversation(alice);
+    const events = await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'error', code: 'provider_unavailable' });
+    expect(String(events[0]?.message)).toContain('quota');
+  });
+
+  it('reports the provider’s own trouble (5xx) separately from a timeout', async () => {
+    const logged = captureServerErrors();
+    provider.mockImplementation(async () => new Response(JSON.stringify({ error: { message: 'internal error' } }), { status: 503 }));
+    const { id } = await newConversation(alice);
+    const events = await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'error', code: 'provider_error' });
+    expect(String(events[0]?.message)).toContain('server problem');
+    expect(String(events[0]?.message)).toContain('503');
+    expect(logged.providerFailures()[0]).toContain('status=503');
   });
 
   it('says the provider could not be reached rather than failing silently', async () => {

@@ -3,14 +3,15 @@
  * and insights pages all read from here, so switching tabs never refetches the
  * whole database, and a change shows up everywhere at once.
  *
- * Adds, edits and removals are applied here the moment they are made and sent
- * to the database behind them. Until a write is confirmed the entry it left
- * behind is only optimistic; if the database refuses it the change is taken
- * back out and the caller is told what went wrong. A repeated request id makes
- * a retry after a lost answer harmless.
+ * Adds, edits and removals are applied here the moment they are made and
+ * recorded in the outbox, which sends them when it can — now if there is a
+ * connection, later if there is not. What is shown is the last confirmed state
+ * with the outstanding operations folded over it, so a word added offline is
+ * still there after a reload.
  *
  * Data is kept for a short while and then re-read in the background the next
- * time a page asks for it; it is never treated as permanently fresh.
+ * time a page asks for it; it is never treated as permanently fresh. Where the
+ * server cannot be reached, the last read is shown instead of an error.
  */
 import type {
   CreateEntryInput,
@@ -18,15 +19,26 @@ import type {
   VocabularyEntry,
   VocabularyListResponse,
 } from '../../shared/api.js';
-import { compareDates, isIsoDate } from '../../shared/dates.js';
 import { ApiError, type VocabularyApi } from './api-client.js';
+import {
+  isVocabularyOp,
+  optimisticCreate,
+  optimisticUpdate,
+  projectVocabulary,
+  resolveEntityId,
+  type VocabCreatePayload,
+  type VocabDeletePayload,
+  type VocabUpdatePayload,
+} from './offline/ops.js';
+import type { LocalStore, OutboxRecord } from './offline/storage.js';
+import type { SyncEngine } from './offline/sync-engine.js';
 import { newRequestId } from './request-id.js';
 
 export type VocabularyMeta = Omit<VocabularyListResponse, 'entries'>;
 
 /** One write on its way to the database, or one that could not be saved. */
 export interface PendingWrite {
-  /** A new word's temporary id until the server answers; otherwise the word's own id. */
+  /** The operation's id: a new word's temporary id until the server confirms it; otherwise the word's own id. */
   id: string;
   operation: 'create' | 'update' | 'delete';
   status: 'saving' | 'failed';
@@ -47,6 +59,8 @@ export interface VocabularyState {
   loadedAt: number | null;
   /** Writes not yet confirmed by the database, including failed ones waiting on a retry. */
   pending: PendingWrite[];
+  /** True when the data shown is this device's own copy rather than a fresh read. */
+  offline: boolean;
 }
 
 /** Why a write could not be saved. */
@@ -69,6 +83,8 @@ export interface CreatedHandle {
 export interface ChangedHandle {
   /** The entry as it looks right now, before the database has answered. */
   entry: VocabularyEntry;
+  /** The operation's id, so a refused write can be sent again or dismissed. */
+  operationId: string;
   result: Promise<WriteResult>;
 }
 
@@ -85,7 +101,7 @@ export interface VocabularyStore {
   markStale(): void;
 
   /** Adds a word at once and saves it in the background. */
-  create(input: CreateEntryInput): CreatedHandle;
+  create(input: Omit<CreateEntryInput, 'requestId'>): CreatedHandle;
   /** Applies an edit at once and saves it in the background. */
   update(id: string, input: UpdateEntryInput): ChangedHandle;
   /** Takes a word out at once and moves it to the trash in the background. */
@@ -94,13 +110,12 @@ export interface VocabularyStore {
   retry(id: string): Promise<WriteResult> | null;
   /** Gives up on a failed write, clearing its indicator. Its optimistic change is already undone. */
   dismiss(id: string): void;
+  /** The real id for a word added on this device, once its create has settled. */
+  resolveId(id: string): string;
 }
 
 /** How long loaded data is used before a page visit triggers a background re-read. */
 export const MAX_AGE_MS = 60_000;
-
-/** The rules a new or edited word is shown under, for the moment before the server answers. */
-const OPTIMISTIC_RETIRED_AT_MASTERY = 10;
 
 const initialState: VocabularyState = {
   status: 'idle',
@@ -111,93 +126,17 @@ const initialState: VocabularyState = {
   stale: false,
   loadedAt: null,
   pending: [],
+  offline: false,
 };
 
-/** A write kept alive so it can be retried and reconciled exactly once. */
-interface PendingOp {
-  id: string;
-  operation: 'create' | 'update' | 'delete';
-  /** Runs the server call. */
-  run: () => Promise<VocabularyEntry | null>;
-  /** Puts the optimistic change in place, again after a failed attempt. */
-  apply: () => void;
-  /** Takes the optimistic change back out. */
-  revert: () => void;
-  /** Puts the record the server confirmed in place. */
-  confirm: (entry: VocabularyEntry | null) => void;
-  status: 'saving' | 'failed';
-  error: string | null;
-  resolve: ((result: WriteResult) => void) | null;
-}
-
-const tidyWord = (word: string): string => word.normalize('NFC').trim().replace(/\s+/g, ' ');
-
-const tidyText = (text: string | undefined): string | null => {
-  const tidy = text === undefined ? '' : text.normalize('NFC').trim();
-  return tidy === '' ? null : tidy;
-};
-
-/** Whether a word with this mastery and date is due, judged the way the server judges it. */
-function statusFor(
-  mastery: number | null,
-  reviewDate: string | null,
-  today: string | null,
-): VocabularyEntry['reviewStatus'] {
-  if (mastery === null || !Number.isInteger(mastery) || mastery < 0) return 'invalid';
-  if (mastery >= OPTIMISTIC_RETIRED_AT_MASTERY) return 'mastered';
-  if (reviewDate === null || !isIsoDate(reviewDate)) return 'unscheduled';
-  const order = compareDates(reviewDate, today ?? reviewDate);
-  if (order < 0) return 'overdue';
-  return order === 0 ? 'due_today' : 'upcoming';
-}
-
-const isReviewable = (status: VocabularyEntry['reviewStatus']): boolean =>
-  status === 'overdue' || status === 'due_today' || status === 'unscheduled';
-
-/** A new word as it looks before the database has answered. */
-function optimisticCreate(input: CreateEntryInput, meta: VocabularyMeta | null, localId: string): VocabularyEntry {
-  const today = meta?.today ?? null;
-  const mastery = input.mastery ?? meta?.defaults.mastery ?? null;
-  const reviewDate =
-    input.reviewDate !== undefined ? input.reviewDate : meta?.defaults.reviewDate === 'today' ? meta.today : null;
-  const reviewStatus = statusFor(mastery, reviewDate, today);
-  return {
-    id: localId,
-    word: tidyWord(input.word),
-    meaning: tidyText(input.meaning),
-    definition: tidyText(input.definition),
-    example: tidyText(input.example),
-    mastery,
-    reviewDate,
-    dateAdded: input.dateAdded ?? today,
-    reviewStatus,
-    reviewable: isReviewable(reviewStatus),
-    createdTime: null,
-    lastEditedTime: null,
-  };
-}
-
-/** The entry an edit would leave behind, before the database has answered. */
-function optimisticUpdate(
-  entry: VocabularyEntry,
-  input: UpdateEntryInput,
-  today: string | null,
-): VocabularyEntry {
-  const mastery = input.schedule?.mastery ?? entry.mastery;
-  const reviewDate = input.schedule === undefined ? entry.reviewDate : input.schedule.reviewDate;
-  const reviewStatus = statusFor(mastery, reviewDate, today);
-  return {
-    ...entry,
-    word: input.word === undefined ? entry.word : tidyWord(input.word),
-    meaning: input.meaning === undefined ? entry.meaning : tidyText(input.meaning),
-    definition: input.definition === undefined ? entry.definition : tidyText(input.definition),
-    example: input.example === undefined ? entry.example : tidyText(input.example),
-    dateAdded: input.dateAdded === undefined ? entry.dateAdded : input.dateAdded,
-    mastery,
-    reviewDate,
-    reviewStatus,
-    reviewable: isReviewable(reviewStatus),
-  };
+export interface VocabularyStoreOptions {
+  api: Pick<VocabularyApi, 'fetchVocabulary' | 'createEntry' | 'updateEntry' | 'deleteEntry'>;
+  engine: SyncEngine;
+  store: LocalStore;
+  accountId: string;
+  /** Temporary ids of words added on this device, resolved to the real ones. Shared with the sender. */
+  ids: Map<string, string>;
+  now?: () => number;
 }
 
 function failureOf(error: unknown): WriteFailure {
@@ -205,94 +144,146 @@ function failureOf(error: unknown): WriteFailure {
   return { code: 'unexpected', message: 'Could not save the change.', duplicates: [] };
 }
 
-export function createVocabularyStore(
-  api: Pick<VocabularyApi, 'fetchVocabulary' | 'createEntry' | 'updateEntry' | 'deleteEntry'>,
-  now: () => number = Date.now,
-): VocabularyStore {
+interface Deferred {
+  resolve: (result: WriteResult) => void;
+  promise: Promise<WriteResult>;
+}
+
+function defer(): Deferred {
+  let resolve!: (result: WriteResult) => void;
+  const promise = new Promise<WriteResult>((settle) => {
+    resolve = settle;
+  });
+  return { resolve, promise };
+}
+
+export function createVocabularyStore(options: VocabularyStoreOptions): VocabularyStore {
+  const { api, engine, store, accountId, ids } = options;
+  const now = options.now ?? Date.now;
   let state = initialState;
   const listeners = new Set<() => void>();
   let inFlight: Promise<void> | null = null;
-  /** Counts local changes, so a response that started before one is not allowed to undo it. */
-  let revision = 0;
-  /** What the database last said, and what it has been told since. */
+  /** What the database last said; never changed by local edits. */
   let base: VocabularyEntry[] = [];
-  /** New words the database has not confirmed yet, by their temporary id. */
-  const optimistic = new Map<string, VocabularyEntry>();
-  /** Writes still owed to the database, kept so they can be retried. */
-  const ops = new Map<string, PendingOp>();
+  /** Counts confirmed changes, so a read that started before one cannot undo it. */
+  let revision = 0;
+  /** What each outstanding operation's caller is waiting for, by operation id. */
+  const results = new Map<string, Deferred>();
+
+  /** The entries as they look right now: the last read with outstanding writes folded over it. */
+  const entries = (): VocabularyEntry[] =>
+    projectVocabulary(base, engine.currentOps(), {
+      today: state.meta?.today ?? null,
+      resolveId: (id) => resolveEntityId(id, ids),
+    });
+
+  const pendingWrites = (): PendingWrite[] =>
+    engine
+      .currentOps()
+      .filter(isVocabularyOp)
+      .map((op) => ({
+        id: op.id,
+        operation: op.kind === 'vocab_create' ? 'create' : op.kind === 'vocab_update' ? 'update' : 'delete',
+        status: op.status === 'failed' ? 'failed' : 'saving',
+        error: op.lastError,
+      }));
 
   const commit = (patch: Partial<VocabularyState> = {}): void => {
-    state = {
-      ...state,
-      ...patch,
-      entries: [...optimistic.values(), ...base],
-      pending: [...ops.values()].map((op) => ({
-        id: op.id,
-        operation: op.operation,
-        status: op.status,
-        error: op.error,
-      })),
-    };
+    state = { ...state, ...patch, entries: entries(), pending: pendingWrites() };
     for (const listener of listeners) listener();
   };
 
   const replaceBase = (entry: VocabularyEntry): void => {
+    revision += 1;
     const index = base.findIndex((existing) => existing.id === entry.id);
     base = index === -1 ? [entry, ...base] : base.map((existing) => (existing.id === entry.id ? entry : existing));
   };
 
-  const removeLocally = (id: string): void => {
-    optimistic.delete(id);
+  /** Takes a word out of the confirmed copy. Counts as a change: older reads must not undo it. */
+  const removeFromBase = (id: string): void => {
+    revision += 1;
     base = base.filter((entry) => entry.id !== id);
   };
 
-  const findLocal = (id: string): VocabularyEntry | null =>
-    optimistic.get(id) ?? base.find((entry) => entry.id === id) ?? null;
-
-  const replaceLocal = (entry: VocabularyEntry): void => {
-    if (optimistic.has(entry.id)) optimistic.set(entry.id, entry);
-    else replaceBase(entry);
+  const findLocal = (id: string): VocabularyEntry | null => {
+    const real = resolveEntityId(id, ids);
+    return entries().find((entry) => entry.id === id || entry.id === real) ?? null;
   };
 
-  const finish = (op: PendingOp, result: WriteResult): void => {
-    const resolve = op.resolve;
-    op.resolve = null;
-    // A local change either way: a response that started earlier must not undo it.
-    revision += 1;
-    if (result.ok) {
-      op.confirm(result.entry);
-      ops.delete(op.id);
-    } else {
-      op.revert();
-      op.status = 'failed';
-      op.error = result.message;
+  /**
+   * A new write to a word replaces any refused earlier write to it. Both carry
+   * absolute values, the refused one changed nothing on screen, and the panel
+   * offers the new attempt itself — without this, a refused update would block
+   * every later write to the same word, whose turn only comes after it.
+   */
+  const supersedeRefused = (entity: string): void => {
+    for (const op of engine.currentOps()) {
+      if (op.entity !== entity || !isVocabularyOp(op) || op.status !== 'failed') continue;
+      results.delete(op.id);
+      engine.dismiss(op.id);
+    }
+  };
+
+  /** The one place a settled operation lands, whichever kind it was. */
+  const settled = (op: OutboxRecord, value: unknown): void => {
+    const deferred = results.get(op.id);
+    results.delete(op.id);
+    if (op.kind === 'vocab_create') {
+      const entry = value as VocabularyEntry | undefined;
+      const payload = op.payload as unknown as VocabCreatePayload;
+      if (entry !== undefined && entry !== null) {
+        replaceBase(entry);
+        ids.set(payload.tempId, entry.id);
+        void store.kv
+          .put(`${accountId}:ids`, Object.fromEntries(ids))
+          .catch(() => undefined);
+      }
+      deferred?.resolve({ ok: true, entry: entry ?? null });
+      return;
+    }
+    if (op.kind === 'vocab_update') {
+      const entry = value as VocabularyEntry | undefined;
+      if (entry !== undefined && entry !== null) replaceBase(entry);
+      deferred?.resolve({ ok: true, entry: entry ?? null });
+      return;
+    }
+    if (op.kind === 'vocab_delete') {
+      // Gone for good: the confirmed copy has to lose it too, or the fold
+      // would bring the word back now that the operation has left the outbox.
+      removeFromBase(resolveEntityId((op.payload as unknown as VocabDeletePayload).id, ids));
+    }
+    deferred?.resolve({ ok: true, entry: null });
+  };
+
+  // Everything the outbox settles or refuses changes what is on screen.
+  engine.subscribeEvents((event) => {
+    if (!isVocabularyOp(event.op)) return;
+    if (event.type === 'settled') {
+      settled(event.op, event.value);
+    } else if (event.type === 'refused' || event.type === 'dismissed') {
+      const deferred = results.get(event.op.id);
+      results.delete(event.op.id);
+      if (deferred !== undefined) {
+        deferred.resolve(
+          event.type === 'refused' && event.error !== null
+            ? { ok: false, ...failureOf(event.error) }
+            : {
+                ok: false,
+                code: event.op.lastErrorCode ?? 'dismissed',
+                message: event.op.lastError ?? 'The change was given up.',
+                duplicates: [],
+              },
+        );
+      }
     }
     commit();
-    resolve?.(result);
-  };
+  });
+  engine.subscribe(() => commit());
 
-  const runOp = (op: PendingOp): void => {
-    op.status = 'saving';
-    op.error = null;
-    commit();
-    void (async () => {
-      try {
-        finish(op, { ok: true, entry: (await op.run()) ?? null });
-      } catch (error) {
-        finish(op, { ok: false, ...failureOf(error) });
-      }
-    })();
-  };
-
-  const startOp = (op: PendingOp): Promise<WriteResult> => {
-    ops.set(op.id, op);
-    op.apply();
-    revision += 1;
-    const result = new Promise<WriteResult>((resolve) => {
-      op.resolve = resolve;
-    });
-    runOp(op);
-    return result;
+  /** The stored id map, so a reload can still name a word added earlier. */
+  const loadIds = async (): Promise<void> => {
+    const saved = await store.kv.get<Record<string, string>>(`${accountId}:ids`);
+    if (saved !== null) for (const [temporary, real] of Object.entries(saved)) ids.set(temporary, real);
   };
 
   const load = (): Promise<void> => {
@@ -303,21 +294,24 @@ export function createVocabularyStore(
     inFlight = (async () => {
       let again = false;
       try {
-        const { entries, ...meta } = await api.fetchVocabulary();
+        const { entries: fetched, ...meta } = await api.fetchVocabulary();
         if (revision !== startedAt) {
-          // A word was added, edited or removed meanwhile; this snapshot predates it.
+          // A record was confirmed meanwhile; this snapshot predates it. Read again.
           again = true;
         } else {
-          base = entries;
-          commit({ status: 'ready', meta, error: null, refreshing: false, stale: false, loadedAt: now() });
+          base = fetched;
+          commit({ status: 'ready', meta, error: null, refreshing: false, stale: false, loadedAt: now(), offline: false });
         }
       } catch (error) {
         const failure = {
           message: error instanceof ApiError ? error.message : 'Could not load your vocabulary.',
           unauthorized: error instanceof ApiError && error.code === 'unauthorized',
         };
-        // Keep showing what we have; only an initial load has nothing to fall back on.
-        commit(state.status === 'ready' ? { error: failure, refreshing: false } : { status: 'error', error: failure });
+        const unreachable =
+          error instanceof ApiError && (error.code === 'network' || error.code === 'timeout') && state.meta !== null;
+        // Keep showing what we have; a first load has nothing to fall back on.
+        if (state.status === 'ready' || unreachable) commit({ error: failure, refreshing: false, offline: unreachable });
+        else commit({ status: 'error', error: failure });
       } finally {
         inFlight = null;
       }
@@ -335,6 +329,7 @@ export function createVocabularyStore(
     },
 
     ensureFresh() {
+      void loadIds().catch(() => undefined);
       if (state.status === 'idle' || state.status === 'error') void load();
       else if (state.status === 'ready' && !state.refreshing) {
         const old = state.loadedAt === null || now() - state.loadedAt > MAX_AGE_MS;
@@ -345,16 +340,12 @@ export function createVocabularyStore(
     reload: () => load(),
 
     upsert(entry) {
-      revision += 1;
-      // The database confirmed this record, so any optimistic stand-in for it goes.
-      optimistic.delete(entry.id);
       replaceBase(entry);
       commit();
     },
 
     remove(id) {
-      revision += 1;
-      removeLocally(id);
+      removeFromBase(id);
       commit();
     },
 
@@ -364,86 +355,65 @@ export function createVocabularyStore(
 
     create(input) {
       const localId = newRequestId();
-      const entry = optimisticCreate(input, state.meta, localId);
-      const op: PendingOp = {
-        id: localId,
-        operation: 'create',
-        run: () => api.createEntry(input),
-        apply: () => {
-          optimistic.set(localId, entry);
-        },
-        revert: () => {
-          optimistic.delete(localId);
-        },
-        confirm: (serverEntry) => {
-          optimistic.delete(localId);
-          if (serverEntry !== null) replaceBase(serverEntry);
-        },
-        status: 'saving',
-        error: null,
-        resolve: null,
-      };
-      return { localId, result: startOp(op) };
+      const entry = optimisticCreate(input, state.meta === null ? null : { ...state.meta.defaults, today: state.meta.today }, localId);
+      const opId = engine.enqueue({
+        kind: 'vocab_create',
+        entity: localId,
+        payload: { tempId: localId, entry, input } satisfies VocabCreatePayload,
+      });
+      const deferred = defer();
+      results.set(opId, deferred);
+      commit();
+      return { localId: opId, result: deferred.promise };
     },
 
     update(id, input) {
       const previous = findLocal(id);
       if (previous === null) throw new Error(`Cannot update a word that is not loaded (${id}).`);
+      supersedeRefused(id);
       const next = optimisticUpdate(previous, input, state.meta?.today ?? null);
-      const op: PendingOp = {
-        id,
-        operation: 'update',
-        run: () => api.updateEntry(id, input),
-        apply: () => replaceLocal(next),
-        revert: () => replaceLocal(previous),
-        confirm: (serverEntry) => replaceLocal(serverEntry ?? previous),
-        status: 'saving',
-        error: null,
-        resolve: null,
-      };
-      return { entry: next, result: startOp(op) };
+      const opId = engine.enqueue({
+        kind: 'vocab_update',
+        entity: id,
+        payload: { id, input } satisfies VocabUpdatePayload,
+      });
+      const deferred = defer();
+      results.set(opId, deferred);
+      commit();
+      return { entry: next, operationId: opId, result: deferred.promise };
     },
 
     trash(id) {
       const previous = findLocal(id);
       if (previous === null) throw new Error(`Cannot delete a word that is not loaded (${id}).`);
-      const op: PendingOp = {
-        id,
-        operation: 'delete',
-        run: async () => {
-          await api.deleteEntry(id);
-          return null;
-        },
-        apply: () => removeLocally(id),
-        revert: () => {
-          if (optimistic.has(id)) optimistic.set(id, previous);
-          else replaceBase(previous);
-        },
-        confirm: () => {},
-        status: 'saving',
-        error: null,
-        resolve: null,
-      };
-      return { entry: previous, result: startOp(op) };
+      supersedeRefused(id);
+      const opId = engine.enqueue({
+        kind: 'vocab_delete',
+        entity: id,
+        payload: { id } satisfies VocabDeletePayload,
+      });
+      const deferred = defer();
+      results.set(opId, deferred);
+      commit();
+      return { entry: previous, operationId: opId, result: deferred.promise };
     },
 
     retry(id) {
-      const op = ops.get(id);
-      if (op === undefined || op.status !== 'failed') return null;
-      op.apply();
-      revision += 1;
-      const result = new Promise<WriteResult>((resolve) => {
-        op.resolve = resolve;
-      });
-      runOp(op);
-      return result;
+      const op = engine.currentOps().find((candidate) => candidate.id === id);
+      if (op === undefined || !isVocabularyOp(op) || op.status !== 'failed') return null;
+      const deferred = defer();
+      results.set(id, deferred);
+      engine.retry(id);
+      return deferred.promise;
     },
 
     dismiss(id) {
-      const op = ops.get(id);
-      if (op === undefined || op.status !== 'failed') return;
-      ops.delete(id);
-      commit();
+      const op = engine.currentOps().find((candidate) => candidate.id === id);
+      if (op === undefined || !isVocabularyOp(op) || op.status !== 'failed') return;
+      results.delete(id);
+      engine.dismiss(id);
     },
+
+    resolveId: (id) => resolveEntityId(id, ids),
   };
 }

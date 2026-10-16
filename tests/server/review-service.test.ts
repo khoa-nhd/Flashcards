@@ -261,6 +261,67 @@ describe('submitAction', () => {
   });
 });
 
+describe('submitAction with answeredAt', () => {
+  const shown = { mastery: 3, nextReview: '2026-10-01' };
+
+  it('files the answer under the day it was given, not the day it arrived', async () => {
+    // Answered on the 7th at 10:00 in UTC+7, arriving on the 9th. The sample rule
+    // adds the NEW mastery (4) in days to the answering day: the 7th + 4 = the 11th.
+    const { service } = setup([record(1, shown)]);
+    const result = await service.submitAction({
+      pageId: pageId(1),
+      action: 'remember',
+      expected: shown,
+      answeredAt: '2026-10-07T03:00:00Z',
+    });
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 4, nextReview: '2026-10-11' } });
+  });
+
+  it('uses the answering day in the account time zone, not in UTC', async () => {
+    // 18:30 UTC on the 8th is already the 9th in UTC+7: the same day the server sees.
+    const { service } = setup([record(1, shown)]);
+    const result = await service.submitAction({
+      pageId: pageId(1),
+      action: 'not_remember',
+      expected: shown,
+      answeredAt: '2026-10-08T18:30:00Z',
+    });
+    expect(result).toEqual({ outcome: 'applied', state: { mastery: 3, nextReview: '2026-10-10' } });
+  });
+
+  it('recognises a retry of the same offline answer as already applied', async () => {
+    const { repository, service } = setup([record(1, shown)]);
+    const request = {
+      pageId: pageId(1),
+      action: 'remember' as const,
+      expected: shown,
+      answeredAt: '2026-10-07T03:00:00Z',
+      requestId: '00000000-0000-4000-8000-000000000001',
+    };
+    await service.submitAction(request);
+    // The response was lost, so the queued answer is sent again exactly as it was.
+    const retry = await service.submitAction(request);
+    expect(retry).toEqual({ outcome: 'already_applied', state: { mastery: 4, nextReview: '2026-10-11' } });
+    expect(repository.updates).toHaveLength(1);
+  });
+
+  it('refuses an answer dated in the future beyond a day', async () => {
+    const { repository, service } = setup([record(1, shown)]);
+    await expect(
+      service.submitAction({ pageId: pageId(1), action: 'remember', expected: shown, answeredAt: '2026-10-12T05:00:00Z' }),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('future') });
+    expect(repository.updates).toEqual([]);
+  });
+
+  it('refuses an answer more than a month old', async () => {
+    const { repository, service } = setup([record(1, shown)]);
+    await expect(
+      service.submitAction({ pageId: pageId(1), action: 'remember', expected: shown, answeredAt: '2026-08-15T05:00:00Z' }),
+    ).rejects.toMatchObject({ status: 400, message: expect.stringContaining('month') });
+    expect(repository.updates).toEqual([]);
+  });
+});
+
 describe('getQueue: why an empty queue is empty', () => {
   it('says words are still in progress when none happens to be due', async () => {
     const { service } = setup([record(1, { nextReview: '2026-11-01' })]);

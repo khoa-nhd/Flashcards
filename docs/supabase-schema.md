@@ -306,8 +306,13 @@ calendar day in the account's time zone. See [review-logic.md](review-logic.md).
   reported as already saved.
 - **A lost response:** Retry sends the same request id, and the database
   returns the first result instead of applying the answer again.
-- There is no offline mode: an answer given without a connection is not
-  queued; the card stays on screen with a Retry.
+- **Offline:** an answer given without a connection is recorded on the device
+  at once (the outbox, see [offline-mode-design.md](offline-mode-design.md))
+  and sent when the server can be reached. `answered_at` is what the browser
+  saw when the answer was given, so the recorded day, the schedule and FSRS
+  all use that moment, not the moment the answer arrived. A transport failure
+  or a 5xx is retried with backoff; a 4xx refusal is final for that answer and
+  is shown to the reviewer, with a Retry (same request id) or a Dismiss.
 
 ## Accounts
 

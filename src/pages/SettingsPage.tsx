@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useApp, useSettings, useVocabulary } from '../app-context.js';
+import { useApp, useSettings, useSync, useVocabulary } from '../app-context.js';
 import { AccountSection, DatabaseStatus, TimeZoneSection, TrashSection } from '../components/AccountSettings.js';
+import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { GoalSection } from '../components/GoalSection.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -32,7 +33,7 @@ const SAVING_TEXT = {
 } as const;
 
 export function SettingsPage() {
-  const { api, settings: store, vocabulary, account } = useApp();
+  const { api, settings: store, vocabulary, account, local } = useApp();
   const settings = useSettings();
   const state = useVocabulary();
   const { meta, entries } = state;
@@ -296,7 +297,78 @@ export function SettingsPage() {
         </section>
 
         {meta !== null && <TrashSection />}
+
+        {account !== null && local.persistent && <DeviceStorageSection />}
       </div>
     </div>
+  );
+}
+
+/**
+ * What this device keeps for the account between visits. Never the only copy
+ * of anything, so clearing it is safe — and refused writes have to be settled
+ * first, or clearing would throw away the only record of them.
+ */
+function DeviceStorageSection() {
+  const { local, toasts } = useApp();
+  const { pending, refused } = useSync();
+  const outstanding = pending + refused;
+  const [asking, setAsking] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const clear = async () => {
+    setClearing(true);
+    setError(null);
+    try {
+      await local.clear();
+      setAsking(false);
+      toasts.show({ message: 'Saved data was cleared from this device.' });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'The saved data could not be cleared.');
+    } finally {
+      setClearing(false);
+    }
+  };
+
+  return (
+    <section className={`${CARD} flex flex-col gap-3 p-5`}>
+      <h2 className={SECTION_TITLE}>Saved on this device</h2>
+      <p className="text-sm text-muted">
+        The app keeps a copy of your words, your review queue and any change not yet sent, so it works without a
+        connection and resumes after a reload. Clearing the copy changes nothing in your account: things are read from
+        the server again.
+      </p>
+      <button
+        type="button"
+        className={`${BUTTON_SECONDARY} self-start`}
+        disabled={outstanding > 0}
+        onClick={() => setAsking(true)}
+      >
+        Clear saved data on this device
+      </button>
+      {outstanding > 0 && (
+        <p className={HELP}>
+          {outstanding === 1 ? 'One change has' : `${outstanding} changes have`} not reached the server yet, and the
+          only record of {outstanding === 1 ? 'it' : 'them'} is here. Wait for them to be saved before clearing; a
+          change the server refused has to be retried or dismissed first, on the page that made it.
+        </p>
+      )}
+      {asking && (
+        <ConfirmDialog
+          title="Clear saved data on this device?"
+          confirmLabel="Clear saved data"
+          busy={clearing}
+          error={error}
+          onConfirm={() => void clear()}
+          onCancel={() => setAsking(false)}
+        >
+          <p>
+            This removes the copies kept on this device for your account: the words, the review queue, what was read
+            for offline use, and any change still waiting to be sent. Everything already saved stays in your account.
+          </p>
+        </ConfirmDialog>
+      )}
+    </section>
   );
 }

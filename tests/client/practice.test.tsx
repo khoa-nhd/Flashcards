@@ -391,7 +391,7 @@ describe('a practice session', () => {
 describe('when an answer cannot be checked', () => {
   it('shows the verdict at once, and repeats the very same request on Try again', async () => {
     const { api, user } = await open('/practice?mode=typing');
-    api.submitPractice.mockRejectedValueOnce(new ApiError('network', 'Could not reach the server.'));
+    api.submitPractice.mockRejectedValueOnce(new ApiError('forbidden', 'The database refused this change.', 403));
     await start(user);
     const word = promptedWord();
     await user.type(main().getByLabelText('Your answer'), `${word.word}{Enter}`);
@@ -399,17 +399,18 @@ describe('when an answer cannot be checked', () => {
     // Judged here at once; it is the save that failed.
     expect(await main().findByRole('status')).toHaveTextContent('Correct.');
     const alert = await main().findByRole('alert');
-    expect(alert).toHaveTextContent('Could not reach the server.');
+    expect(alert).toHaveTextContent('The database refused this change.');
 
     await user.click(within(alert).getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(api.submitPractice).toHaveBeenCalledTimes(2));
+    expect(api.submitPractice.mock.calls[1]?.[0]).toEqual(api.submitPractice.mock.calls[0]?.[0]);
     expect(await main().findByRole('status')).toHaveTextContent('Correct.');
-    expect(api.submitPractice).toHaveBeenCalledTimes(2);
     expect(sent(api, 1)).toEqual(sent(api, 0));
   });
 
   it('lets the failed question be skipped, and reports it as not recorded', async () => {
     const { api, user } = await open('/practice?mode=typing');
-    api.submitPractice.mockRejectedValueOnce(new ApiError('network', 'Could not reach the server.'));
+    api.submitPractice.mockRejectedValueOnce(new ApiError('forbidden', 'The database refused this change.', 403));
     await start(user);
     await user.type(main().getByLabelText('Your answer'), 'anything{Enter}');
     await user.click(within(await main().findByRole('alert')).getByRole('button', { name: 'Skip this question' }));

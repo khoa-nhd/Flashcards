@@ -1,172 +1,203 @@
-# Offline mode: a design note
+# Offline mode: how it works
 
-**Status: not built.** The app needs a connection for everything. With no
-connection the queue cannot load, and an answer that cannot be sent stays on
-screen with *Try again* until it can. Nothing is kept on the device between
-visits except display preferences. This note is what building offline review
-would take; none of it exists.
+**Status: built.** Review answers, practice answers and vocabulary changes are
+recorded on the device first and sent to the server whenever they can be. The
+app keeps working without a connection, and nothing that looks saved is ever
+dropped on the floor. Everything is either confirmed by the server or shown to
+the reviewer as refused, with a Retry and a Dismiss.
 
-## What "offline" would have to mean
+This note describes what was built, not a plan. The plan that preceded it is in
+the git history.
 
-Review the cards that were due when the device last had a connection, without
-one, and have every answer saved exactly once when it returns. Adding,
-editing, importing and practice stay online-only: they are not what gets done
-on a train, and each would bring its own conflicts.
+## The one model
 
-It must never mean an answer that looks saved and is not. That is the failure
-this design is built around.
+Every change — a review answer, a practice answer, a word added, edited or
+deleted — becomes one **operation** in a durable **outbox** on the device. The
+operation carries its own id (a UUID made in the browser), the account it
+belongs to, the entity it is about, its payload, and when it was made. Nothing
+is written anywhere else: what is on screen is the last confirmed server state
+with the outstanding operations folded over it, so:
 
-## What is already in place
+- one code path works the same online and offline;
+- a retry can never apply an operation twice, because the request id
+  identifies it to the server, which answers a repeat with its first result;
+- what is shown survives a reload, because the outbox is the truth.
 
-| Needed for offline | Present today |
+The outbox lives in `src/lib/offline/storage.ts` (IndexedDB, one database per
+account; a memory store is used when there is none). The engine that drains it
+is `src/lib/offline/sync-engine.ts`. The folding rules are pure functions in
+`src/lib/offline/ops.ts`.
+
+## Sending, and when it happens
+
+- An operation is **stored before it is sent**. Nothing exists only in memory
+  on its way to the server.
+- Sending is serial — one request in flight — and operations about the same
+  entity keep their order. Skipping ahead could apply an edit to a word that
+  the server has not created yet.
+- The engine is woken at start-up, when the browser comes online, when the tab
+  becomes visible, and shortly after anything is recorded. `navigator.onLine`
+  is only a hint: sending is driven by what actually happens to each request.
+- **Transport failures and 5xx** are retried with capped exponential backoff
+  and jitter. A 401 pauses sending for a minute; the session can come back.
+- **Refusals** (4xx other than 401/408/429) are final for that operation: it
+  moves to `failed`, stops where it is, and is reported to the person, who can
+  retry it (under the same request id) or dismiss it.
+- Nothing is ever silently discarded. An operation leaves the outbox only when
+  the server has confirmed it, or because the person dismissed it.
+
+## Review answers
+
+The review session (`src/lib/session-controller.ts`, machine in
+`session-machine.ts`) records each answer in the outbox and moves to the next
+card **in the same tick**. There is no submission lock and no wait for the
+database: A → B → C → D all work while the first three are still on their way.
+The rules:
+
+- An answer is accepted only after the card is flipped (and not while an Undo
+  is in flight). Rapid clicks, key presses or swipes cannot record twice:
+  the machine moves the card on as the answer is recorded.
+- Each answer carries the state the card was shown in (mastery and review
+  date); the server refuses an answer given against a state the word no
+  longer has. There is no "keep mine": a stale answer is a fact to report,
+  not a conflict to resolve.
+- Answers carry `answeredAt` — the instant the answer was given, from the
+  browser's clock. The server accepts it within a day of its own clock and no
+  more than 30 days back, and uses it for the recorded day, the schedule and
+  FSRS. An answer given on Monday and sent on Wednesday counts on Monday.
+- The sitting in progress is written to the device (snapshot, kept 7 days),
+  so a reload without a connection resumes exactly where it stopped: same
+  cards, same place, same answers still waiting.
+- Answers the server refuses are listed **beside** the current card with
+  Retry and Dismiss; the session never stops for them. A refused answer that
+  predates this sitting (a reload, another tab) is adopted back into the list
+  when a fresh queue loads, so it is never stuck with only a counter to show
+  for it.
+- Answer counts (the tally, the completion screen) count only what has been
+  confirmed; waiting answers are excluded and shown as saving.
+
+## Practice answers
+
+`src/pages/PracticePage.tsx` judges each answer locally with the same rules
+the server uses (`shared/study-modes.ts`) and records it in the outbox. The
+verdict shows at once; the confirmation (what was recorded, and the word's
+practice mastery in that mode) appears when the server answers. A refused
+answer shows the verdict with Retry and Skip; a lost connection retries
+silently. A dry run (saving switched off on the server) is shown as "Not
+recorded" and counted as such in the summary — never as saved.
+
+## Vocabulary changes
+
+`src/lib/vocabulary-store.ts` folds the outbox over the last read:
+
+- **Add** shows the word at once, sends it behind the form, and the "was
+  added" confirmation appears when the server has named the real record. A
+  temporary id names the word until then; the id map is kept on the device
+  so a reload can still resolve it.
+- **Edit** applies the change at once and sends only the fields that differ.
+  A refusal puts the stored values back and reopens the draft — nothing has
+  to be typed again.
+- **Delete** takes the word out of the list at once. The Undo toast appears
+  when the delete has been confirmed, and calls the server's restore then. A
+  refusal returns the word to the list with a Retry.
+- A new write to a word **supersedes** an earlier refused write to the same
+  word: both carry absolute values, and the refused one changed nothing on
+  screen — without this, a refused edit would block every later write to that
+  word.
+- A refused delete or create is reported where it was made (the word's panel,
+  the add form) rather than in a global list, because the draft or the toast
+  is what Retry needs.
+
+## Reads without a connection
+
+- `src/lib/offline/cached-api.ts` wraps the read-only API calls: every
+  successful read is kept on the device, and **only** a failure to reach the
+  server is answered from the copy. Reads that depend on the reviewer's day
+  (settings, plan, analytics, weak words, review days) are only ever answered
+  from a copy taken today; the rest (library, a word, practice history,
+  trash) are kept for up to a week.
+- The review queue is cached separately (with the day it was fetched for),
+  and answers already in the outbox are taken out of a restored queue.
+- The vocabulary list is the last read plus the folded outbox; it is re-read
+  in the background when it is stale, and a read that cannot reach the server
+  keeps showing what is stored.
+- A refusal (4xx) is never answered from a copy: only "the server was not
+  reached" is.
+
+## Accounts, storage and privacy
+
+- The outbox, the caches and the id map are scoped by account id; one
+  account's copy is never used for another.
+- No token, password or key is stored by any of this. The session stays where
+  the Supabase client already keeps it; syncing under an uncertain identity
+  never happens — operations are only ever sent as the account they were
+  recorded under.
+- Signing out asks first when anything is waiting or refused; clearing the
+  device's saved data in Settings is refused while anything is outstanding.
+- Guest (sample-data) mode stays memory-only: no offline persistence for the
+  guest account.
+
+## The app shell
+
+`public/sw.js` is a small hand-written service worker: navigation requests
+are network-first with a cached shell as fallback; hashed assets are
+cache-first (they never change); `/api/*` is never cached. It is registered
+only when the built `index.html` says `app-mode: production` (the `%MODE%`
+placeholder), so development and tests never see it.
+
+## What is not offline
+
+- Importing a list, AI Chat, account-settings writes, and the library writes
+  (collections, further examples, relations) need a connection.
+- FSRS state is not projected locally: a card whose FSRS schedule is in charge
+  shows the dates the server sent until the answers sync.
+- Guest mode keeps nothing between visits.
+- Multi-tab use is safe against duplicates (idempotent ids) but not merged:
+  each tab's view is its own; the outbox is shared.
+- Background Sync (sending with the tab closed) is not used.
+- Restoring a word from the trash needs a connection.
+- The queue shows the cards that were due when it was last fetched. Words
+  that became due while offline are not invented on the device.
+
+## Feature coverage
+
+| Feature | Offline |
 | --- | --- |
-| An answer can be sent twice safely | Yes. Every answer carries a request id made in the browser; the database saves it once and answers a repeat with the first result. |
-| A stale answer cannot overwrite a newer one | Yes. An answer names the state it was given against (mastery and review date); the database refuses it if the word has moved on (`409`, with the current state). |
-| Every answer is its own record | Yes. The history is append-only. |
-| The reviewer's own day is recorded | Partly. The server stamps the day from its own clock when the answer arrives. Offline, that is the wrong day (see below). |
+| Review: answer, swipe/keyboard, next card | **Full** (recorded locally, sent when possible) |
+| Review: Undo | Full when online; the answers themselves never need the connection |
+| Review: resume after reload | **Full** (snapshot ≤7 days) |
+| Practice: all modes, local verdict, results | **Full** (answers recorded locally) |
+| Vocabulary bank: view, search, filter, sort | **Full** (last read + folded writes) |
+| Vocabulary: add, edit, delete | **Full** (outbox, per-word retry) |
+| Vocabulary bank: word details | Full from cache; a refused read falls back to the cached word |
+| Weak words, dashboard summary, insights numbers | Partial: shown from today's cached read; may be stale |
+| Calendar / review days | Partial: today's cached read |
+| Collections, further examples, relations: view | Partial (cached library read) |
+| Collections, examples, relations: change | **Not offline** |
+| Import / Export | Not offline (needs the connection) |
+| AI Chat | Not offline |
+| Account settings, sign-in | Not offline |
+| Trash: view | Cached (≤7 days); Restore needs a connection |
+| App shell (open the app at all) | Full (service worker in production builds) |
+| Guest/sample-data mode | Works, memory-only: nothing survives a reload |
 
-## What would have to be built
+## Where it lives
 
-### 1. Local storage
+```
+src/lib/offline/storage.ts      Outbox and key-value storage (IndexedDB / memory)
+src/lib/offline/ops.ts          Payload types and the pure folding rules
+src/lib/offline/sync-engine.ts  The pump: store, claim, send, back off, report
+src/lib/offline/send.ts         One operation → one API request, field by field
+src/lib/offline/cached-api.ts   Reads that survive a lost connection
+src/lib/offline/service-worker.ts  Registers public/sw.js when the build says production
+public/sw.js                    The service worker itself
+src/lib/session-controller.ts   Review answers through the outbox, snapshot resume
+src/lib/session-machine.ts      The session's own transitions
+src/lib/vocabulary-store.ts     Vocabulary writes through the outbox, folded over reads
+```
 
-IndexedDB, in one database per signed-in account (named with the account id),
-holding:
-
-- **The queue as last loaded**: the cards, and the "today" and time zone they
-  were loaded for.
-- **The outbox**: answers given and not yet confirmed by the server.
-
-This puts vocabulary on the device, unencrypted, where today nothing is. It
-must be cleared on sign-out and never read by another account on the same
-browser. On a shared computer that is a real change in what the app leaves
-behind, and it should be something the owner switches on, not a default.
-
-### 2. An outbox of pending answers
-
-One entry per answer: the request id, the word, the answer, the state it was
-given against, the time on the card, the session id, the confidence rating if
-any, **and the moment it was answered** (instant and the reviewer's calendar
-day). Entries are sent oldest first, one at a time. An entry leaves the outbox
-only when the server has confirmed it or definitively refused it.
-
-A card answered offline leaves the local queue, as it does online. It is not
-offered again on that device until the outbox has drained and the queue has
-been reloaded.
-
-### 3. The answer's own date
-
-This is the part that needs a server change, and the reason offline is not
-just a client feature.
-
-Today the server works out the result from *its* "today": Remember at mastery
-3 means "due three days after the day the answer arrived". An answer given on
-Monday and synced on Wednesday would be scheduled from Wednesday, recorded as
-reviewed on Wednesday, and counted in Wednesday's statistics and streak. FSRS
-would likewise be told the review happened on Wednesday.
-
-So the request needs an optional `answeredAt`, and the server has to:
-
-- accept it only within limits (not in the future beyond a small clock
-  tolerance; not older than a set number of days, after which the entry is
-  refused and shown to the reviewer rather than applied);
-- use it, instead of its own clock, for the result, the recorded day and the
-  FSRS calculation;
-- still check that the word was due on that day.
-
-That changes `ReviewService.submitAction`, `record_review` and their tests.
-The rules themselves (`shared/review-logic.ts`) do not change: they already
-take the day as an argument.
-
-### 4. Idempotent synchronisation
-
-Sending an outbox entry is the request the app already makes, with the same
-request id every time it is tried. The outcomes, all of which exist today:
-
-| Server says | Meaning | Outbox entry |
-| --- | --- | --- |
-| `applied` or `already_applied` | Saved, now or on an earlier try | Removed |
-| `409` with the current state | The word changed since the card was loaded | Removed, and listed for the reviewer (see 5) |
-| `404` | The word is gone | Removed, and listed |
-| `401` | The session has expired | Kept; syncing stops until sign-in |
-| Network error, timeout, `5xx` | Unknown | Kept; tried again later, with growing waits |
-
-A `dry_run` reply (saving switched off on the server) must not be treated as
-saved: the entry is removed and the reviewer is told nothing was recorded.
-
-### 5. Conflicts between devices
-
-The existing rule stays, unchanged: **an answer given against a state the word
-no longer has is not applied.** There is no "keep mine". Forcing a stale
-answer through would count one sitting twice, which is exactly what the state
-check exists to prevent.
-
-So a refused entry is not an error to resolve but a fact to report: "3 answers
-given offline were not saved, because those words were reviewed on another
-device first", with the words named. They reappear in the queue if they are
-still due.
-
-Two answers to the same word in one offline sitting cannot happen: the card
-leaves the queue after the first.
-
-### 6. Undo
-
-Undo offline would mean removing an entry from the outbox before it is sent,
-which is safe, and nothing more. Undoing an answer that has already been
-synced still needs the server.
-
-### 7. Sign-in and sessions
-
-- The access token is short-lived and is refreshed online. Offline, it will
-  expire; syncing then waits for the reviewer to be signed in again. Outbox
-  entries are kept across that.
-- Entries are only ever sent as the account they were recorded under. If a
-  different account signs in on the browser, the previous account's database
-  is left alone (and can be cleared), never merged.
-- Signing out with a non-empty outbox asks first: syncing needs the session
-  that is about to end.
-- No password, token or key is stored by this feature. The session stays where
-  the Supabase client already keeps it.
-
-### 8. Saying what has not been saved
-
-- A count of pending answers, always visible while it is not zero, in words:
-  "4 answers waiting to be saved".
-- The completion screen separates "saved" from "waiting to be saved". Today's
-  rule, that nothing unsaved is counted as saved, carries over.
-- The summary, statistics, streak and goal come from the server, so they do
-  not include pending answers, and say so while there are any.
-- A way to see the outbox and to discard an entry on purpose.
-
-### 9. The app shell
-
-A service worker that caches the built files, so the app opens without a
-connection at all. Without it, "offline" only covers losing the connection
-after the page has loaded.
-
-## What it would not do
-
-- Show words that became due while offline: the queue is the one that was
-  loaded. A week offline is one sitting, not seven.
-- Run both schedules on the device. The schedule in charge is applied by the
-  server when the answer arrives.
-- Guarantee anything if the browser clears its storage. Pending answers are
-  lost with it, and the note in the interface has to say so.
-
-## Order of work
-
-1. `answeredAt` on the server, with its limits and tests. Useful on its own:
-   it also fixes the answer that is given at 23:59 and arrives at 00:01.
-2. The outbox, with the pending count, for answers that fail to send while the
-   page is open. No local queue yet. This is the smallest honest step.
-3. The local queue and per-account storage, behind a setting.
-4. The service worker.
-
-Each step is usable without the next.
-
-## Open questions for the owner
-
-- Is keeping vocabulary on the device acceptable, and on which devices?
-- How old may an offline answer be and still be applied? A day is safe. A week
-  starts to stretch what "reviewed on Monday" means for a schedule.
-- Is losing pending answers when browser data is cleared acceptable, given the
-  warning?
+The types, the storage and the engine have their own suites
+(`tests/client/sync-engine.test.ts`, `vocabulary-store.test.ts`,
+`session-controller.test.ts`, `cached-reads.test.ts`); the screens are covered
+through the real app (`review-ui`, `study-experience`, `vocabulary-pages`,
+`practice`, `app-pages`, `review-activity`).

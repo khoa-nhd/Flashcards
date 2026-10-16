@@ -11,6 +11,8 @@ import { NO_CAPABILITIES, type QueueResponse, type ReviewActionResponse } from '
 import { App } from '../../src/App.js';
 import { goalMessage } from '../../src/components/GoalStatus.js';
 import { ApiError } from '../../src/lib/api-client.js';
+import { createMemoryStore } from '../../src/lib/offline/storage.js';
+import { createSyncEngine } from '../../src/lib/offline/sync-engine.js';
 import { createSessionController } from '../../src/lib/session-controller.js';
 import { initialSessionState, transition, type SessionState } from '../../src/lib/session-machine.js';
 import { createSettingsStore, type Settings } from '../../src/lib/settings.js';
@@ -50,6 +52,20 @@ const press = (key: string, init: KeyboardEventInit = {}) =>
 const isFlipped = () => screen.getByTestId('flashcard').dataset.flipped === 'true';
 const lastRequest = (api: ReturnType<typeof createFakeApi>['api']) => api.submitAction.mock.calls.at(-1)?.[0];
 
+type Saves = ReturnType<typeof createFakeApi>['saves'];
+
+/** Waits for the outbox to send the answer at `at`, then settles it as saved. */
+async function save(saves: Saves, at = 0, result = applied) {
+  await waitFor(() => expect(saves.length).toBeGreaterThanOrEqual(at + 1));
+  await act(async () => saves[at]?.resolve(result));
+}
+
+/** Waits for the outbox to send the answer at `at`, then refuses it. */
+async function refuse(saves: Saves, at = 0, error: unknown) {
+  await waitFor(() => expect(saves.length).toBeGreaterThanOrEqual(at + 1));
+  await act(async () => saves[at]?.reject(error));
+}
+
 describe('choosing what to review', () => {
   const chooser = () => screen.getByLabelText('Cards to review') as HTMLSelectElement;
 
@@ -86,7 +102,7 @@ describe('choosing what to review', () => {
 
     press(' ');
     press('ArrowRight');
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(chooser().value).toBe('recent');
   });
 
@@ -118,12 +134,18 @@ describe('choosing what to review', () => {
     expect(chooser().value).toBe('');
   });
 
-  it('cannot be changed while an answer is being saved', async () => {
-    await open('/review', { cards: [card(1), card(2)] });
+  it('stays usable while an answer is still on its way, and the answer is not lost', async () => {
+    const { api, saves, user } = await open('/review', { cards: [card(1), card(2)] });
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    expect(chooser()).toBeDisabled();
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
+
+    // The answer waits in the outbox; the choice is never held hostage by it.
+    expect(chooser()).not.toBeDisabled();
+    await user.selectOptions(chooser(), 'recent');
+    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: 'recent' }));
+    expect(saves).toHaveLength(1);
   });
 });
 
@@ -190,7 +212,7 @@ describe('the shortcut list', () => {
 
     press(' ');
     press('ArrowRight');
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
   });
 
   it('can also be opened with a button', async () => {
@@ -222,12 +244,12 @@ describe('extra answer keys', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('K');
-    expect(lastRequest(api)).toMatchObject({ pageId: card(1).id, action: 'remember' });
-    await act(async () => saves[0]?.resolve(applied));
+    await waitFor(() => expect(lastRequest(api)).toMatchObject({ pageId: card(1).id, action: 'remember' }));
+    await save(saves, 0);
 
     press(' ');
     press('j');
-    expect(lastRequest(api)).toMatchObject({ pageId: card(2).id, action: 'not_remember' });
+    await waitFor(() => expect(lastRequest(api)).toMatchObject({ pageId: card(2).id, action: 'not_remember' }));
     // The arrows still work as well.
     expect(screen.getByRole('note', { name: 'Keyboard shortcuts' })).toHaveTextContent('←');
   });
@@ -247,6 +269,7 @@ describe('extra answer keys', () => {
     press('2');
     press('2', { repeat: true });
     press('2', { repeat: true });
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction).toHaveBeenCalledTimes(1);
   });
 });
@@ -283,7 +306,7 @@ describe('rating confidence before the answer', () => {
     expect(prompt()).not.toBeInTheDocument();
     press('ArrowLeft');
     // Sure, and wrong: both facts are sent, and neither changes the other.
-    expect(lastRequest(api)).toMatchObject({ pageId: card(1).id, action: 'not_remember', confidence: 3 });
+    await waitFor(() => expect(lastRequest(api)).toMatchObject({ pageId: card(1).id, action: 'not_remember', confidence: 3 }));
   });
 
   it('takes the keys 1, 2 and 3', async () => {
@@ -292,7 +315,7 @@ describe('rating confidence before the answer', () => {
     press('2');
     expect(isFlipped()).toBe(true);
     press('ArrowRight');
-    expect(lastRequest(api)).toMatchObject({ action: 'remember', confidence: 2 });
+    await waitFor(() => expect(lastRequest(api)).toMatchObject({ action: 'remember', confidence: 2 }));
   });
 
   it('can be skipped by flipping the card, and then nothing is sent for it', async () => {
@@ -300,6 +323,7 @@ describe('rating confidence before the answer', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
+    await waitFor(() => expect(lastRequest(api)).toMatchObject({ action: 'remember' }));
     expect(lastRequest(api)).not.toHaveProperty('confidence');
   });
 
@@ -315,6 +339,7 @@ describe('rating confidence before the answer', () => {
     expect(isFlipped()).toBe(false);
     press(' ');
     press('ArrowRight');
+    await waitFor(() => expect(lastRequest(api)).toMatchObject({ action: 'remember' }));
     expect(lastRequest(api)).not.toHaveProperty('confidence');
   });
 
@@ -323,23 +348,23 @@ describe('rating confidence before the answer', () => {
     await screen.findByTestId('flashcard');
     press('3');
     press('ArrowRight');
-    await act(async () => saves[0]?.resolve(applied));
+    await save(saves, 0);
 
     expect(prompt()).toBeInTheDocument();
     press(' ');
     press('ArrowRight');
-    expect(lastRequest(api)).toMatchObject({ pageId: card(2).id });
+    await waitFor(() => expect(lastRequest(api)).toMatchObject({ pageId: card(2).id }));
     expect(lastRequest(api)).not.toHaveProperty('confidence');
   });
 
-  it('repeats the same rating when a failed save is retried', async () => {
+  it('repeats the same rating when a refused save is retried', async () => {
     const { api, saves, user } = await open('/review', { cards: [card(1), card(2)], ...asking });
     await screen.findByTestId('flashcard');
     press('1');
     press('ArrowRight');
-    await act(async () => saves[0]?.reject(new ApiError('network', 'Could not reach the server.')));
-    await user.click(screen.getByRole('button', { name: /Retry/ }));
-    expect(api.submitAction).toHaveBeenCalledTimes(2);
+    await refuse(saves, 0, new ApiError('conflict', 'This card was changed after it was loaded.', 409));
+    await user.click(await screen.findByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(2));
     const [first, second] = api.submitAction.mock.calls.map(([request]) => request);
     expect(second).toEqual(first);
     expect(second).toMatchObject({ confidence: 1 });
@@ -350,7 +375,7 @@ describe('rating confidence before the answer', () => {
     await screen.findByTestId('flashcard');
     press('3');
     press('ArrowRight');
-    await act(async () => saves[0]?.resolve(applied));
+    await save(saves, 0);
     await act(async () => {
       press('u');
     });
@@ -370,7 +395,7 @@ describe('rating confidence before the answer', () => {
     expect(api.submitAction).not.toHaveBeenCalled();
     expect(isFlipped()).toBe(true);
     press('2');
-    expect(lastRequest(api)).toMatchObject({ action: 'remember', confidence: 1 });
+    await waitFor(() => expect(lastRequest(api)).toMatchObject({ action: 'remember', confidence: 1 }));
   });
 });
 
@@ -402,7 +427,7 @@ describe('the session rules for confidence', () => {
 
   it('never let a rating stand in for an answer', () => {
     const rated = transition(ready(), { type: 'RATE_CONFIDENCE', level: 3 });
-    expect(rated.saving).toBeNull();
+    expect(rated.pending).toEqual([]);
     expect(rated.tally).toEqual({ remember: 0, notRemember: 0, skipped: 0 });
   });
 
@@ -410,7 +435,7 @@ describe('the session rules for confidence', () => {
     let state = transition(ready(), { type: 'RATE_CONFIDENCE', level: 3 });
     state = transition(state, { type: 'GRADE', action: 'remember', requestId: 'r1', durationMs: 100 });
     // The rating travels with the answer; it is no longer the card's own.
-    expect(state.saving).toMatchObject({ confidence: 3 });
+    expect(state.pending[0]).toMatchObject({ confidence: 3 });
     expect(state.confidence).toBeNull();
     state = transition(state, { type: 'SAVE_SETTLED', requestId: 'r1', undoable: true });
     expect(state).toMatchObject({ index: 1, confidence: null, revealed: false });
@@ -422,7 +447,14 @@ describe('the session rules for confidence', () => {
       submitAction: async () => applied,
       undoAction: async () => ({ outcome: 'undone' as const, pageId: card(1).id, state: { mastery: 3, nextReview: null } }),
     };
-    const session = createSessionController(api);
+    const store = createMemoryStore();
+    const engine = createSyncEngine({
+      accountId: 'test',
+      store,
+      sender: async () => applied,
+      backoffMs: { base: 10, max: 20 },
+    });
+    const session = createSessionController({ api, engine, store, accountId: 'test' });
     await session.load();
     expect(session.rateConfidence(3)).toBe(false);
     expect(session.getState()).toMatchObject({ status: 'ready', confidence: null, revealed: false });
@@ -625,7 +657,7 @@ describe('the goal at the end of a session', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    await act(async () => saves[0]?.resolve(applied));
+    await save(saves, 0);
     const goal = await screen.findByRole('group', { name: 'Daily goal' });
     expect(goal).toHaveTextContent('3 of 3 reviews');
     expect(goal).toHaveTextContent('Reached today.');
@@ -636,7 +668,7 @@ describe('the goal at the end of a session', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    await act(async () => saves[0]?.resolve(applied));
+    await save(saves, 0);
     expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
     expect(api.fetchPlan).not.toHaveBeenCalled();
     expect(screen.queryByRole('group', { name: 'Daily goal' })).not.toBeInTheDocument();

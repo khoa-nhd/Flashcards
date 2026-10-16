@@ -94,8 +94,6 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const [duplicateOf, setDuplicateOf] = useState<VocabularyEntry[] | null>(null);
 
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [practiceHistory, setPracticeHistory] = useState<PracticeAnswer[]>([]);
 
@@ -243,14 +241,35 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
     });
   };
 
-  const remove = async () => {
-    if (entry === null || deleting) return;
-    setDeleting(true);
-    setDeleteError(null);
-    try {
-      await api.deleteEntry(entry.id);
-      vocabulary.remove(entry.id);
-      const removed = entry;
+  const remove = () => {
+    if (entry === null) return;
+    const removed = entry;
+    // Out of the list at once; the write waits in the outbox if it has to, and
+    // the word comes back with a reason if the server refuses it.
+    const { operationId, result } = vocabulary.trash(removed.id);
+    onClose();
+    void result.then((outcome) => {
+      if (!outcome.ok) {
+        toasts.show({
+          tone: 'error',
+          message: `${outcome.message} “${removed.word}” is still in your vocabulary.`,
+          action: {
+            label: 'Retry',
+            run: () => {
+              const again = vocabulary.retry(operationId);
+              if (again === null) return;
+              void again.then((next) => {
+                toasts.show(
+                  next.ok
+                    ? { message: `Moved “${removed.word}” to the trash.` }
+                    : { tone: 'error', message: next.message },
+                );
+              });
+            },
+          },
+        });
+        return;
+      }
       toasts.show({
         message: `Moved “${removed.word}” to the trash.`,
         action: {
@@ -274,11 +293,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
           },
         },
       });
-      onClose();
-    } catch (error) {
-      setDeleteError(error instanceof ApiError ? error.message : 'Could not delete the word.');
-      setDeleting(false);
-    }
+    });
   };
 
   const onSubmit = (event: FormEvent) => {
@@ -560,10 +575,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                   key="delete"
                   type="button"
                   className={`${BUTTON_GHOST} ml-auto text-bad-ink hover:text-bad-ink`}
-                  onClick={() => {
-                    setDeleteError(null);
-                    setConfirmingDelete(true);
-                  }}
+                  onClick={() => setConfirmingDelete(true)}
                   disabled={!canWrite}
                 >
                   <Icon name="trash" className="size-4" /> Delete
@@ -579,9 +591,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
         <ConfirmDialog
           title={`Delete “${entry.word}”?`}
           confirmLabel="Move to trash"
-          busy={deleting}
-          error={deleteError}
-          onConfirm={() => void remove()}
+          onConfirm={remove}
           onCancel={() => setConfirmingDelete(false)}
         >
           <p>

@@ -64,14 +64,14 @@ describe('Add vocabulary', () => {
     expect(api.createEntry.mock.calls[0]?.[0].requestId).toMatch(/^[0-9a-f-]{36}$/);
 
     // The word is already on screen and the form is ready again, without waiting for the database.
-    expect(screen.getByText(/Saving/)).toHaveTextContent('luminous');
+    expect(screen.getByText(/The form is ready for the next word/)).toHaveTextContent('luminous');
     expect(screen.queryByText(/was added/)).not.toBeInTheDocument();
     expect(wordField()).toHaveValue('');
     expect(addButton()).toBeEnabled();
 
     await act(async () => pending.resolve(entry(50, { word: 'luminous', meaning: 'sáng chói', dateAdded: TODAY })));
     expect(await screen.findByText(/was added/)).toHaveTextContent('luminous was added to your vocabulary.');
-    await waitFor(() => expect(screen.queryByText(/Saving/)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryAllByText(/Saving/)).toHaveLength(0));
     // Ready for the next word, with the cursor back where typing starts.
     expect(wordField()).toHaveValue('');
     expect(screen.getByLabelText('Vietnamese meaning')).toHaveValue('');
@@ -205,10 +205,16 @@ describe('Add vocabulary', () => {
     await user.type(await screen.findByLabelText(/^Word/), 'alpha{Enter}');
     // The next word can be typed and sent while the first is still saving.
     await user.type(wordField(), 'beta{Enter}');
-    expect(api.createEntry).toHaveBeenCalledTimes(2);
-    expect(api.createEntry.mock.calls.map((call) => call[0].word)).toEqual(['alpha', 'beta']);
+    await waitFor(() => expect(api.createEntry).toHaveBeenCalledTimes(1));
+    // Both submissions are on screen, and the second takes its turn behind the
+    // first instead of failing or being dropped.
+    expect(screen.getByText(/The form is ready for the next word/)).toHaveTextContent('alpha, beta');
+    expect(api.createEntry.mock.calls[0]?.[0].word).toBe('alpha');
 
     await act(async () => pending.resolve(entry(60, { word: 'alpha' })));
+    await waitFor(() => expect(api.createEntry).toHaveBeenCalledTimes(2));
+    expect(api.createEntry.mock.calls[1]?.[0].word).toBe('beta');
+    await waitFor(() => expect(screen.queryAllByText(/Saving/)).toHaveLength(0));
   });
 
   it('keeps several words added in quick succession, each saved once', async () => {
@@ -238,7 +244,8 @@ describe('Add vocabulary', () => {
     fireEvent.submit(form);
     fireEvent.submit(form);
     fireEvent.submit(form);
-    expect(api.createEntry).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.createEntry).toHaveBeenCalledTimes(1));
+    expect(api.createEntry.mock.calls[0]?.[0].word).toBe('zeal');
     await act(async () => pending.resolve(entry(51, { word: 'zeal' })));
   });
 
@@ -631,19 +638,20 @@ describe('Word details', () => {
 
   it('keeps what was typed when saving fails', async () => {
     const { api, user, panel } = await openWord();
-    api.updateEntry.mockRejectedValueOnce(new ApiError('database_unavailable', 'The database is temporarily unavailable.', 503));
+    api.updateEntry.mockRejectedValueOnce(new ApiError('forbidden', 'The database refused this change.', 403));
     await user.click(within(panel).getByRole('button', { name: /Edit/ }));
     const meaning = within(panel).getByLabelText('Vietnamese meaning');
     await user.clear(meaning);
     await user.type(meaning, 'may mắn bất ngờ');
     await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
 
-    expect(await within(panel).findByRole('alert')).toHaveTextContent('The database is temporarily unavailable. Your changes are still here.');
+    expect(await within(panel).findByRole('alert')).toHaveTextContent('The database refused this change. Your changes are still here.');
     expect(within(panel).getByLabelText('Vietnamese meaning')).toHaveValue('may mắn bất ngờ');
     // Escape must not throw the draft away either.
     await user.keyboard('{Escape}');
     expect(screen.getByRole('dialog')).toBeInTheDocument();
 
+    // The refused attempt does not stand in the way of saving again.
     await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
     expect(await within(panel).findByText('may mắn bất ngờ')).toBeInTheDocument();
   });
@@ -686,10 +694,10 @@ describe('Word details', () => {
     await user.click(screen.getByRole('button', { name: 'Move to trash' }));
 
     await waitFor(() => expect(rowWords()).toEqual(['alleviate', 'candid']));
-    expect(api.deleteEntry).toHaveBeenCalledExactlyOnceWith(pageId(1));
+    await waitFor(() => expect(api.deleteEntry).toHaveBeenCalledExactlyOnceWith(pageId(1)));
     expect(screen.queryByRole('heading', { name: 'serendipity' })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Undo' }));
+    await user.click(await screen.findByRole('button', { name: 'Undo' }));
     await waitFor(() => expect(rowWords()).toContain('serendipity'));
     expect(api.restoreEntry).toHaveBeenCalledExactlyOnceWith(pageId(1));
   });
@@ -699,8 +707,8 @@ describe('Word details', () => {
     api.deleteEntry.mockRejectedValueOnce(new ApiError('forbidden', 'The database refused this change.', 403));
     await user.click(within(panel).getByRole('button', { name: /Delete/ }));
     await user.click(screen.getByRole('button', { name: 'Move to trash' }));
-    expect(await screen.findByText('The database refused this change.')).toBeInTheDocument();
-    expect(rowWords()).toContain('serendipity');
+    expect(await screen.findByText(/The database refused this change/)).toBeInTheDocument();
+    await waitFor(() => expect(rowWords()).toContain('serendipity'));
   });
 
   it('is read-only while saving is switched off', async () => {

@@ -54,15 +54,23 @@ function swipe(dx: number, dy = 0, pointer: PointerEventInit = touch) {
   fireEvent.pointerUp(element, { ...pointer, clientX: start.clientX + dx, clientY: start.clientY + dy });
 }
 
-async function settle(save: Deferred<ReviewActionResponse> | undefined, result = applied) {
+/** Waits until the outbox has sent `count` answers: sending happens in the background now. */
+async function sent(saves: Array<Deferred<ReviewActionResponse>>, count = 1) {
+  await waitFor(() => expect(saves.length).toBeGreaterThanOrEqual(count));
+}
+
+/** Settles the answer at `at` as the server having saved it. */
+async function settle(saves: Array<Deferred<ReviewActionResponse>>, at = 0, result = applied) {
+  await sent(saves, at + 1);
   await act(async () => {
-    save?.resolve(result);
+    saves[at]?.resolve(result);
   });
 }
 
-async function fail(save: Deferred<ReviewActionResponse> | undefined, error: unknown) {
+async function fail(saves: Array<Deferred<ReviewActionResponse>>, at = 0, error: unknown) {
+  await sent(saves, at + 1);
   await act(async () => {
-    save?.reject(error);
+    saves[at]?.reject(error);
   });
 }
 
@@ -185,7 +193,7 @@ describe('answering with the keyboard', () => {
     const { api } = await renderApp();
     press(' ');
     press('ArrowRight');
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction).toHaveBeenCalledWith({
       pageId: card(1).id,
       action: 'remember',
@@ -193,6 +201,7 @@ describe('answering with the keyboard', () => {
       requestId: expect.any(String),
       durationMs: expect.any(Number),
       sessionId: expect.any(String),
+      answeredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
   });
 
@@ -200,7 +209,7 @@ describe('answering with the keyboard', () => {
     const { api } = await renderApp();
     press(' ');
     press('ArrowLeft');
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'not_remember' }));
   });
 
@@ -209,7 +218,7 @@ describe('answering with the keyboard', () => {
     const { api } = await renderApp();
     await user.keyboard(' ');
     await user.keyboard('{ArrowRight}');
-    expect(api.submitAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'remember' }));
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'remember' })));
   });
 
   it('a repeated or held key submits the answer only once', async () => {
@@ -219,6 +228,7 @@ describe('answering with the keyboard', () => {
     press('ArrowRight');
     press('ArrowRight', { repeat: true });
     press('ArrowLeft');
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction).toHaveBeenCalledTimes(1);
   });
 
@@ -226,7 +236,7 @@ describe('answering with the keyboard', () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await settle(saves[0]);
+    await settle(saves, 0);
     showsCard(2, 'word-2');
     press(' ');
     press('ArrowRight', { repeat: true });
@@ -275,7 +285,7 @@ describe('answering with the keyboard', () => {
     // Several re-renders and a card change must not stack up listeners.
     press(' ');
     press('ArrowRight');
-    await settle(saves[0]);
+    await settle(saves, 0);
     press(' ');
     expect(keydownCalls(added)).toBe(1);
     expect(keydownCalls(removed)).toBe(0);
@@ -292,7 +302,7 @@ describe('answering by swiping', () => {
     const { api } = await renderApp();
     press(' ');
     swipe(140);
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'remember' }));
   });
 
@@ -300,7 +310,7 @@ describe('answering by swiping', () => {
     const { api } = await renderApp();
     press(' ');
     swipe(-140);
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'not_remember' }));
   });
 
@@ -379,6 +389,7 @@ describe('answering by swiping', () => {
     swipe(140);
     press('ArrowLeft');
     swipe(-140);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction).toHaveBeenCalledTimes(1);
   });
 
@@ -414,19 +425,17 @@ describe('saving', () => {
     showsCard(2, 'word-2');
     expect(screen.getByLabelText('Card 2 of 3')).toHaveTextContent('2 / 3');
     expect(screen.getByText('2 left')).toBeInTheDocument();
-    expect(screen.getByRole('status')).toHaveTextContent('Saving…');
-    expect(answerButton('Remember')).toHaveAttribute('aria-busy', 'true');
+    expect(screen.getByText('Saving one answer…')).toBeInTheDocument();
 
-    await settle(saves[0]);
-    expect(screen.getByRole('status')).toHaveTextContent('');
-    expect(answerButton('Remember')).toHaveAttribute('aria-busy', 'false');
+    await settle(saves, 0);
+    expect(screen.queryByText('Saving one answer…')).not.toBeInTheDocument();
   });
 
   it('resets the next card to its front', async () => {
     const { saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await settle(saves[0]);
+    await settle(saves, 0);
     expect(isFlipped()).toBe(false);
     expect(screen.queryByText('definition of word-2')).not.toBeInTheDocument();
     expect(answerButton('Remember')).toHaveAttribute('aria-disabled', 'true');
@@ -434,8 +443,8 @@ describe('saving', () => {
     expect(screen.getByRole('button', { name: 'Flip card to show the answer' })).toHaveFocus();
   });
 
-  it('does not submit again while an answer is still saving', async () => {
-    const { api } = await renderApp();
+  it('does not answer the next card until it is flipped, however often the buttons are pressed', async () => {
+    const { api, saves } = await renderApp();
     press(' ');
     const remember = answerButton('Remember');
     const notRemember = answerButton('Not remember');
@@ -443,8 +452,10 @@ describe('saving', () => {
     fireEvent.click(remember); // a double click
     fireEvent.click(notRemember);
     press('ArrowRight');
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
+    await settle(saves, 0);
     expect(api.submitAction).toHaveBeenCalledTimes(1);
-    expect(remember).toHaveAttribute('aria-busy', 'true');
+    expect(remember).toHaveAttribute('aria-disabled', 'true');
     expect(notRemember).toHaveAttribute('aria-disabled', 'true');
   });
 
@@ -452,8 +463,8 @@ describe('saving', () => {
     const { api, saves } = await renderApp();
     press(' ');
     fireEvent.click(answerButton('Not remember'));
-    expect(api.submitAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'not_remember' }));
-    await settle(saves[0]);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledWith(expect.objectContaining({ action: 'not_remember' })));
+    await settle(saves, 0);
     showsCard(2, 'word-2');
   });
 
@@ -461,10 +472,10 @@ describe('saving', () => {
     const { saves } = await renderApp([card(1), card(2)]);
     press(' ');
     press('ArrowRight');
-    await settle(saves[0]);
+    await settle(saves, 0);
     press(' ');
     press('ArrowLeft');
-    await settle(saves[1]);
+    await settle(saves, 1);
 
     expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
     expect(screen.getByText('You went through 2 cards in this session.')).toBeInTheDocument();
@@ -490,7 +501,7 @@ describe('saving', () => {
     const { saves } = await renderApp([card(1)]);
     press(' ');
     press('ArrowRight');
-    await settle(saves[0]);
+    await settle(saves, 0);
     expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
     expect(screen.queryByText(/mastered/i)).not.toBeInTheDocument();
   });
@@ -511,7 +522,7 @@ describe('saving', () => {
       seen.push(screen.getByText(/Card \d of 3: /).textContent ?? '');
       press(' ');
       press(i % 2 === 0 ? 'ArrowRight' : 'ArrowLeft');
-      await settle(saves[i]);
+      await settle(saves, i);
     }
     expect(seen.map((text) => text.match(/word-\d/)?.[0])).toEqual(['word-1', 'word-2', 'word-3']);
     expect(api.submitAction.mock.calls.map(([request]) => request.pageId)).toEqual([
@@ -526,81 +537,84 @@ describe('saving', () => {
   });
 });
 
-describe('when saving fails', () => {
+describe('when the server refuses an answer', () => {
   it('says the answer was not saved and keeps it for a retry', async () => {
     const { saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('network', 'Could not reach the server. Check your connection.'));
+    await fail(saves, 0, new ApiError('forbidden', 'The database refused this change.', 403));
 
-    expect(screen.getByRole('alert')).toHaveTextContent('was not saved');
+    expect(screen.getByRole('alert')).toHaveTextContent('One answer was not saved');
     expect(screen.getByRole('alert')).toHaveTextContent('word-1');
-    expect(screen.getByRole('alert')).toHaveTextContent('Could not reach the server. Check your connection.');
+    expect(screen.getByRole('alert')).toHaveTextContent('The database refused this change.');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dismiss' })).toBeInTheDocument();
     showsCard(2, 'word-2');
   });
 
-  it('ignores answer shortcuts until the failure is dealt with', async () => {
+  it('never blocks the next answer while one is refused', async () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('network', 'offline'));
-    press('ArrowRight');
-    press('ArrowLeft');
-    swipe(200);
+    await fail(saves, 0, new ApiError('forbidden', 'The database refused this change.', 403));
     press(' ');
-    expect(api.submitAction).toHaveBeenCalledTimes(1);
+    press('ArrowLeft');
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(2));
+    expect(api.submitAction.mock.calls[1]?.[0]).toMatchObject({ action: 'not_remember' });
   });
 
-  it('retries the same answer and clears the alert once it is confirmed', async () => {
+  it('retries the same answer and clears the panel once it is confirmed', async () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('timeout', 'No confirmation arrived in time.'));
+    await fail(saves, 0, new ApiError('conflict', 'This card was changed after it was loaded.', 409));
 
     const retry = screen.getByRole('button', { name: 'Retry' });
     expect(retry).toHaveFocus();
     fireEvent.click(retry);
-    expect(api.submitAction).toHaveBeenCalledTimes(2);
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(2));
     expect(api.submitAction.mock.calls[1]).toEqual(api.submitAction.mock.calls[0]);
     showsCard(2, 'word-2');
 
-    await settle(saves[1], { outcome: 'already_applied', state: { mastery: 4, nextReview: '2026-10-13' } });
+    await settle(saves, 1, { outcome: 'already_applied', state: { mastery: 4, nextReview: '2026-10-13' } });
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     showsCard(2, 'word-2');
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('can discard a failed answer instead of retrying', async () => {
+  it('can dismiss a refused answer instead of retrying', async () => {
     const { api, saves } = await renderApp();
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('network', 'offline'));
-    fireEvent.click(screen.getByRole('button', { name: 'Discard answer' }));
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
-    // The failed answer is not re-sent; the next card is a fresh one.
+    await fail(saves, 0, new ApiError('forbidden', 'The database refused this change.', 403));
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
+    // The refused answer is not re-sent; the next card is a fresh one.
     expect(api.submitAction).toHaveBeenCalledTimes(1);
     press(' ');
     press('ArrowLeft');
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(2));
     expect(api.submitAction).toHaveBeenLastCalledWith(expect.objectContaining({ action: 'not_remember' }));
   });
 
-  it('treats a card answered on another device as stale, and offers only to skip it', async () => {
+  it('marks a card answered elsewhere as changed, and leaves a dismissed answer out of the counts', async () => {
     const { api, saves } = await renderApp([card(1), card(2)], { mode: 'supabase' });
     press(' ');
     press('ArrowRight');
-    await fail(saves[0], new ApiError('conflict', 'This card was changed after it was loaded, so nothing was saved.', 409));
+    await fail(saves, 0, new ApiError('conflict', 'This card was changed after it was loaded, so nothing was saved.', 409));
 
     const alert = screen.getByRole('alert');
-    expect(alert).toHaveTextContent('could not be saved');
-    expect(alert).toHaveTextContent('the card changed on another device');
-    expect(screen.queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+    expect(alert).toHaveTextContent('word-1');
+    expect(alert).toHaveTextContent('changed on another device');
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
 
-    // Skipping records nothing; the session simply moves on and says so at the end.
-    fireEvent.click(screen.getByRole('button', { name: 'Skip this card' }));
+    // Dismissing records nothing; the session simply moves on and says so at the end.
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    await waitFor(() => expect(screen.queryByRole('alert')).not.toBeInTheDocument());
     press(' ');
     press('ArrowRight');
-    await settle(saves[1]);
+    await settle(saves, 1);
     expect(api.submitAction).toHaveBeenCalledTimes(2);
-    expect(screen.getByText('Skipped because they changed on another device')).toBeInTheDocument();
+    expect(screen.getByText('Not saved, so left out of the counts').previousSibling).toHaveTextContent('1');
   });
 });
 
@@ -648,7 +662,7 @@ describe('undoing the last answer', () => {
     const context = await renderApp(cards, withUndo);
     press(' ');
     press('ArrowRight');
-    await settle(context.saves[0]);
+    await settle(context.saves, 0);
     return context;
   }
 
@@ -675,7 +689,7 @@ describe('undoing the last answer', () => {
     await act(async () => {
       press('u');
     });
-    expect(api.undoAction).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(api.undoAction).toHaveBeenCalledTimes(1));
     showsCard(1, 'word-1');
     // Nothing left to undo: the key now does nothing.
     press('u');
@@ -692,7 +706,7 @@ describe('undoing the last answer', () => {
     const { saves } = await renderApp([card(1), card(2)]);
     press(' ');
     press('ArrowRight');
-    await settle(saves[0]);
+    await settle(saves, 0);
     expect(screen.queryByRole('button', { name: /^Undo/ })).not.toBeInTheDocument();
     expect(screen.queryByText('undo')).not.toBeInTheDocument();
   });
@@ -704,11 +718,11 @@ describe('undoing the last answer', () => {
     );
     press(' ');
     press('ArrowRight');
-    await settle(context.saves[0]);
+    await settle(context.saves, 0);
     await act(async () => {
       fireEvent.click(screen.getByRole('button', { name: /^Undo/ }));
     });
-    expect(screen.getByRole('alert')).toHaveTextContent('can no longer be undone');
+    expect(await screen.findByRole('alert')).toHaveTextContent('can no longer be undone');
     showsCard(2, 'word-2');
     expect(screen.queryByRole('button', { name: /^Undo/ })).not.toBeInTheDocument();
   });
@@ -717,7 +731,7 @@ describe('undoing the last answer', () => {
     const { saves } = await answerFirst();
     press(' ');
     press('ArrowLeft');
-    await settle(saves[1]);
+    await settle(saves, 1);
     expect(screen.getByRole('button', { name: 'Undo “Not remember” for word-2' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /for word-1/ })).not.toBeInTheDocument();
   });
@@ -745,10 +759,10 @@ describe('the session summary', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    await settle(fake.saves[0]);
+    await settle(fake.saves, 0);
     press(' ');
     press('ArrowLeft');
-    await settle(fake.saves[1]);
+    await settle(fake.saves, 1);
     return fake;
   }
 
@@ -792,7 +806,7 @@ describe('the session summary', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     press('ArrowRight');
-    await settle(fake.saves[0], { outcome: 'dry_run', state: null });
+    await settle(fake.saves, 0, { outcome: 'dry_run', state: null });
     expect(await screen.findByText(/This was a preview/)).toBeInTheDocument();
     expect(fake.api.fetchSessionSummary).not.toHaveBeenCalled();
     expect(screen.queryByText(/Accuracy/)).not.toBeInTheDocument();

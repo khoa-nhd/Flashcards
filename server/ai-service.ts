@@ -69,6 +69,10 @@ export enum AiErrorCode {
   MESSAGE_TOO_LONG = 'message_too_long',
   RATE_LIMITED = 'rate_limited',
   PROVIDER_UNAVAILABLE = 'provider_unavailable',
+  /** The provider rejected the request (HTTP 400): the key or the model id is the usual cause. */
+  PROVIDER_BAD_REQUEST = 'provider_bad_request',
+  /** The provider has nothing at that address or no model with that name (HTTP 404). */
+  PROVIDER_NOT_FOUND = 'provider_not_found',
   PROVIDER_ERROR = 'provider_error',
   PROVIDER_TIMEOUT = 'provider_timeout',
   INVALID_RESPONSE = 'invalid_response',
@@ -245,6 +249,92 @@ async function startRequest(url: string, init: RequestInit, signal: AbortSignal,
   }
 }
 
+/** The provider's own explanation of a failure, when it sent one. */
+async function providerDetail(response: Response): Promise<string | null> {
+  try {
+    const body: unknown = await response.json();
+    const message = (body as { error?: { message?: unknown } } | null)?.error?.message;
+    return typeof message === 'string' && message.trim() !== '' ? message.trim() : null;
+  } catch {
+    return null; // No JSON body, or not one with a message.
+  }
+}
+
+/** One bounded line: what the log gets, and what the reader is shown. */
+function oneLine(text: string, max = 300): string {
+  const flat = text.replace(/\s+/g, ' ').trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}
+
+/**
+ * Turns one failed provider response into the app's own error, in one place
+ * for both providers, with the classes told apart:
+ *
+ * - 401/403: the provider refused the key — an authentication problem.
+ * - 400: the request was rejected — the key or the model id is the usual
+ *   cause.
+ * - 404: no model or route by that name — the model id or the base address
+ *   is most likely wrong, or the model has been retired. The message names
+ *   both possibilities rather than guessing which one it is.
+ * - 429: rate limiting, with a minute of guidance.
+ * - 5xx: the provider's own trouble; trying again later is reasonable.
+ *
+ * The log line carries the provider, the model, the status and the address —
+ * enough to diagnose from outside — and the provider's own words, bounded.
+ * Never the key, the headers or the conversation; none of those reach here.
+ */
+function providerHttpFailure(
+  provider: AiProvider,
+  model: string,
+  url: string,
+  response: Response,
+  detail: string | null,
+): AiError {
+  const { status } = response;
+  const said = detail === null ? '' : ` The provider said: "${oneLine(detail)}"`;
+  console.error(
+    `AI provider failure: provider=${provider} model=${model} status=${status} url=${url}${detail === null ? '' : ` detail="${oneLine(detail)}"`}`,
+  );
+
+  if (status === 429) {
+    return new AiError(
+      AiErrorCode.PROVIDER_UNAVAILABLE,
+      `The AI provider is busy or its quota is used up. Try again in a minute.${said}`,
+      429,
+      60,
+    );
+  }
+  if (status === 401 || status === 403) {
+    return new AiError(
+      AiErrorCode.PROVIDER_ERROR,
+      `The AI provider refused the key this server uses. Check the AI key in the server settings.${said}`,
+      502,
+    );
+  }
+  if (status === 400) {
+    return new AiError(
+      AiErrorCode.PROVIDER_BAD_REQUEST,
+      `The AI provider rejected the request (HTTP 400). The key or the model id is the usual cause; check the AI settings on the server.${said}`,
+      502,
+    );
+  }
+  if (status === 404) {
+    return new AiError(
+      AiErrorCode.PROVIDER_NOT_FOUND,
+      `The AI provider has no model or endpoint by that name (HTTP 404). The model id or the base address is most likely wrong, or the model has been retired; check AI_MODEL and AI_BASE_URL on the server.${said}`,
+      502,
+    );
+  }
+  if (status >= 500) {
+    return new AiError(
+      AiErrorCode.PROVIDER_ERROR,
+      `The AI provider had a server problem (HTTP ${status}). Try again shortly.${said}`,
+      502,
+    );
+  }
+  return new AiError(AiErrorCode.PROVIDER_ERROR, `The AI provider refused the request (HTTP ${status}).${said}`, 502);
+}
+
 /** Provider-agnostic interface for model calls. */
 export interface AiProviderClient {
   /** Generates a complete response (non-streaming). */
@@ -333,8 +423,9 @@ export class OpenAiCompatibleClient implements AiProviderClient {
       stream,
     };
 
+    const url = `${this.baseUrl}/chat/completions`;
     const response = await startRequest(
-      `${this.baseUrl}/chat/completions`,
+      url,
       {
         method: 'POST',
         headers: {
@@ -348,20 +439,7 @@ export class OpenAiCompatibleClient implements AiProviderClient {
     );
 
     if (!response.ok) {
-      let message = `Provider returned ${response.status}`;
-      try {
-        const err = await response.json();
-        message = err.error?.message ?? message;
-      } catch {
-        // Ignore parse errors
-      }
-      if (response.status === 429) {
-        throw new AiError(AiErrorCode.PROVIDER_UNAVAILABLE, 'The AI provider is busy or its quota is used up. Try again in a minute.', 429, 60);
-      }
-      if (response.status === 401 || response.status === 403) {
-        throw new AiError(AiErrorCode.PROVIDER_ERROR, 'The AI provider refused the key this server uses. Check the AI key in the server settings.', 502);
-      }
-      throw new AiError(AiErrorCode.PROVIDER_ERROR, message, 502);
+      throw providerHttpFailure('openai', config.model, url, response, await providerDetail(response));
     }
     return response;
   }
@@ -467,8 +545,9 @@ export class AnthropicClient implements AiProviderClient {
       stream,
     };
 
+    const url = `${this.baseUrl}/messages`;
     const response = await startRequest(
-      `${this.baseUrl}/messages`,
+      url,
       {
         method: 'POST',
         headers: {
@@ -484,20 +563,7 @@ export class AnthropicClient implements AiProviderClient {
     );
 
     if (!response.ok) {
-      let message = `Provider returned ${response.status}`;
-      try {
-        const err = await response.json();
-        message = err.error?.message ?? message;
-      } catch {
-        // Ignore parse errors
-      }
-      if (response.status === 429) {
-        throw new AiError(AiErrorCode.PROVIDER_UNAVAILABLE, 'The AI provider is busy or its quota is used up. Try again in a minute.', 429, 60);
-      }
-      if (response.status === 401 || response.status === 403) {
-        throw new AiError(AiErrorCode.PROVIDER_ERROR, 'The AI provider refused the key this server uses. Check the AI key in the server settings.', 502);
-      }
-      throw new AiError(AiErrorCode.PROVIDER_ERROR, message, 502);
+      throw providerHttpFailure('anthropic', config.model, url, response, await providerDetail(response));
     }
     return response;
   }

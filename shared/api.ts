@@ -157,6 +157,13 @@ export const reviewActionRequestSchema = z.strictObject({
   /** The sitting this answer belongs to. Chosen by the browser when a review session starts. */
   sessionId: z.uuid().optional(),
   /**
+   * The instant the answer was given, as the browser's clock saw it. Sent so an
+   * answer made without a connection is recorded on the day it was answered
+   * rather than the day it reached the server; the server checks it against
+   * its own clock and ignores it where the two disagree beyond a day.
+   */
+  answeredAt: z.iso.datetime({ offset: true }).optional(),
+  /**
    * How sure the reviewer said they were before the answer was shown. Stored
    * beside the answer; it never changes what the answer does.
    */
@@ -490,6 +497,8 @@ export const practiceRequestSchema = z.strictObject({
   sessionId: z.uuid().optional(),
   durationMs: z.number().int().min(0).max(86_400_000).optional(),
   confidence: confidenceSchema.optional(),
+  /** The instant the answer was given; see `reviewActionRequestSchema`. */
+  answeredAt: z.iso.datetime({ offset: true }).optional(),
 });
 
 export const practiceResponseSchema = z.object({

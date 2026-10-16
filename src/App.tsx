@@ -10,6 +10,7 @@ import { WordDetailPanel } from './components/WordDetailPanel.js';
 import { BUTTON_PRIMARY } from './components/ui.js';
 import { ApiError, appApi, createAppApi, fetchAppConfig, type ApiAuth, type AppApi } from './lib/api-client.js';
 import type { AuthClient } from './lib/auth.js';
+import { createLocalStore, createMemoryStore } from './lib/offline/storage.js';
 import { ROUTES, closeWord, matchRoute, useLocation, wordInQuery, type RouteKey } from './lib/router.js';
 import type { SettingsStore } from './lib/settings.js';
 import { AddPage } from './pages/AddPage.js';
@@ -165,6 +166,7 @@ function AccountApp({
     <SignedIn
       key={state.user.id}
       auth={auth}
+      accountId={state.user.id}
       email={state.user.email}
       settings={settings}
       apiFor={apiFor}
@@ -176,6 +178,7 @@ function AccountApp({
 
 function SignedIn({
   auth,
+  accountId,
   email,
   settings,
   apiFor,
@@ -183,6 +186,7 @@ function SignedIn({
   onSignedOut,
 }: {
   auth: AuthClient;
+  accountId: string;
   email: string | null;
   settings?: SettingsStore;
   apiFor: (auth: ApiAuth) => AppApi;
@@ -206,12 +210,29 @@ function SignedIn({
       },
     },
   }));
-  return <Workspace api={api} settings={settings} account={account} />;
+  return <Workspace api={api} settings={settings} account={account} accountId={accountId} />;
 }
 
-function Workspace({ api, settings, account }: { api: AppApi; settings?: SettingsStore; account: AccountControls | null }) {
-  // Created once: the review session and the loaded vocabulary outlive any single page.
-  const [services] = useState(() => createAppServices(api, settings, account));
+function Workspace({
+  api,
+  settings,
+  account,
+  accountId,
+}: {
+  api: AppApi;
+  settings?: SettingsStore;
+  account: AccountControls | null;
+  /** The signed-in account's id. Without one — the built-in sample words — nothing is kept on the device. */
+  accountId?: string;
+}) {
+  // Created once: the review session, the loaded vocabulary and the outbox behind them outlive any single page.
+  const [services] = useState(() =>
+    createAppServices(api, settings, account, {
+      accountId: accountId ?? 'local',
+      // Sample data is nobody's own: it is kept for this visit only, never written to the device.
+      store: accountId === undefined ? createMemoryStore() : createLocalStore().store,
+    }),
+  );
   return (
     <AppProvider value={services}>
       <Root />

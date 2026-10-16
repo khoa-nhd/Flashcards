@@ -5,18 +5,17 @@ import type { Confidence } from '../../shared/api.js';
 import { useSettings } from '../app-context.js';
 import { ANSWER_KEY_SETS, useReviewShortcuts } from '../hooks/useReviewShortcuts.js';
 import type { SessionController } from '../lib/session-controller.js';
-import { canUndo, currentCard, isSaving, saveIssue, type SessionState } from '../lib/session-machine.js';
+import { canUndo, currentCard, type SessionState } from '../lib/session-machine.js';
 import { ConfidencePrompt } from './ConfidencePrompt.js';
 import { Flashcard } from './Flashcard.js';
+import { RefusedAnswersPanel } from './RefusedAnswersPanel.js';
 import { ReviewControls } from './ReviewControls.js';
 import { ReviewProgress } from './ReviewProgress.js';
-import { SaveIssuePanel } from './SaveIssuePanel.js';
 import { SkippedNotice } from './SkippedNotice.js';
 
 export interface ReviewScreenProps {
   state: SessionState;
   session: SessionController;
-  onReload: () => void;
   /** Opens the list of keyboard shortcuts. */
   onHelp?: () => void;
   /** Something is open over the card (the shortcut list): keys must not reach the review. */
@@ -28,16 +27,16 @@ const ACTION_TEXT: Record<ReviewAction, string> = {
   not_remember: 'Not remember',
 };
 
-export function ReviewScreen({ state, session, onReload, onHelp, paused = false }: ReviewScreenProps) {
+export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewScreenProps) {
   const { askConfidence, answerKeys } = useSettings();
   const card = currentCard(state);
   const cardId = card?.id ?? null;
   const { status } = state;
-  const saving = isSaving(state);
-  const issue = saveIssue(state);
+  // An answer still on its way never holds the next one up; this is a notice, not a lock.
+  const saving = state.pending.length > 0;
   const flipped = status === 'flipped';
-  // An answer is only accepted on a flipped card, with nothing else in flight.
-  const canGrade = flipped && !saving && issue === null;
+  // An answer is accepted on any flipped card. Nothing the server does can stand in the way.
+  const canGrade = flipped;
 
   const [hintVisible, setHintVisible] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -107,7 +106,6 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
   const total = state.cards.length;
   const undoable = state.lastSaved;
   const undoWord = undoable === null ? null : (state.cards[undoable.index]?.word ?? null);
-  const issueWord = state.failed === null ? null : (state.cards[state.failed.index]?.word ?? null);
   const extraKeys = ANSWER_KEY_SETS[answerKeys];
 
   return (
@@ -116,7 +114,11 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
 
       <div className="flex min-h-8 items-center justify-between gap-3 text-sm">
         <p role="status" className="min-w-0 flex-1 truncate text-muted">
-          {saving ? 'Saving…' : hintVisible ? 'Flip the card before answering.' : ''}
+          {saving
+            ? `Saving ${state.pending.length === 1 ? 'one answer' : `${state.pending.length} answers`}…`
+            : hintVisible
+              ? 'Flip the card before answering.'
+              : ''}
         </p>
         {undoable !== null && (
           <button
@@ -150,7 +152,7 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
             today={state.meta?.today ?? null}
             flipped={flipped}
             canGrade={canGrade}
-            locked={issue !== null}
+            locked={false}
             pendingAction={null}
             onFlip={flip}
             onGrade={grade}
@@ -162,18 +164,19 @@ export function ReviewScreen({ state, session, onReload, onHelp, paused = false 
 
       {askingConfidence && <ConfidencePrompt onRate={rate} />}
 
-      {issue !== null ? (
-        <SaveIssuePanel
-          kind={issue.kind}
-          message={issue.message}
-          word={issueWord}
-          onRetry={() => session.retrySave()}
-          onDiscard={() => session.cancelSave()}
-          onReload={onReload}
-          onSkip={() => session.skipCard()}
-        />
-      ) : (
-        <ReviewControls enabled={flipped && !saving} saving={saving} onGrade={grade} onBlocked={showFlipHint} />
+      <ReviewControls enabled={flipped} onGrade={grade} onBlocked={showFlipHint} />
+
+      <RefusedAnswersPanel
+        answers={state.refused}
+        onRetry={(requestId) => session.retryRefusal(requestId)}
+        onDismiss={(requestId) => session.dismissRefusal(requestId)}
+      />
+
+      {state.source === 'cache' && (
+        <p role="status" className="rounded-xl bg-warn-soft px-3 py-2 text-sm text-warn-ink">
+          Offline: these are the cards from this device’s last queue. Answers are kept here and sent when the connection
+          is back.
+        </p>
       )}
 
       <div

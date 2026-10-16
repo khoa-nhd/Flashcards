@@ -12,6 +12,11 @@ export default tseslint.config(
     languageOptions: { globals: { ...globals.browser, ...globals.node } },
   },
   {
+    // The service worker is plain JavaScript with the worker's own globals.
+    files: ['public/sw.js'],
+    languageOptions: { globals: { ...globals.serviceworker } },
+  },
+  {
     files: ['src/**/*.{ts,tsx}'],
     ...reactHooks.configs.flat.recommended,
   },
