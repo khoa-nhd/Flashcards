@@ -228,6 +228,8 @@ describe('AI chat API', () => {
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({ type: 'error', code: 'provider_unavailable' });
     expect(String(events[0]?.message)).toContain('quota');
+    // Quota problems are not retried; retrying only burns more quota.
+    expect(provider).toHaveBeenCalledTimes(1);
   });
 
   it('reports the provider’s own trouble (5xx) separately from a timeout', async () => {
@@ -240,6 +242,33 @@ describe('AI chat API', () => {
     expect(String(events[0]?.message)).toContain('server problem');
     expect(String(events[0]?.message)).toContain('503');
     expect(logged.providerFailures()[0]).toContain('status=503');
+    // An unrelenting overload is retried twice before the error is shown.
+    expect(provider).toHaveBeenCalledTimes(3);
+  });
+
+  it('rides out a momentary overload (503) without showing an error', async () => {
+    const logged = captureServerErrors();
+    let calls = 0;
+    provider.mockImplementation(async () => {
+      calls += 1;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ error: { message: 'The model is overloaded. Please try again later.' } }), { status: 503 });
+      }
+      return streamedReply(['Hel', 'lo']);
+    });
+    const { id } = await newConversation(alice);
+    const events = await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+
+    // The reader sees a normal reply, as if the blip never happened...
+    expect(events.filter((event) => event.type === 'delta').map((event) => event.delta).join('')).toBe('Hello');
+    expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'stop' });
+    expect(provider).toHaveBeenCalledTimes(2);
+    // ...nothing is logged as a failure...
+    expect(logged.providerFailures()).toEqual([]);
+
+    // ...and the exchange is kept like any other reply.
+    const opened = (await (await call(app, alice, `/api/ai/conversations/${id}`)).json()) as { messages: unknown[] };
+    expect(opened.messages).toHaveLength(2);
   });
 
   it('says the provider could not be reached rather than failing silently', async () => {

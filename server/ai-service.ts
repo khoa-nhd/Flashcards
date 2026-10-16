@@ -249,6 +249,53 @@ async function startRequest(url: string, init: RequestInit, signal: AbortSignal,
   }
 }
 
+/** How long to wait before each retry, in order. Two retries at most. */
+const RETRY_DELAYS_MS = [500, 1000] as const;
+
+/** Waits `ms` milliseconds, or less if the caller's signal aborts first. */
+function sleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(() => {
+      signal.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
+ * Starts a request, riding out the provider's own momentary trouble: a 5xx
+ * answer (most often a 503, "temporarily overloaded") is waited out briefly
+ * and retried, twice at the most. Only the start of a request is retried —
+ * once a reply has begun streaming it cannot be replayed, so a failure part
+ * way through is left to the caller to report.
+ */
+async function startRequestWithRetries(
+  url: string,
+  init: RequestInit,
+  signal: AbortSignal,
+  timeoutMs: number,
+): Promise<Response> {
+  for (let attempt = 0; ; attempt += 1) {
+    const response = await startRequest(url, init, signal, timeoutMs);
+    const delay = RETRY_DELAYS_MS[attempt];
+    if (response.status < 500 || delay === undefined) return response;
+    if (response.body) {
+      try {
+        await response.body.cancel();
+      } catch {
+        // This body is being dropped anyway; a failed cancel changes nothing.
+      }
+    }
+    await sleep(delay, signal);
+  }
+}
+
 /** The provider's own explanation of a failure, when it sent one. */
 async function providerDetail(response: Response): Promise<string | null> {
   try {
@@ -277,7 +324,8 @@ function oneLine(text: string, max = 300): string {
  *   is most likely wrong, or the model has been retired. The message names
  *   both possibilities rather than guessing which one it is.
  * - 429: rate limiting, with a minute of guidance.
- * - 5xx: the provider's own trouble; trying again later is reasonable.
+ * - 5xx: the provider's own trouble (a 503 is its "temporarily overloaded"
+ *   signal); a couple of quick retries have already happened by this point.
  *
  * The log line carries the provider, the model, the status and the address —
  * enough to diagnose from outside — and the provider's own words, bounded.
@@ -424,7 +472,7 @@ export class OpenAiCompatibleClient implements AiProviderClient {
     };
 
     const url = `${this.baseUrl}/chat/completions`;
-    const response = await startRequest(
+    const response = await startRequestWithRetries(
       url,
       {
         method: 'POST',
@@ -546,7 +594,7 @@ export class AnthropicClient implements AiProviderClient {
     };
 
     const url = `${this.baseUrl}/messages`;
-    const response = await startRequest(
+    const response = await startRequestWithRetries(
       url,
       {
         method: 'POST',

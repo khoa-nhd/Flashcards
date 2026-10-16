@@ -430,6 +430,11 @@ change is needed. Current lists:
 [Gemini](https://ai.google.dev/gemini-api/docs/deprecations),
 [Anthropic](https://platform.claude.com/docs/en/about-claude/model-deprecations).
 
+Momentary overload takes care of itself: when the provider reports its own
+trouble (a 503 means "temporarily overloaded"), the server waits briefly and
+retries the request, twice at the most, before showing an error. A failed
+reply is never saved, so sending again is always clean.
+
 Free tiers are rate-limited, and some use your data for training. A local model
 has neither problem but needs the app to run where it does.
 
