@@ -581,7 +581,15 @@ export function createFakeApi({
         },
       });
     }),
+    markMessageSaved: vi.fn<AppApi['markMessageSaved']>(async (conversationId, messageId, vocabularyId) => {
+      const chat = chats.get(conversationId);
+      const message = chat?.messages.find((item) => item.id === messageId);
+      if (message === undefined) return { saved: false };
+      const metadata = typeof message.metadata === 'object' && message.metadata !== null ? message.metadata : {};
+      message.metadata = { ...metadata, vocabularyId, savedAt: new Date().toISOString() };
+      return { saved: true };
+    }),
   } satisfies AppApi;
 
-  return { api, saves, store };
+  return { api, saves, store, chats };
 }

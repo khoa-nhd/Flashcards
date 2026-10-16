@@ -3,6 +3,7 @@ import {
   accountSettingsSchema,
   aiConversationListResponseSchema,
   aiConversationSchema,
+  aiMessageSavedResponseSchema,
   aiMessageSchema,
   analyticsResponseSchema,
   apiErrorSchema,
@@ -33,6 +34,7 @@ import {
   type AiConversation,
   type AiConversationListResponse,
   type AiMessage,
+  type AiMessageSavedResponse,
   type DayPlanResponse,
   type ImportResponse,
   type LibraryResponse,
@@ -175,6 +177,12 @@ export interface AiApi {
   deleteConversation(id: string): Promise<void>;
   /** Sends a message and returns a readable stream of SSE chunks. */
   sendMessage(id: string, content: string): Promise<ReadableStream<Uint8Array>>;
+  /**
+   * Marks a Vocabulary Expert reply as saved to one word, so the "Added" state
+   * survives a reload. Best effort: `saved: false` where the database is older
+   * than version 12 and has nowhere to keep the link.
+   */
+  markMessageSaved(conversationId: string, messageId: string, vocabularyId: string): Promise<AiMessageSavedResponse>;
 }
 
 export type { AiConversation, AiMessage, AiStreamChunk, AiConversationListResponse, AiMessageListResponse } from '../../shared/api.js';
@@ -623,6 +631,18 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
 
     sendMessage: (id, content) =>
       openStream(`/api/ai/conversations/${encodeURIComponent(id)}/messages`, { content }, TIMEOUTS.queueMs, auth),
+
+    markMessageSaved: (conversationId, messageId, vocabularyId) =>
+      call(
+        `/api/ai/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/saved`,
+        aiMessageSavedResponseSchema,
+        {
+          method: 'POST',
+          body: { vocabularyId },
+          timeoutMs: TIMEOUTS.actionMs,
+          timeoutMessage: 'Recording the added word took too long.',
+        },
+      ),
   };
 }
 

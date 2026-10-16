@@ -899,6 +899,17 @@ export const aiMessageListResponseSchema = z.object({
 });
 export type AiMessageListResponse = z.infer<typeof aiMessageListResponseSchema>;
 
+/** The word one Vocabulary Expert reply was added to, from the "Add Word" action. */
+export const aiMessageSavedRequestSchema = z.strictObject({
+  vocabularyId: z.uuid(),
+});
+
+export const aiMessageSavedResponseSchema = z.object({
+  /** False when the database is older than version 12 and has nowhere to keep the link. */
+  saved: z.boolean(),
+});
+export type AiMessageSavedResponse = z.infer<typeof aiMessageSavedResponseSchema>;
+
 export const aiConversationCreateSchema = z.strictObject({
   mode: z.enum(AI_MODES),
   title: z.string().max(200).optional(),

@@ -36,6 +36,8 @@ export interface AiService {
     limit?: number,
     offset?: number,
   ): Promise<Array<{ id: string; role: 'user' | 'assistant' | 'system'; content: string; metadata: Record<string, unknown>; createdAt: string }>>;
+  /** Marks an assistant message as saved to a word, so the state survives a reload. Needs schema version 12. */
+  markMessageSaved(conversationId: string, messageId: string, vocabularyId: string): Promise<boolean>;
   /** Builds the conversation context for generation. */
   buildContext(conversationId: string, mode: AiMode, history: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>, newUserMessage: string): ConversationContext;
   /** Checks rate limits for a mode. */
@@ -117,6 +119,10 @@ export function createAiService(repository: VocabularyRepository, env: Record<st
     async listMessageRecords(conversationId: string, limit = 200, offset = 0) {
       const rows = await repository.listAiMessages(conversationId, limit, offset);
       return rows.map((r) => ({ id: r.id, role: r.role, content: r.content, metadata: r.metadata, createdAt: r.created_at }));
+    },
+
+    async markMessageSaved(conversationId: string, messageId: string, vocabularyId: string) {
+      return repository.markAiMessageSaved(conversationId, messageId, vocabularyId);
     },
 
     buildContext(conversationId: string, mode: AiMode, history: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>, newUserMessage: string) {

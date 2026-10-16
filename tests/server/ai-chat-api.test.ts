@@ -5,7 +5,7 @@
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { aiConversationSchema, aiMessageSchema, apiErrorSchema } from '../../shared/api.js';
-import { call, createSupabaseTestApp, createTestUser, type TestApp, type TestUser } from '../helpers/supabase-app.js';
+import { call, createSupabaseTestApp, createTestUser, newId, type TestApp, type TestUser } from '../helpers/supabase-app.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
 
 const AI_ENV = {
@@ -305,5 +305,104 @@ describe('AI chat API', () => {
     const response = await call(app, alice, '/api/ai/conversations?limit=50&offset=0');
     expect(response.status).toBe(503);
     expect(apiErrorSchema.parse(await response.json()).error.code).toBe('ai_unavailable');
+  });
+
+  describe('marking a reply as added', () => {
+    /** Adds one word through the real route and answers with its id. */
+    async function addWord(user: TestUser, word: string) {
+      const response = await call(app, user, '/api/vocabulary', { method: 'POST', body: { word, requestId: newId() } });
+      expect(response.status).toBe(201);
+      return ((await response.json()) as { entry: { id: string } }).entry.id;
+    }
+
+    /** A Vocabulary Expert conversation with one exchange, and the stored messages. */
+    async function expertExchange(user: TestUser) {
+      const { id } = await newConversation(user, 'vocabulary_expert');
+      await eventsOf(await call(app, user, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'proliferation' } }));
+      const opened = (await (await call(app, user, `/api/ai/conversations/${id}`)).json()) as {
+        messages: Array<{ id: string; role: string }>;
+      };
+      return { id, messages: opened.messages };
+    }
+
+    it('records the word on the reply, and the reply keeps it when reopened', async () => {
+      const vocabularyId = await addWord(alice, 'proliferation');
+      const { id, messages } = await expertExchange(alice);
+      const assistant = messages.find((message) => message.role === 'assistant');
+      expect(assistant).toBeDefined();
+
+      const response = await call(app, alice, `/api/ai/conversations/${id}/messages/${assistant!.id}/saved`, {
+        method: 'POST',
+        body: { vocabularyId },
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ saved: true });
+
+      const reopened = (await (await call(app, alice, `/api/ai/conversations/${id}`)).json()) as {
+        messages: Array<{ id: string; metadata: Record<string, unknown> | null }>;
+      };
+      const stored = reopened.messages.find((message) => message.id === assistant!.id);
+      expect(stored?.metadata).toMatchObject({ vocabularyId });
+      expect(typeof stored?.metadata?.savedAt).toBe('string');
+      // Nothing else about the reply changed.
+      expect(reopened.messages).toHaveLength(2);
+    });
+
+    it('quietly answers saved:false for anything that is not the caller’s own reply', async () => {
+      const vocabularyId = await addWord(alice, 'proliferation');
+      const { id, messages } = await expertExchange(alice);
+      const userMessage = messages.find((message) => message.role === 'user');
+      const another = await expertExchange(alice);
+
+      const attempts = [
+        // A question, not a reply.
+        `/api/ai/conversations/${id}/messages/${userMessage!.id}/saved`,
+        // A reply in a different conversation.
+        `/api/ai/conversations/${id}/messages/${another.messages.find((message) => message.role === 'assistant')!.id}/saved`,
+        // A message that was never there.
+        `/api/ai/conversations/${id}/messages/00000000-0000-4000-8000-000000000009/saved`,
+      ];
+      for (const path of attempts) {
+        const response = await call(app, alice, path, { method: 'POST', body: { vocabularyId } });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toEqual({ saved: false });
+      }
+    });
+
+    it('will not point a reply at another account’s word', async () => {
+      const bobsWord = await addWord(bob, 'tide');
+      const { id, messages } = await expertExchange(alice);
+      const assistant = messages.find((message) => message.role === 'assistant');
+
+      const response = await call(app, alice, `/api/ai/conversations/${id}/messages/${assistant!.id}/saved`, {
+        method: 'POST',
+        body: { vocabularyId: bobsWord },
+      });
+      expect(response.status).toBe(403);
+      expect(apiErrorSchema.parse(await response.json()).error.code).toBe('forbidden');
+    });
+
+    it('refuses a reply in a general conversation, and someone else’s conversation', async () => {
+      const vocabularyId = await addWord(alice, 'proliferation');
+      const general = await newConversation(alice);
+      await eventsOf(await call(app, alice, `/api/ai/conversations/${general.id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+      const opened = (await (await call(app, alice, `/api/ai/conversations/${general.id}`)).json()) as { messages: Array<{ id: string; role: string }> };
+      const assistant = opened.messages.find((message) => message.role === 'assistant');
+
+      const wrongMode = await call(app, alice, `/api/ai/conversations/${general.id}/messages/${assistant!.id}/saved`, {
+        method: 'POST',
+        body: { vocabularyId },
+      });
+      expect(wrongMode.status).toBe(400);
+      expect(apiErrorSchema.parse(await wrongMode.json()).error.code).toBe('invalid_request');
+
+      const { id, messages } = await expertExchange(alice);
+      const reply = messages.find((message) => message.role === 'assistant');
+      const notBobs = await call(app, bob, `/api/ai/conversations/${id}/messages/${reply!.id}/saved`, {
+        method: 'POST',
+        body: { vocabularyId },
+      });
+      expect(notBobs.status).toBe(404);
+    });
   });
 });

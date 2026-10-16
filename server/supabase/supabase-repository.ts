@@ -98,7 +98,7 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     private readonly database: VocabularyDatabase,
     private readonly rules: ReviewRules,
     /** The newest migration the database has. Anything it lacks stays switched off. */
-    schemaVersion: number = LATEST_SCHEMA_VERSION,
+    private readonly schemaVersion: number = LATEST_SCHEMA_VERSION,
   ) {
     this.capabilities = capabilitiesAt(schemaVersion);
   }
@@ -443,6 +443,12 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
   ): Promise<AiMessageRow> {
     if (!this.capabilities.aiChat) throw new Error('AI chat not supported by this database version.');
     return this.database.insertAiMessage(conversationId, role, content, metadata);
+  }
+
+  async markAiMessageSaved(conversationId: string, messageId: string, vocabularyId: string): Promise<boolean> {
+    // The link is a convenience; before version 12 there is nowhere to keep it.
+    if (this.schemaVersion < 12) return false;
+    return this.database.markAiMessageSaved(conversationId, messageId, vocabularyId);
   }
 
   async checkAiRateLimit(

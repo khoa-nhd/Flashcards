@@ -5,6 +5,7 @@ import { z } from 'zod';
 import type { ZodType } from 'zod';
 import {
   REVIEW_FOCUSES,
+  aiMessageSavedRequestSchema,
   collectionNameRequestSchema,
   createEntryRequestSchema,
   createExampleRequestSchema,
@@ -641,6 +642,25 @@ export function createApp({
         'X-Accel-Buffering': 'no',
       },
     });
+  });
+
+  // Marks a Vocabulary Expert reply as saved to one of the caller's words, so
+  // the "Added" state survives a reload. Best effort: a database older than
+  // version 12 has nowhere to keep the link and answers `saved: false`.
+  app.post('/api/ai/conversations/:id/messages/:messageId/saved', async (c) => {
+    const conversationId = idParam(c, 'id', 'conversation');
+    const messageId = idParam(c, 'messageId', 'message');
+    const { vocabularyId } = await parseBody(c, aiMessageSavedRequestSchema);
+
+    const ai = requireAi(c);
+    const conversation = await ai.getConversation(conversationId);
+    if (!conversation) throw new HttpError(404, 'not_found', 'Conversation not found.');
+    if (conversation.mode !== 'vocabulary_expert') {
+      throw new HttpError(400, 'invalid_request', 'Only Vocabulary Expert replies can be added to the vocabulary.');
+    }
+
+    const saved = await ai.markMessageSaved(conversationId, messageId, vocabularyId);
+    return c.json({ saved });
   });
 
   // Save vocabulary from Vocabulary Expert response

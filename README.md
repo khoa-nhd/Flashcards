@@ -187,6 +187,7 @@ in the Supabase dashboard (SQL Editor → paste the file → Run):
 | `20261018090000_true_mastery_practice_history.sql` | 9 | The practice history the True Mastery estimate is counted from. |
 | `20261020090000_ai_conversations.sql` | 10 | AI Chat: saved conversations and messages. |
 | `20261025090000_vocabulary_analysis.sql` | 11 | The structured analysis Vocabulary Expert stores for a word. |
+| `20261026090000_ai_message_saved.sql` | 12 | The link from a Vocabulary Expert reply to the word it was added to, so "Added" survives a reload. Changes nothing until a word is added from the chat. |
 
 Each file only adds things; none changes or removes existing data. The app
 checks the database version and keeps working on an older one, with the newer

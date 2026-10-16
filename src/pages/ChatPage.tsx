@@ -6,6 +6,7 @@
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { AiConversation, AiMessage, AiMode } from '../../shared/api.js';
 import { useApp } from '../app-context.js';
+import { AddWordActions } from '../components/AddWordActions.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { Icon } from '../components/Icon.js';
 import { Markdown } from '../components/Markdown.js';
@@ -17,6 +18,16 @@ import { buildHref, navigate, ROUTES, useLocation } from '../lib/router.js';
 
 /** The server's default limit for one message. */
 const MESSAGE_MAX_CHARS = 4000;
+
+/** Message metadata as an object, however the server shaped it. */
+const metadataOf = (metadata: unknown): Record<string, unknown> =>
+  typeof metadata === 'object' && metadata !== null && !Array.isArray(metadata) ? (metadata as Record<string, unknown>) : {};
+
+/** The word this reply was saved to, when the "Add Word" action was used on it. */
+const savedIdOf = (message: AiMessage): string | null => {
+  const id = metadataOf(message.metadata).vocabularyId;
+  return typeof id === 'string' && id !== '' ? id : null;
+};
 
 const MODE_LABEL: Record<AiMode, string> = {
   general: 'General',
@@ -160,6 +171,16 @@ export function ChatPage() {
 
   const updateMessages = (id: string, change: (messages: AiMessage[]) => AiMessage[]) =>
     setThread((latest) => (latest === null || latest.id !== id ? latest : { ...latest, messages: change(latest.messages) }));
+
+  /** Once a reply's analysis is in the bank, the row keeps saying so across reloads. */
+  const markSaved = (messageId: string, vocabularyId: string) => {
+    if (conversationId === null) return;
+    updateMessages(conversationId, (messages) =>
+      messages.map((message) =>
+        message.id === messageId ? { ...message, metadata: { ...metadataOf(message.metadata), vocabularyId } } : message,
+      ),
+    );
+  };
 
   const send = async () => {
     const content = draft.trim();
@@ -345,7 +366,14 @@ export function ChatPage() {
             <Intro mode={mode} />
           ) : (
             loaded.messages.map((message) => (
-              <MessageBubble key={message.id} message={message} pending={sending && message === loaded.messages.at(-1)} />
+              <MessageBubble
+                key={message.id}
+                message={message}
+                pending={sending && message === loaded.messages.at(-1)}
+                expert={mode === 'vocabulary_expert'}
+                conversationId={loaded.id}
+                onSaved={markSaved}
+              />
             ))
           )}
           <div ref={messagesEnd} />
@@ -417,7 +445,20 @@ function Intro({ mode }: { mode: AiMode }) {
   );
 }
 
-function MessageBubble({ message, pending }: { message: AiMessage; pending: boolean }) {
+function MessageBubble({
+  message,
+  pending,
+  expert,
+  conversationId,
+  onSaved,
+}: {
+  message: AiMessage;
+  pending: boolean;
+  /** A Vocabulary Expert conversation: its replies can be added to the bank. */
+  expert: boolean;
+  conversationId: string;
+  onSaved: (messageId: string, vocabularyId: string) => void;
+}) {
   const mine = message.role === 'user';
   const [copied, setCopied] = useState(false);
 
@@ -430,6 +471,16 @@ function MessageBubble({ message, pending }: { message: AiMessage; pending: bool
       // Copying can be refused by the browser; the text is still there to select.
     }
   };
+
+  const copyButton = (
+    <button
+      type="button"
+      onClick={() => void copy()}
+      className="cursor-pointer rounded-lg px-1.5 py-0.5 text-xs text-muted hover:bg-line/40 hover:text-ink"
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
 
   return (
     <div className={`flex ${mine ? 'justify-end' : 'justify-start'}`} data-testid={`message-${message.role}`}>
@@ -450,9 +501,18 @@ function MessageBubble({ message, pending }: { message: AiMessage; pending: bool
           )}
         </div>
         {!mine && message.content !== '' && !pending && (
-          <button type="button" onClick={() => void copy()} className="cursor-pointer rounded-lg px-1.5 py-0.5 text-xs text-muted hover:bg-line/40 hover:text-ink">
-            {copied ? 'Copied' : 'Copy'}
-          </button>
+          expert ? (
+            <AddWordActions
+              message={message}
+              conversationId={conversationId}
+              savedVocabularyId={savedIdOf(message)}
+              onSaved={onSaved}
+            >
+              {copyButton}
+            </AddWordActions>
+          ) : (
+            copyButton
+          )
         )}
       </div>
     </div>

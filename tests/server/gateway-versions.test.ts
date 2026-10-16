@@ -225,6 +225,8 @@ async function askedAt(version: number): Promise<Asked[]> {
     .catch(() => undefined);
   fake.during('counting practice mastery');
   await repository.practiceCorrectCounts(WORD).catch(() => undefined);
+  fake.during('marking a reply added');
+  await repository.markAiMessageSaved(newId(), newId(), WORD).catch(() => undefined);
   quiet.mockRestore();
   return fake.asked;
 }
@@ -286,6 +288,11 @@ describe.each(Array.from({ length: LATEST_SCHEMA_VERSION }, (_, index) => index 
     const used = asked.filter((item) => item.during === 'saving an answer').map((item) => item.name);
     expect(used).toEqual([version >= 2 ? 'record_review' : 'apply_review']);
   });
+
+  it('marks a reply added only where the link can be kept', () => {
+    const used = asked.filter((item) => item.during === 'marking a reply added').map((item) => item.name);
+    expect(used).toEqual(version >= 12 ? ['mark_ai_message_saved'] : []);
+  });
 });
 
 describe('the recording itself', () => {
@@ -307,6 +314,7 @@ describe('the recording itself', () => {
       'practice_daily_stats',
       'record_practice',
       'create_vocabulary',
+      'mark_ai_message_saved',
     ]) {
       expect(names, expected).toContain(expected);
     }

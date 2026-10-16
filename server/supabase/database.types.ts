@@ -430,6 +430,11 @@ export interface Database {
         Args: { p_conversation_id: string; p_role: string; p_content: string; p_metadata?: unknown };
         Returns: Array<{ id: string; role: string; content: string; metadata: unknown; created_at: string }>;
       };
+      /** From schema version 12. */
+      mark_ai_message_saved: {
+        Args: { p_conversation_id: string; p_message_id: string; p_vocabulary_id: string };
+        Returns: boolean;
+      };
       /** From schema version 10. */
       check_ai_rate_limit: {
         Args: { p_mode: string; p_window: string; p_limit: number };

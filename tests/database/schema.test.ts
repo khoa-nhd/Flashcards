@@ -139,6 +139,10 @@ describe('schema', () => {
     expect(await can('authenticated', 'effective_reviews', 'SELECT')).toBe(true);
     expect(await can('authenticated', 'effective_reviews', 'INSERT')).toBe(false);
     expect(await can('authenticated', 'study_sessions', 'DELETE')).toBe(false);
+    // The Add Word action may only change a message's own metadata.
+    expect(await can('authenticated', 'ai_messages', 'UPDATE')).toBe(true);
+    expect(await can('anon', 'ai_messages', 'UPDATE')).toBe(false);
+    expect(await can('authenticated', 'ai_messages', 'DELETE')).toBe(false);
     // Nobody can remove a word or its state outright; the app only ever trashes.
     for (const table of ['vocabulary', 'card_states']) {
       expect(await can('authenticated', table, 'SELECT'), table).toBe(true);
@@ -161,6 +165,7 @@ describe('schema', () => {
       'ai_conversations UPDATE {authenticated}',
       'ai_messages INSERT {authenticated}',
       'ai_messages SELECT {authenticated}',
+      'ai_messages UPDATE {authenticated}',
       'ai_rate_limits INSERT {authenticated}',
       'ai_rate_limits SELECT {authenticated}',
       'ai_rate_limits UPDATE {authenticated}',
@@ -252,6 +257,7 @@ describe('isolation between users', () => {
       `public.record_review('{}'::jsonb)`,
       `public.undo_review('${mine.id}'::uuid, '${mine.id}'::uuid)`,
       `public.session_summary('${mine.id}'::uuid)`,
+      `public.mark_ai_message_saved('${mine.id}'::uuid, '${mine.id}'::uuid, '${mine.id}'::uuid)`,
     ]) {
       await expect(db.asAnon((s) => s.query(`select * from ${call}`)), call).rejects.toMatchObject({ code: RLS_DENIED });
     }
@@ -364,6 +370,64 @@ describe('isolation between users', () => {
       { id: mine.id, word: 'candid', mastery: 3, review_date: '2026-10-09', deleted: false },
     ]);
     expect(await count('review_logs')).toBe(0);
+  });
+
+  it('links a reply to the caller’s own word, and to nobody else’s', async () => {
+    const mine = await db.as(alice, (s) => createWord(s));
+    const [chat] = await db.as(alice, (s) =>
+      s.query<{ id: string }>(`insert into public.ai_conversations (mode) values ('vocabulary_expert') returning id`),
+    );
+    const [replied] = await db.as(alice, (s) =>
+      s.query<{ id: string }>(
+        `insert into public.ai_messages (conversation_id, role, content, metadata)
+         values ($1, 'assistant', 'hello', '{"model":"test"}') returning id`,
+        [chat!.id],
+      ),
+    );
+    const [asked] = await db.as(alice, (s) =>
+      s.query<{ id: string }>(
+        `insert into public.ai_messages (conversation_id, role, content) values ($1, 'user', 'hi') returning id`,
+        [chat!.id],
+      ),
+    );
+
+    const mark = (user: string, conversation: string, message: string, word: string) =>
+      db.as(user, (s) =>
+        s.query<{ ok: boolean }>(`select public.mark_ai_message_saved($1::uuid, $2::uuid, $3::uuid) as ok`, [conversation, message, word]),
+      );
+
+    // The word is recorded on the reply; whatever else was in the metadata stays.
+    expect(await mark(alice, chat!.id, replied!.id, mine.id)).toEqual([{ ok: true }]);
+    const [stored] = await db.as(alice, (s) =>
+      s.query<{ metadata: Record<string, unknown> }>(`select metadata from public.ai_messages where id = $1`, [replied!.id]),
+    );
+    expect(stored!.metadata).toMatchObject({ model: 'test', vocabularyId: mine.id });
+    expect(typeof stored!.metadata.savedAt).toBe('string');
+
+    // A question is not a reply, a reply belongs to one conversation, and a word
+    // has to exist: none of these is an error, they just record nothing.
+    expect(await mark(alice, chat!.id, asked!.id, mine.id)).toEqual([{ ok: false }]);
+    expect(await mark(alice, '00000000-0000-4000-8000-000000000009', replied!.id, mine.id)).toEqual([{ ok: false }]);
+    await expect(mark(alice, chat!.id, replied!.id, '00000000-0000-4000-8000-00000000000a')).rejects.toMatchObject({
+      code: RLS_DENIED,
+    });
+
+    // Bob's own word cannot point at Alice's reply, and Alice's word is not his to use.
+    const bobsWord = await db.as(bob, (s) => createWord(s, { word: 'tide' }));
+    expect(await mark(bob, chat!.id, replied!.id, bobsWord.id)).toEqual([{ ok: false }]);
+    await expect(mark(bob, chat!.id, replied!.id, mine.id)).rejects.toMatchObject({ code: RLS_DENIED });
+    expect(
+      await db.as(bob, (s) =>
+        s.query(`update public.ai_messages set metadata = metadata || '{"sneaky":true}' where id = $1 returning id`, [replied!.id]),
+      ),
+    ).toEqual([]);
+
+    // …and nothing any of them did left a mark on the reply.
+    const [after] = await db.as(alice, (s) =>
+      s.query<{ metadata: Record<string, unknown> }>(`select metadata from public.ai_messages where id = $1`, [replied!.id]),
+    );
+    expect(after!.metadata).toMatchObject({ model: 'test', vocabularyId: mine.id });
+    expect(after!.metadata).not.toHaveProperty('sneaky');
   });
 
   it('keeps settings private and one row per user', async () => {

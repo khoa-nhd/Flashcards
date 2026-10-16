@@ -659,6 +659,14 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     return row;
   }
 
+  async markAiMessageSaved(conversationId: string, messageId: string, vocabularyId: string): Promise<boolean> {
+    const messages = this.aiMessages.get(normalizeId(conversationId));
+    const message = messages?.find((row) => row.id === messageId && row.role === 'assistant');
+    if (message === undefined) return false;
+    message.metadata = { ...message.metadata, vocabularyId, savedAt: this.now().toISOString() };
+    return true;
+  }
+
   async checkAiRateLimit(
     _mode: 'general' | 'vocabulary_expert',
     _window: 'minute' | 'day',

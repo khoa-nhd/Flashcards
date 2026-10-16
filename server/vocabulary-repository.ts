@@ -203,6 +203,8 @@ export interface VocabularyRepository {
     content: string,
     metadata?: Record<string, unknown>,
   ): Promise<AiMessageRow>;
+  /** Marks one assistant message as saved to a word, merging the link into its metadata. Needs schema version 12. */
+  markAiMessageSaved(conversationId: string, messageId: string, vocabularyId: string): Promise<boolean>;
 
   // ---- Vocabulary Analysis (schema version 11) ----
   /** Vocabulary Analysis: upsert analysis for a vocabulary entry. Needs schema version 11. */

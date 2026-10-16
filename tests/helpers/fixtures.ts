@@ -269,6 +269,14 @@ export class FakeRepository implements VocabularyRepository {
     return row;
   }
 
+  async markAiMessageSaved(conversationId: string, messageId: string, vocabularyId: string): Promise<boolean> {
+    const messages = this.aiMessages.get(conversationId);
+    const message = messages?.find((row) => row.id === messageId && row.role === 'assistant');
+    if (message === undefined) return false;
+    message.metadata = { ...message.metadata, vocabularyId, savedAt: new Date().toISOString() };
+    return true;
+  }
+
   async checkAiRateLimit(
     _mode: 'general' | 'vocabulary_expert',
     _window: 'minute' | 'day',

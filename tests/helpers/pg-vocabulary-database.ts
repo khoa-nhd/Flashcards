@@ -651,6 +651,16 @@ export function createPgVocabularyDatabase(
       return rows[0]?.msg as AiMessageRow;
     },
 
+    async markAiMessageSaved(conversationId: string, messageId: string, vocabularyId: string) {
+      const rows = await run((session) =>
+        session.query<{ done: boolean }>(
+          `select public.mark_ai_message_saved($1::uuid, $2::uuid, $3::uuid) as done`,
+          [conversationId, messageId, vocabularyId],
+        ),
+      );
+      return rows[0]?.done === true;
+    },
+
     async checkAiRateLimit(mode: 'general' | 'vocabulary_expert', window: 'minute' | 'day', limit: number) {
       const rows = await run((session) =>
         session.query<{ check: unknown }>(

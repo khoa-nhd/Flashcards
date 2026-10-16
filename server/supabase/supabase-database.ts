@@ -152,7 +152,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 11;
+export const LATEST_SCHEMA_VERSION = 12;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -509,6 +509,8 @@ export interface VocabularyDatabase {
     content: string,
     metadata?: Record<string, unknown>,
   ): Promise<AiMessageRow>;
+  /** Marks one assistant message as saved to a word. Needs schema version 12. */
+  markAiMessageSaved(conversationId: string, messageId: string, vocabularyId: string): Promise<boolean>;
   /** Checks and increments rate limit counters for the caller. */
   checkAiRateLimit(
     mode: 'general' | 'vocabulary_expert',
@@ -1225,6 +1227,16 @@ export function createSupabaseDatabase(
         throw new DatabaseError('unavailable', 'The database did not confirm the new message.');
       }
       return rows.data[0];
+    },
+
+    async markAiMessageSaved(conversationId, messageId, vocabularyId) {
+      const { data, error, status } = await client.rpc('mark_ai_message_saved', {
+        p_conversation_id: conversationId,
+        p_message_id: messageId,
+        p_vocabulary_id: vocabularyId,
+      });
+      if (error) throw toDatabaseError(error, status);
+      return data === true;
     },
 
     async checkAiRateLimit(mode, window, limit) {
