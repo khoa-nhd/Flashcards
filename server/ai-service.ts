@@ -321,7 +321,7 @@ function providerHttpFailure(
   if (status === 404) {
     return new AiError(
       AiErrorCode.PROVIDER_NOT_FOUND,
-      `The AI provider has no model or endpoint by that name (HTTP 404). The model id or the base address is most likely wrong, or the model has been retired; check AI_MODEL and AI_BASE_URL on the server.${said}`,
+      `The AI provider has no model or endpoint by that name (HTTP 404). The model id or the base address is most likely wrong, or the model has been retired; check AI_MODEL and AI_BASE_URL on the server. The request went to ${url}.${said}`,
       502,
     );
   }

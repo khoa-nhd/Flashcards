@@ -188,6 +188,9 @@ describe('AI chat API', () => {
     expect(message).toContain('AI_MODEL');
     expect(message).toContain('AI_BASE_URL');
     expect(message).toContain('404');
+    // ...and the exact address the request went to, which is what a doubled
+    // path or a wrong host would show up in.
+    expect(message).toContain('https://ai.example.test/v1/chat/completions');
     // ...and keeps the provider's own words.
     expect(message).toContain('no longer available');
 
