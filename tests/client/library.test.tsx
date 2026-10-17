@@ -136,14 +136,17 @@ describe('the Collections page', () => {
   it('links each collection to its words in the bank, its due words in Review, and Practice', async () => {
     await open('/collections', { library: { collections: [EXAM] } });
     expect(await main().findByRole('link', { name: 'Exam' })).toHaveAttribute('href', `/bank?collection=${EXAM.id}`);
-    expect(main().getByRole('link', { name: 'Review the due words' })).toHaveAttribute('href', `/review?collection=${EXAM.id}`);
+    expect(main().getByRole('link', { name: 'Review these words' })).toHaveAttribute(
+      'href',
+      `/review?focus=select&collection=${EXAM.id}`,
+    );
     expect(main().getByRole('link', { name: 'Practise' })).toHaveAttribute('href', `/practice?collection=${EXAM.id}`);
   });
 
-  it('offers no review for a collection with nothing due, and no practice for an empty one', async () => {
+  it('offers a review for every collection with words, and no practice for an empty one', async () => {
     await open('/collections', { library: { collections: [collection(3, 'Later', [pageId(3)]), collection(4, 'Empty')] } });
     await main().findByRole('link', { name: 'Later' });
-    expect(main().queryByRole('link', { name: 'Review the due words' })).not.toBeInTheDocument();
+    expect(main().getAllByRole('link', { name: 'Review these words' })).toHaveLength(1);
     expect(main().getAllByRole('link', { name: 'Practise' })).toHaveLength(1);
   });
 
@@ -406,42 +409,52 @@ describe('a collection as a filter', () => {
     expect(screen.queryByLabelText('Collection')).not.toBeInTheDocument();
   });
 
-  it('narrows a review to the collection’s due words and says so', async () => {
-    const { api } = await open(`/review?collection=${EXAM.id}`, {
+  it('opens the picker from a collection in the address, with its words already ticked', async () => {
+    const { api, user } = await open(`/review?collection=${EXAM.id}`, {
       cards: [card(1)],
       library: { collections: [EXAM] },
-      queue: { collection: { id: EXAM.id, name: 'Exam' } },
     });
-    await screen.findByTestId('flashcard');
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null, collection: EXAM.id });
-    expect(screen.getByText(/Collection “Exam” only, from those due now\./)).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByLabelText('Cards to review')).toHaveValue(`collection:${EXAM.id}`));
+
+    // The collection's words arrive ticked, in the collection's own order.
+    expect(await screen.findByRole('heading', { name: 'Select words' })).toBeInTheDocument();
+    await user.click(await screen.findByRole('button', { name: 'Review 2 words' }));
+
+    await waitFor(() =>
+      expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'selection', ids: [pageId(1), pageId(3)] } }),
+    );
+    expect(await screen.findByTestId('flashcard')).toBeInTheDocument();
+    expect(screen.getByText(/Words you picked, whether or not they are due\./)).toBeInTheDocument();
   });
 
-  it('can be picked from the review chooser, and left for everything due', async () => {
+  it('can be picked from the review chooser: tick the words, then review them', async () => {
     const { api, user } = await open('/review', { cards: [card(1)], library: { collections: [EXAM, BOOKS] } });
     await screen.findByTestId('flashcard');
-    const chooser = screen.getByLabelText('Cards to review');
-    await waitFor(() => expect(within(chooser).getByRole('option', { name: 'Books' })).toBeInTheDocument());
-    await user.selectOptions(chooser, `collection:${BOOKS.id}`);
-    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null, collection: BOOKS.id }));
-    expect(window.location.search).toBe(`?collection=${BOOKS.id}`);
 
-    await user.selectOptions(screen.getByLabelText('Cards to review'), '');
-    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null }));
-    expect(window.location.search).toBe('');
+    await user.selectOptions(screen.getByLabelText('Cards to review'), 'select');
+    expect(await screen.findByRole('heading', { name: 'Select words' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Pick at least one word' })).toBeDisabled();
+
+    // A collection row ticks its words without replacing what is already ticked.
+    await user.selectOptions(screen.getByLabelText('Add a collection'), BOOKS.id);
+    await user.click(await screen.findByRole('button', { name: 'Review 1 word' }));
+
+    await waitFor(() =>
+      expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'selection', ids: [pageId(2)] } }),
+    );
+    expect(window.location.search).toBe('?focus=select');
   });
 
-  it('explains an empty collection review without claiming nothing at all is due', async () => {
-    await open(`/review?collection=${EXAM.id}`, { cards: [], queue: { collection: { id: EXAM.id, name: 'Exam' } } });
-    expect(await screen.findByRole('heading', { name: 'Nothing in this collection is due' })).toBeInTheDocument();
-    expect(screen.getByText(/None of the words in “Exam” is due for review right now\./)).toBeInTheDocument();
+  it('explains an empty set of picks without claiming nothing at all is due', async () => {
+    const { user } = await open(`/review?collection=${EXAM.id}`, { cards: [], library: { collections: [EXAM] } });
+    await user.click(await screen.findByRole('button', { name: 'Review 2 words' }));
+    expect(await screen.findByRole('heading', { name: 'Nothing to review from your picks' })).toBeInTheDocument();
+    expect(screen.getByText(/None of these words can be reviewed right now\./)).toBeInTheDocument();
   });
 
   it('ignores a collection id in the address that is not an id', async () => {
     const { api } = await open('/review?collection=everything', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'all' } });
   });
 
   it('supplies the words for a practice session, due or not', async () => {

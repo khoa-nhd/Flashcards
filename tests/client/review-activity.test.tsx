@@ -370,25 +370,25 @@ describe('reviewing only the weakest words', () => {
     await user.click(await screen.findByRole('link', { name: /Review my weakest words/ }));
     expect(await screen.findByTestId('flashcard')).toBeInTheDocument();
     expect(api.fetchQueue).toHaveBeenCalledTimes(1);
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: 'weak' });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'weak' } });
     expect(banner()).toBeInTheDocument();
   });
 
   it('opens directly from its address', async () => {
     const { api } = await open('/review?focus=weak', { cards: [card(1), card(2)] });
     await screen.findByTestId('flashcard');
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: 'weak' });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'weak' } });
     expect(banner()).toBeInTheDocument();
   });
 
   it('is not announced on an ordinary review', async () => {
     const { api } = await open('/review', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'all' } });
     expect(banner()).not.toBeInTheDocument();
   });
 
-  it('saves answers with the focus, so the server lets an early word through', async () => {
+  it('saves answers that may be taken early, so the server lets an early word through', async () => {
     const { api, saves } = await open('/review?focus=weak', { cards: [card(1), card(2)] });
     await screen.findByTestId('flashcard');
     press(' ');
@@ -397,7 +397,7 @@ describe('reviewing only the weakest words', () => {
     expect(api.submitAction.mock.calls[0]?.[0]).toMatchObject({
       pageId: card(1).id,
       action: 'not_remember',
-      focus: 'weak',
+      allowNotDue: true,
     });
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
     expect(screen.getByText(/Card 2 of 2: word-2\./)).toBeInTheDocument();
@@ -407,7 +407,7 @@ describe('reviewing only the weakest words', () => {
     const { api, user } = await open('/review?focus=weak', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
     await user.click(screen.getByRole('link', { name: 'Review everything due' }));
-    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null }));
+    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'all' } }));
     expect(api.fetchQueue).toHaveBeenCalledTimes(2);
     await waitFor(() => expect(banner()).not.toBeInTheDocument());
     expect(window.location.search).toBe('');

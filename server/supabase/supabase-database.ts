@@ -138,6 +138,8 @@ export interface StoredSettings {
   dailyGoal: DailyGoal | null;
   /** Which schedule is in charge; `null` on a database that cannot keep the choice yet. */
   scheduler: SchedulerId | null;
+  /** Whether a review moves a word; `null` on a database that cannot keep the choice yet. */
+  countReviewsTowardMastery: boolean | null;
 }
 
 export const reviewWriteResultSchema = z.object({
@@ -152,7 +154,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 12;
+export const LATEST_SCHEMA_VERSION = 14;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -297,6 +299,20 @@ export const cardStatRowSchema = z.object({
 
 export type CardStatRow = z.infer<typeof cardStatRowSchema>;
 
+/** One day of one word's answers, review and practice together. */
+export const weakWordDayRowSchema = z.object({
+  vocabulary_id: z.string(),
+  day: z.string().refine(isIsoDate),
+  review_answers: z.number().int(),
+  review_fails: z.number().int(),
+  practice_answers: z.number().int(),
+  practice_fails: z.number().int(),
+  day_points: z.number(),
+  last_action: z.string().nullable(),
+});
+
+export type WeakWordDayDbRow = z.infer<typeof weakWordDayRowSchema>;
+
 export const undoResultSchema = z.object({
   outcome: z.enum(['undone', 'already_undone', 'not_latest', 'conflict', 'not_found']),
   vocabulary_id: z.string().nullable(),
@@ -418,6 +434,8 @@ export interface VocabularyDatabase {
   reviewDailyStats(from: IsoDate, to: IsoDate): Promise<DailyStatRow[]>;
   /** How each reviewed word has gone, overall and since `since`. Needs schema version 4. */
   cardReviewStats(since: IsoDate): Promise<CardStatRow[]>;
+  /** One day of one word's answers, review and practice together. Needs schema version 14. */
+  weakWordDays(): Promise<WeakWordDayDbRow[]>;
   /** Every row of the caller's review history, oldest first. Reads only. */
   listReviewLogs(): Promise<ReviewLogRow[]>;
   // ---- Collections, further examples, relationships. All need schema version 7. ----
@@ -485,6 +503,8 @@ export interface VocabularyDatabase {
   saveFsrsRetention(value: number): Promise<number>;
   /** Needs schema version 8. */
   saveScheduler(value: SchedulerId): Promise<SchedulerId>;
+  /** Needs schema version 13. */
+  saveCountReviewsTowardMastery(value: boolean): Promise<boolean>;
   getTimeZone(): Promise<string | null>;
   /** Stores the zone only if the user has none yet; returns the one in effect. */
   ensureTimeZone(timeZone: string): Promise<string>;
@@ -539,6 +559,8 @@ export interface SettingsRow {
   daily_goal_minutes?: number | null;
   /** From schema version 8. */
   scheduler?: string | null;
+  /** From schema version 13. */
+  count_reviews_toward_mastery?: boolean | null;
 }
 
 /** The settings columns a database at this version has. */
@@ -548,6 +570,7 @@ export const settingsColumns = (schemaVersion: number): string =>
     ...(schemaVersion >= 3 ? ['fsrs_request_retention'] : []),
     ...(schemaVersion >= 5 ? ['daily_goal_reviews', 'daily_goal_minutes'] : []),
     ...(schemaVersion >= 8 ? ['scheduler'] : []),
+    ...(schemaVersion >= 13 ? ['count_reviews_toward_mastery'] : []),
   ].join(', ');
 
 export function settingsFromRow(row: SettingsRow, schemaVersion: number): StoredSettings {
@@ -559,6 +582,9 @@ export function settingsFromRow(row: SettingsRow, schemaVersion: number): Stored
       schemaVersion >= 5 ? { reviews: row.daily_goal_reviews ?? null, minutes: row.daily_goal_minutes ?? null } : null,
     // Anything unrecognised is read as the default: the mastery schedule is never left by accident.
     scheduler: schemaVersion >= 8 ? (isSchedulerId(row.scheduler) ? row.scheduler : DEFAULT_SCHEDULER) : null,
+    // A database that cannot keep the choice counts every review, as it always did.
+    countReviewsTowardMastery:
+      schemaVersion >= 13 ? row.count_reviews_toward_mastery !== false : null,
   };
 }
 
@@ -870,6 +896,16 @@ export function createSupabaseDatabase(
       if (error) throw toDatabaseError(error, status);
       const rows = z.array(cardStatRowSchema).safeParse(data ?? []);
       if (!rows.success) throw new DatabaseError('unavailable', 'The database returned statistics in an unexpected shape.');
+      return rows.data;
+    },
+
+    async weakWordDays() {
+      const { data, error, status } = await client.rpc('weak_word_days');
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(weakWordDayRowSchema).safeParse(data ?? []);
+      if (!rows.success) {
+        throw new DatabaseError('unavailable', 'The database returned weak-word days in an unexpected shape.');
+      }
       return rows.data;
     },
 
@@ -1284,6 +1320,16 @@ export function createSupabaseDatabase(
         throw new DatabaseError('unavailable', 'The database returned a schedule this app does not know.');
       }
       return data.scheduler;
+    },
+
+    async saveCountReviewsTowardMastery(value) {
+      const { data, error, status } = await client
+        .from('user_settings')
+        .upsert({ count_reviews_toward_mastery: value }, { onConflict: 'user_id' })
+        .select('count_reviews_toward_mastery')
+        .single();
+      if (error) throw toDatabaseError(error, status);
+      return data.count_reviews_toward_mastery === true;
     },
 
     async undoReview(args) {

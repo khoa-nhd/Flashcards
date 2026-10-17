@@ -19,6 +19,7 @@ import {
   practiceRequestSchema,
   reviewActionRequestSchema,
   reviewFocusSchema,
+  reviewQueueSelectionRequestSchema,
   reviewUndoRequestSchema,
   schedulerChoiceRequestSchema,
   updateEntryRequestSchema,
@@ -281,37 +282,27 @@ export function createApp({
 
   app.get('/api/review-queue', async (c) => {
     const raw = c.req.query('focus');
-    const collectionId = c.req.query('collection');
-    if (collectionId !== undefined) {
-      if (raw !== undefined) throw new HttpError(400, 'invalid_request', 'Choose a focus or a collection, not both.');
-      if (!pageIdSchema.safeParse(collectionId).success) {
-        throw new HttpError(400, 'invalid_request', 'That is not a valid collection id.');
-      }
-      // The due words of the caller's own collection: narrowed like every other selection, never widened.
-      const collection = await requireLibrary(c).collection(collectionId);
-      return c.json(
-        await requireService(c).getQueue({
-          kind: 'collection',
-          ids: collection.wordIds,
-          collection: { id: collection.id, name: collection.name },
-        }),
-      );
-    }
     if (raw === undefined) return c.json(await requireService(c).getQueue());
     const parsed = reviewFocusSchema.safeParse(raw);
     if (!parsed.success) {
       throw new HttpError(400, 'invalid_request', `Unknown focus. Use one of: ${REVIEW_FOCUSES.join(', ')}.`);
     }
-    // Every focus narrows the due queue; `weak` is the one exception, bringing weak words forward.
-    const focus = parsed.data;
-    if (focus === 'weak') {
-      const { words } = await requireAnalytics(c).weakWords();
-      return c.json(await requireService(c).getQueue({ kind: 'weak', ids: words.map((word) => word.id) }));
-    }
-    if (focus === 'recent') {
-      return c.json(await requireService(c).getQueue({ kind: 'recent', ids: await requireAnalytics(c).recentlyAddedIds() }));
-    }
-    return c.json(await requireService(c).getQueue({ kind: focus }));
+    // The one narrowing the server can work out for itself: the weak words, weakest first,
+    // whether or not they are due. Each carries its recovery, so the session can show it.
+    const { words } = await requireAnalytics(c).weakWords();
+    const recovery = new Map(
+      words.flatMap((word) => (word.recovery === undefined ? [] : [[word.id, word.recovery]])),
+    );
+    return c.json(
+      await requireService(c).getQueue({ kind: 'weak', ids: words.map((word) => word.id), recovery }),
+    );
+  });
+
+  // The reviewer's own picked words, in the order they were ticked. Sent as a body rather than
+  // in the address, because the list may be as long as the bank.
+  app.post('/api/review-queue', async (c) => {
+    const { ids } = await parseBody(c, reviewQueueSelectionRequestSchema);
+    return c.json(await requireService(c).getQueue({ kind: 'selection', ids }));
   });
 
   // Today's reviewing against the daily goal. The goal never changes what is due.
@@ -436,10 +427,19 @@ export function createApp({
         email: session.account.email,
         database: session.database,
         fsrsRetention: session.fsrsRetention,
+        countReviewsTowardMastery: session.countReviewsTowardMastery,
       };
     }
     if (config.timeZone === null) throw notConfigured();
-    return { timeZone: config.timeZone, timeZoneEditable: false, email: null, database: null, fsrsRetention: null };
+    return {
+      timeZone: config.timeZone,
+      timeZoneEditable: false,
+      email: null,
+      database: null,
+      fsrsRetention: null,
+      // Nothing keeps a choice without an account, so a review counts by default.
+      countReviewsTowardMastery: true,
+    };
   };
 
   app.get('/api/settings', (c) => c.json(settingsOf(c)));
@@ -449,13 +449,17 @@ export function createApp({
     if (session === null) {
       throw new HttpError(409, 'not_editable', 'The sample data has no account to keep settings in.');
     }
-    const { timeZone, fsrsRetention } = await parseBody(c, updateSettingsRequestSchema);
+    const { timeZone, fsrsRetention, countReviewsTowardMastery } = await parseBody(c, updateSettingsRequestSchema);
     const body: AccountSettings = {
       timeZone: timeZone === undefined ? session.timeZone : await session.saveTimeZone(timeZone),
       timeZoneEditable: true,
       email: session.account.email,
       database: session.database,
       fsrsRetention: fsrsRetention === undefined ? session.fsrsRetention : await session.saveFsrsRetention(fsrsRetention),
+      countReviewsTowardMastery:
+        countReviewsTowardMastery === undefined
+          ? session.countReviewsTowardMastery
+          : await session.saveCountReviewsTowardMastery(countReviewsTowardMastery),
     };
     return c.json(body);
   });

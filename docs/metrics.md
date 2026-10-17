@@ -126,10 +126,12 @@ Shown on the Dashboard ("Review activity") and in Insights. Computed in
 aggregates per day (`review_daily_stats`).
 
 **What is counted.** Only answers that were saved and still stand. An answer
-that was undone is not counted anywhere. Nothing is reconstructed for the time
-before the app kept a history: a word's mastery is never turned into pretend
-past reviews. Needs database version 4; below that the app says the figures are
-not available instead of showing zeros.
+that was undone is not counted anywhere. An answer from a sitting where counting
+towards mastery was switched off **is** counted here: it was a real attempt, and
+only mastery and the schedule were left alone. Nothing is reconstructed for the
+time before the app kept a history: a word's mastery is never turned into
+pretend past reviews. Needs database version 4; below that the app says the
+figures are not available instead of showing zeros.
 
 **Days.** A review belongs to the reviewer's calendar day at the moment it was
 saved (`reviewed_on`), in the account's time zone. The figures look back 90
@@ -200,12 +202,33 @@ reason that is shown beside the word.
 - Where the database keeps no review history yet (below version 4), only the
   last two reasons can apply, and the page says so.
 - At most 100 words are sent; the page says when there are more.
+- Practice answers (recognition, recall, typing, cloze, listening) now count
+  too, both correct and wrong: they feed the recent window, the latest answer
+  and the recovery below. A wrong practice answer never adds to "forgotten on
+  separate days", so practising hard cannot make a word harder to leave.
+- **Recovery.** A word leaves the list once it has shown it is remembered
+  again: one point per day (an auto-graded correct answer is a whole point; a
+  self-graded one is half, so two in a day make a point), 3 points for a
+  Medium or Low word and 4 for a High one. A forgotten answer takes a point
+  back; points expire after 30 days. Once a word has recovered, its old
+  failures are erased, so a later slip re-enters lightly rather than carrying
+  its whole past. The requirement is fixed when the word starts earning, so it
+  does not move while the reviewer is working on it. Recovery progress is
+  shown on the list and on each card in a weakest-words review; words that
+  leave are named at the end of any session, and the page updates on the next
+  open. On launch, the last 30 days of saved answers are used, so words that
+  already qualify leave at once.
+- **Overdue.** A word that has been remembered within the last week is no
+  longer held for being overdue; the overdue reason returns if it then goes a
+  week without being remembered again.
 
 **Reviewing the weakest words** (`/review?focus=weak`) shows the words on this
-list, weakest first, **whether or not they are due**. It is the one selection
-that can bring a word forward, so a weak word may be reviewed early; answers are
-saved by exactly the same rules as any other review, and a new date is counted
-from the day of the review.
+list, weakest first, **whether or not they are due**. It can bring a word
+forward, so a weak word may be reviewed early. It arrives with counting towards
+mastery switched off, so by default an answer here records itself but leaves the
+word's mastery, review date and FSRS state alone — the reviewer may switch
+counting back on, and then the answer moves the word by exactly the same rules
+as any other review. See [Choosing what to review](#choosing-what-to-review) below.
 
 ## Daily goal
 
@@ -229,20 +252,32 @@ over when the goal is reached stay due, and the app says so.
 "Today" is the account's calendar day, so progress starts again at local
 midnight.
 
-## Narrowing a review
+## Choosing what to review
 
-The Review tab can show a subset of what is due. Except for "Weakest words",
-every choice selects among words that are **already in the queue** and cannot
-bring a word forward; an answer is saved by the same rules whichever choice it
-came from.
+The Review tab offers three choices, and each starts a fresh sitting:
 
 | Choice | Words kept |
 | --- | --- |
-| Everything due | The whole queue: most overdue first, words with no date last. |
-| Overdue only | Review date before today. |
-| Due today only | Review date is today. Words with no review date are in neither this nor "Overdue only". |
+| Everything due | The whole queue: most overdue first, words with no date last. Cannot bring a word forward. |
 | Weakest words | Words on the Weak words list, weakest first, due or not. |
-| Recently added | Date Added within today and the six days before it. |
+| Select words | Exactly the words ticked in the picker, in the order ticked, due or not. Words at mastery 10 are not offered. |
+
+The last two can take a word before its review date. The picker reuses the
+Bank's word list, and a collection can be added to the ticks in one go.
+
+**Counting towards mastery** is one switch in two places — beside the choices
+and in Settings → Review — remembered per account and on the device. The choice
+does not change which words a sitting holds; changing it mid-sitting applies
+from the next card.
+
+| Switch | What an answer does |
+| --- | --- |
+| On (default) | Mastery and review date move by the usual rules. FSRS advances too. |
+| Off | The answer is recorded and counts towards accuracy, the streak and the daily goal, but mastery, the review date and the FSRS state are left exactly as they were. |
+
+"Everything due" always counts, and is always counted when nothing has been
+chosen. Weakest words arrives with the switch off; the reviewer may turn it back
+on, and that becomes the remembered choice like any other.
 
 ## Confidence and calibration
 

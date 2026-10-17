@@ -36,6 +36,12 @@ export interface WeakWordInput {
   definition: string | null;
   example: string | null;
   history: CardHistory | null;
+  /**
+   * The reviewer has shown they still know the word within the last week, so
+   * the word's age on the schedule is not held against it. Set by the caller
+   * that has the recovery history; `false` when there is none.
+   */
+  overdueForgiven?: boolean;
 }
 
 export type WeakReasonCode =
@@ -178,7 +184,7 @@ export function scoreWeakWord(
     }
   }
 
-  if (!input.retired && input.reviewDate !== null) {
+  if (!input.overdueForgiven && !input.retired && input.reviewDate !== null) {
     const overdue = daysBetween(input.reviewDate, today);
     if (overdue >= weights.longOverdueDays) {
       const extraWeeks = Math.min(Math.floor((overdue - weights.longOverdueDays) / 7), weights.overdueWeeksCap);

@@ -63,7 +63,7 @@ export function queueResponse(cards: ReviewCard[], overrides: Partial<QueueRespo
     capabilities: NO_CAPABILITIES,
     scheduler: 'mastery_v1',
     focus: null,
-    collection: null,
+    selection: false,
     skipped: [],
     vocabulary: 'in_progress',
     ...overrides,
@@ -100,7 +100,7 @@ export const TEST_FIELDS: CardFieldConfig[] = [
  */
 export class FakeRepository implements VocabularyRepository {
   readonly mode = 'mock' as const;
-  readonly capabilities = { ...NO_CAPABILITIES, practiceHistory: false, aiChat: true };
+  readonly capabilities = { ...NO_CAPABILITIES, practiceHistory: false, aiChat: true, weakRecovery: false };
   readonly updates: Array<{ pageId: string; changes: Partial<ReviewState> }> = [];
   setup: SetupReport = { readIssues: [], writeIssues: [], warnings: [] };
   /** Lets a test corrupt what the "database" reports back after a write. */
@@ -181,6 +181,10 @@ export class FakeRepository implements VocabularyRepository {
 
   async cardReviewStats() {
     return new Map<string, CardHistory>();
+  }
+
+  async weakWordDays() {
+    return [];
   }
 
   async confidenceStats() {

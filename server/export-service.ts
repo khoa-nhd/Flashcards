@@ -10,7 +10,13 @@ export interface ExportServiceOptions {
   catalog: VocabularyCatalog;
   library: LibraryService;
   /** The account's settings as they stand for this request. */
-  settings: () => { timeZone: string; dailyGoal: DailyGoal; fsrsRetention: number | null; scheduler: SchedulerId };
+  settings: () => {
+    timeZone: string;
+    dailyGoal: DailyGoal;
+    fsrsRetention: number | null;
+    scheduler: SchedulerId;
+    countReviewsTowardMastery: boolean;
+  };
   now?: () => Date;
 }
 
@@ -58,6 +64,7 @@ export class ExportService {
         dailyGoal: current.dailyGoal,
         fsrsRequestRetention: current.fsrsRetention,
         scheduler: current.scheduler,
+        countReviewsTowardMastery: current.countReviewsTowardMastery,
       },
       counts: {
         words: entries.length,

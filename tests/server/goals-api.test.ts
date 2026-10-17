@@ -6,6 +6,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   NO_CAPABILITIES,
+  accountSettingsSchema,
   analyticsResponseSchema,
   dayPlanSchema,
   entryResponseSchema,
@@ -318,82 +319,66 @@ describe('narrowing a review', () => {
     await addWord(app, alice, { word: 'mastered-new', mastery: 10, reviewDate: '2026-10-01', dateAdded: TODAY });
   }
 
+  const picked = async (app: TestApp, user: TestUser, ids: string[]) =>
+    queueResponseSchema.parse(
+      await (await call(app, user, '/api/review-queue', { method: 'POST', body: { ids } })).json(),
+    );
+
   it('shows everything due when not narrowed', async () => {
     const app = on(TODAY);
     await library(app);
     const queue = await queueOf(app, alice);
     expect(queue.focus).toBeNull();
+    expect(queue.selection).toBe(false);
     expect(words(queue)).toEqual(['late-old', 'late-new', 'today-old', 'today-new', 'undated-new', 'undated-old']);
   });
 
-  it('to overdue words keeps only those whose date has passed, most overdue first', async () => {
+  it('the weakest-words review holds weak words, weakest first, and may bring one forward', async () => {
     const app = on(TODAY);
     await library(app);
-    const queue = await queueOf(app, alice, 'overdue');
-    expect(queue.focus).toBe('overdue');
-    expect(words(queue)).toEqual(['late-old', 'late-new']);
-  });
-
-  it('to words due today keeps only those dated today', async () => {
-    const app = on(TODAY);
-    await library(app);
-    expect(words(await queueOf(app, alice, 'due_today'))).toEqual(['today-old', 'today-new']);
-  });
-
-  it('to recently added words keeps those added in the last seven days that are due', async () => {
-    const app = on(TODAY);
-    await library(app);
-    const queue = await queueOf(app, alice, 'recent');
-    expect(queue.focus).toBe('recent');
-    // 3 October is the seventh day back, today included; 2 October is outside. The usual order is kept.
-    expect(words(queue)).toEqual(['late-new', 'today-new', 'undated-new']);
-  });
-
-  it('never brings forward a mastered word, and only a weak review brings forward a word that is not due', async () => {
-    const app = on(TODAY);
-    await library(app);
-    for (const focus of ['overdue', 'due_today', 'recent']) {
-      const listed = words(await queueOf(app, alice, focus));
-      expect(listed, focus).not.toContain('future-new');
-      expect(listed, focus).not.toContain('mastered-new');
-    }
     const weak = words(await queueOf(app, alice, 'weak'));
     // A weak word may be taken early; a mastered one never appears.
     expect(weak).toContain('future-new');
     expect(weak).not.toContain('mastered-new');
   });
 
-  it('the due-only selections are a subset of the full queue, with the same cards', async () => {
+  it('words the reviewer picked are held in the order they were ticked, due or not', async () => {
     const app = on(TODAY);
     await library(app);
-    const all = (await queueOf(app, alice)).cards;
-    for (const focus of ['overdue', 'due_today', 'recent']) {
-      for (const card of (await queueOf(app, alice, focus)).cards) expect(all, `${focus}: ${card.word}`).toContainEqual(card);
-    }
+    const entries = await db.admin<{ id: string; word: string }>('select id, word from public.vocabulary');
+    const id = (word: string) => entries.find((row) => row.word === word)?.id ?? '';
+
+    const queue = await picked(app, alice, [id('future-new'), id('late-old'), id('today-new')]);
+    expect(words(queue)).toEqual(['future-new', 'late-old', 'today-new']);
+    expect(queue).toMatchObject({ focus: null, selection: true, vocabulary: 'in_progress' });
   });
 
-  it('an empty selection does not claim that nothing at all is due', async () => {
-    const app = on(TODAY);
-    await addWord(app, alice, { word: 'undated', dateAdded: '2026-01-01' });
-    for (const focus of ['overdue', 'due_today', 'recent']) {
-      expect(await queueOf(app, alice, focus), focus).toMatchObject({ cards: [], vocabulary: 'in_progress', focus });
-    }
-  });
-
-  it('holds only the caller’s own words', async () => {
+  it('a picked review holds only the caller’s own words, is not repeated, and never a mastered one', async () => {
     const app = on(TODAY);
     await library(app);
     await addWord(app, bob, { word: 'bobs', mastery: 1, reviewDate: '2026-10-01', dateAdded: TODAY });
-    for (const focus of ['overdue', 'recent']) {
-      expect(words(await queueOf(app, alice, focus)), focus).not.toContain('bobs');
-      expect(words(await queueOf(app, bob, focus)), focus).toEqual(['bobs']);
-    }
+    const mine = await addWord(app, alice, { word: 'mine', mastery: 1, reviewDate: '2026-10-01' });
+    const mastered = await addWord(app, alice, { word: 'finished', mastery: 10, reviewDate: '2026-10-01' });
+    const theirs = (await addWord(app, bob, { word: 'theirs', mastery: 1, reviewDate: '2026-10-01' })).id;
+
+    const queue = await picked(app, alice, [mine.id, theirs, mine.id, mastered.id]);
+    // The mastered word is not reviewable at all, and another account's word is not reachable.
+    expect(words(queue)).toEqual(['mine']);
   });
 
-  it('saves an answer from a narrowed queue by the same rules as any other', async () => {
+  it('an empty pick does not claim that nothing at all is due', async () => {
+    const app = on(TODAY);
+    await addWord(app, alice, { word: 'undated', dateAdded: '2026-01-01' });
+    expect(await picked(app, alice, [])).toMatchObject({ cards: [], vocabulary: 'in_progress', selection: true });
+  });
+
+  it('saves an answer from a picked review by the same rules as any other', async () => {
     const app = on(TODAY);
     await library(app);
-    const [card] = (await queueOf(app, alice, 'overdue')).cards;
+    const entries = await db.admin<{ id: string; word: string }>('select id, word from public.vocabulary');
+    const lateOld = entries.find((row) => row.word === 'late-old')!.id;
+
+    const [card] = (await picked(app, alice, [lateOld])).cards;
     await answer(app, alice, card!.id, 'remember');
     const after = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${card!.id}`)).json()).entry;
     // Mastery 3 remembered on the 9th: mastery 4, due three days later.
@@ -404,7 +389,7 @@ describe('narrowing a review', () => {
     const response = await call(on(TODAY), alice, '/api/review-queue?focus=everything');
     expect(response.status).toBe(400);
     expect(((await response.json()) as { error: { message: string } }).error.message).toBe(
-      'Unknown focus. Use one of: weak, overdue, due_today, recent.',
+      'Unknown focus. Use one of: weak.',
     );
   });
 });
@@ -606,9 +591,16 @@ describe('a database one migration behind (version 4)', () => {
     expect(analytics.calibration.levels.every((level) => level.reviews === 0)).toBe(true);
   });
 
-  it('can still narrow a review by date', async () => {
+  it('can still take the words the reviewer picked, and counts them by default', async () => {
     const app = on(TODAY, old, [carol]);
-    await addWord(app, carol, { word: 'overdue-one', mastery: 2, reviewDate: '2026-10-02' });
-    expect(words(await queueOf(app, carol, 'overdue'))).toContain('overdue-one');
+    const word = await addWord(app, carol, { word: 'early', mastery: 2, reviewDate: '2026-10-20' });
+    const queue = queueResponseSchema.parse(
+      await (await call(app, carol, '/api/review-queue', { method: 'POST', body: { ids: [word.id] } })).json(),
+    );
+    expect(queue.cards.map((card) => card.word)).toEqual(['early']);
+
+    // Nowhere to keep the choice, so a review counts, exactly as it always did.
+    const settings = accountSettingsSchema.parse(await (await call(app, carol, '/api/settings')).json());
+    expect(settings.countReviewsTowardMastery).toBe(true);
   });
 });

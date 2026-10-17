@@ -154,6 +154,7 @@ describe('a new account', () => {
       email: alice.email,
       database: { version: LATEST_SCHEMA_VERSION, latest: LATEST_SCHEMA_VERSION },
       fsrsRetention: 0.9,
+      countReviewsTowardMastery: true,
     });
   });
 
@@ -576,6 +577,23 @@ describe('account settings', () => {
     const response = await call(app, alice, '/api/settings', { method: 'PUT', body: { timeZone: 'Hanoi' } });
     expect(response.status).toBe(400);
     expect(accountSettingsSchema.parse(await (await call(app, alice, '/api/settings')).json()).timeZone).toBe('Asia/Ho_Chi_Minh');
+  });
+
+  it('keeps whether a review counts towards mastery, and changes nothing else', async () => {
+    const before = await listOf(alice);
+    const saved = await call(app, alice, '/api/settings', {
+      method: 'PUT',
+      body: { countReviewsTowardMastery: false },
+    });
+    expect(saved.status).toBe(200);
+    const settings = accountSettingsSchema.parse(await saved.json());
+    expect(settings).toMatchObject({ countReviewsTowardMastery: false, timeZone: 'Asia/Ho_Chi_Minh' });
+    // Read again: it is the account's, not this response's.
+    expect(
+      accountSettingsSchema.parse(await (await call(app, alice, '/api/settings')).json()).countReviewsTowardMastery,
+    ).toBe(false);
+    // A preference is not a rule about what is due.
+    expect((await listOf(alice)).entries).toHaveLength(before.entries.length);
   });
 });
 

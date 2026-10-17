@@ -6,14 +6,15 @@
  * needlessly.
  */
 import { createContext, useContext, useEffect, useSyncExternalStore } from 'react';
-import type { ReviewFocus } from '../shared/api.js';
 import type { AppApi } from './lib/api-client.js';
+import { createCountingPreference, type CountingPreference } from './lib/counting-preference.js';
 import { createLibraryStore, type LibraryState, type LibraryStore } from './lib/library-store.js';
 import { createSender } from './lib/offline/send.js';
 import { createMemoryStore, type LocalStore } from './lib/offline/storage.js';
 import { withCachedReads } from './lib/offline/cached-api.js';
 import { createSyncEngine, type SyncEngine, type SyncEngineState } from './lib/offline/sync-engine.js';
 import { invalidateAllPracticeHistory } from './lib/practice-history-cache.js';
+import { ALL_SCOPE, sameScope, type ReviewScope } from './lib/review-scope.js';
 import { createSessionController, type SessionController } from './lib/session-controller.js';
 import { createSettingsStore, type Settings, type SettingsStore } from './lib/settings.js';
 import { createToastStore, type ToastStore } from './lib/toasts.js';
@@ -31,6 +32,11 @@ export interface AppServices {
   session: SessionController;
   vocabulary: VocabularyStore;
   settings: SettingsStore;
+  /**
+   * Whether a review moves a word. The reviewer's own choice, made with the
+   * switch beside the card, kept with the account and on this device.
+   */
+  counting: CountingPreference;
   toasts: ToastStore;
   /** `null` with the built-in sample words, which need no account. */
   account: AccountControls | null;
@@ -39,7 +45,7 @@ export interface AppServices {
    * afterwards only a finished or failed session is replaced, so one in
    * progress survives a trip to another tab.
    */
-  ensureReviewSession(focus?: ReviewFocus | null, collection?: string | null): void;
+  ensureReviewSession(scope?: ReviewScope): void;
   /** Collections, further examples and relationships between words. */
   library: LibraryStore;
   /**
@@ -89,21 +95,40 @@ export function createAppServices(
   const vocabulary = createVocabularyStore({ api: client, engine: sync, store, accountId, ids });
   // The practice history cache lives outside these services; a new account must not start with the last one's.
   invalidateAllPracticeHistory();
+  const counting = createCountingPreference({
+    store,
+    accountId,
+    save: (value) => client.saveSettings({ countReviewsTowardMastery: value }),
+  });
+  // The account's stored choice, where it can be read at all; this device's own
+  // copy stands in until then, and offline it is the only copy there is.
+  void client
+    .fetchSettings()
+    .then((current) => counting.adopt(current.countReviewsTowardMastery))
+    .catch(() => undefined);
   // A saved answer changes mastery and dates, so the other pages must re-read.
-  const session = createSessionController({ api: client, engine: sync, store, accountId, onSaved: () => vocabulary.markStale() });
+  const session = createSessionController({
+    api: client,
+    engine: sync,
+    store,
+    accountId,
+    countsTowardMastery: () => counting.get(),
+    onSaved: () => vocabulary.markStale(),
+  });
   let reviewStarted = false;
   const library = createLibraryStore(client);
-  const ensureReviewSession = (focus: ReviewFocus | null = null, collection: string | null = null) => {
+  const ensureReviewSession = (scope: ReviewScope = ALL_SCOPE) => {
     const current = session.getState();
     const failedToLoad = current.status === 'error' && current.error?.kind === 'load';
     // Asking for a different selection of cards is a new session. Answers
     // already given are not at risk: their writes are in the outbox.
-    const changed =
-      current.meta !== null && (current.meta.focus !== focus || (current.meta.collection?.id ?? null) !== collection);
-    const refocused = reviewStarted && changed;
-    if (!reviewStarted || current.status === 'completed' || failedToLoad || refocused) {
+    const changed = reviewStarted && !sameScope(session.scope(), scope);
+    if (!reviewStarted || current.status === 'completed' || failedToLoad || changed) {
       reviewStarted = true;
-      void session.load({ focus, collection });
+      // The weakest words arrive with counting off: taking a weak word early is meant to be
+      // extra practice unless the reviewer says otherwise, and their own choice then sticks.
+      if (scope.kind === 'weak') counting.preset(false);
+      void session.load({ scope });
     }
   };
 
@@ -112,6 +137,7 @@ export function createAppServices(
     session,
     vocabulary,
     settings,
+    counting,
     toasts: createToastStore(),
     account,
     ensureReviewSession,
@@ -175,6 +201,12 @@ export function useLibrary(): LibraryState {
 export function useSettings(): Settings {
   const { settings } = useApp();
   return useSyncExternalStore(settings.subscribe, settings.getState);
+}
+
+/** Whether a review moves a word, as the switch beside the card has it. */
+export function useCounting(): boolean {
+  const { counting } = useApp();
+  return useSyncExternalStore(counting.subscribe, counting.get);
 }
 
 /** Access True Mastery data for vocabulary entries. */

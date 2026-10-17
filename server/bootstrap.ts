@@ -91,6 +91,8 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
       dailyGoal: goals.get(),
       fsrsRetention: DEFAULT_FSRS_SETTINGS.requestRetention,
       scheduler: scheduler.get(),
+      // Sample data keeps no account, so there is nowhere to remember a choice; a review counts by default.
+      countReviewsTowardMastery: true,
     }),
   });
   return { app: createApp({ config, service, vocabulary, analytics, library, exporter }), config };

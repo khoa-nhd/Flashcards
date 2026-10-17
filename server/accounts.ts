@@ -20,6 +20,12 @@ export interface AccountSession {
   /** The retention FSRS aims for; `null` where the database cannot store it yet. */
   fsrsRetention: number | null;
   saveFsrsRetention(value: number): Promise<number>;
+  /**
+   * Whether a review moves a word by default. The reviewer chooses it beside
+   * the words being reviewed; it is account-wide so the choice follows them.
+   */
+  countReviewsTowardMastery: boolean;
+  saveCountReviewsTowardMastery(value: boolean): Promise<boolean>;
   review: ReviewService;
   vocabulary: VocabularyService;
   analytics: AnalyticsService;

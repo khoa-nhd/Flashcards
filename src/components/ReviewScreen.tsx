@@ -146,6 +146,11 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
       {/* The card scrolls here when its answer is taller than the screen, so it never runs under the buttons. */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-hidden py-2">
         <div className="my-auto">
+          {card.recovery !== undefined && (
+            <p className="mb-2 text-center text-xs font-medium text-accent" role="status">
+              Recovery {card.recovery.points} of {card.recovery.threshold}
+            </p>
+          )}
           <Flashcard
             key={card.id}
             card={card}

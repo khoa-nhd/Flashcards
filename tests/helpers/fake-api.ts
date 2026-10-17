@@ -258,6 +258,7 @@ export function createFakeApi({
     email: 'me@example.test',
     database: null,
     fsrsRetention: null,
+    countReviewsTowardMastery: true,
     ...account,
   };
   let nextId = 500;
@@ -272,12 +273,12 @@ export function createFakeApi({
   const api = {
     // Echoes the selection it was asked for, as the server does.
     fetchQueue: vi.fn<AppApi['fetchQueue']>(async (options) => {
-      const wanted = options?.collection ?? null;
-      const collection =
-        wanted === null
-          ? null
-          : { id: wanted, name: library.collections.find((item) => item.id === wanted)?.name ?? 'Collection' };
-      return queueResponse(cards, { focus: options?.focus ?? null, collection, ...queue });
+      const scope = options?.scope ?? { kind: 'all' };
+      return queueResponse(cards, {
+        focus: scope.kind === 'weak' ? 'weak' : null,
+        selection: scope.kind === 'selection',
+        ...queue,
+      });
     }),
     submitAction: vi.fn<AppApi['submitAction']>(() => {
       const pending = deferred<ReviewActionResponse>();
@@ -390,7 +391,13 @@ export function createFakeApi({
       format: EXPORT_FORMAT,
       version: EXPORT_VERSION,
       exportedAt: `${TODAY}T05:00:00.000Z`,
-      settings: { timeZone: TIME_ZONE, dailyGoal: goal, fsrsRequestRetention: null, scheduler: scheduler.active },
+      settings: {
+        timeZone: TIME_ZONE,
+        dailyGoal: goal,
+        fsrsRequestRetention: null,
+        scheduler: scheduler.active,
+        countReviewsTowardMastery: true,
+      },
       counts: {
         words: store.length,
         wordsInTrash: trash.size,
@@ -529,9 +536,10 @@ export function createFakeApi({
       goal = next;
       return dayPlan({ ...planFigures, goal });
     }),
-    saveSettings: vi.fn<AppApi['saveSettings']>(async ({ timeZone, fsrsRetention }) => {
+    saveSettings: vi.fn<AppApi['saveSettings']>(async ({ timeZone, fsrsRetention, countReviewsTowardMastery }) => {
       if (timeZone !== undefined) settings.timeZone = timeZone;
       if (fsrsRetention !== undefined) settings.fsrsRetention = fsrsRetention;
+      if (countReviewsTowardMastery !== undefined) settings.countReviewsTowardMastery = countReviewsTowardMastery;
       return { ...settings };
     }),
 

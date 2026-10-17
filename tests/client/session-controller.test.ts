@@ -52,7 +52,14 @@ function setup(cardCount = 3, queue: Partial<QueueResponse> = {}) {
     backoffMs: { base: 10, max: 20 },
   });
   const onSaved = vi.fn();
-  const session = createSessionController({ api, engine, store, accountId: 'test', onSaved });
+  const session = createSessionController({
+    api,
+    engine,
+    store,
+    accountId: 'test',
+    countsTowardMastery: () => true,
+    onSaved,
+  });
   return { api, engine, session, store, saves, undos, onSaved };
 }
 
@@ -138,6 +145,8 @@ describe('answering', () => {
       requestId: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
       durationMs: expect.any(Number),
       sessionId: session.sessionId(),
+      allowNotDue: false,
+      countsTowardMastery: true,
       answeredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
   });
@@ -151,7 +160,9 @@ describe('answering', () => {
     const sent = api.submitAction.mock.calls[0]?.[0] ?? {};
     expect(Object.keys(sent).sort()).toEqual([
       'action',
+      'allowNotDue',
       'answeredAt',
+      'countsTowardMastery',
       'durationMs',
       'expected',
       'pageId',
@@ -463,20 +474,20 @@ describe('narrowing the queue', () => {
   it('asks for everything due unless told otherwise', async () => {
     const { api, session } = setup();
     await session.load();
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'all' } });
   });
 
   it('asks for the weakest words when told to, and keeps to them on a plain reload', async () => {
     const { api, session } = setup();
-    await session.load({ focus: 'weak' });
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: 'weak' });
+    await session.load({ scope: { kind: 'weak' } });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'weak' } });
 
     // Refresh passes nothing: it re-reads the same selection.
     await session.load();
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: 'weak' });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'weak' } });
 
-    await session.load({ focus: null });
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null });
+    await session.load({ scope: { kind: 'all' } });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'all' } });
   });
 
   it('changes the selection while an answer is still waiting: the write is the outbox’s', async () => {
@@ -486,8 +497,8 @@ describe('narrowing the queue', () => {
     session.grade('remember');
     await waitFor(() => saves.length === 1);
 
-    await session.load({ focus: 'weak' });
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: 'weak' });
+    await session.load({ scope: { kind: 'weak' } });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'weak' } });
     expect((await engine.ops()).length).toBe(1);
 
     saves[0]?.resolve(applied);
@@ -528,7 +539,13 @@ describe('without a connection', () => {
     // A reload: the queue cannot be fetched either, so the last one comes back
     // from this device, with the sitting where it stopped.
     api.fetchQueue.mockRejectedValueOnce(new ApiError('network', 'Could not reach the server.'));
-    const reloaded = createSessionController({ api, engine, store, accountId: 'test' });
+    const reloaded = createSessionController({
+      api,
+      engine,
+      store,
+      accountId: 'test',
+      countsTowardMastery: () => true,
+    });
     await reloaded.load();
     const state = reloaded.getState();
     expect(state).toMatchObject({ status: 'ready', source: 'cache', index: 1, tally: { remember: 1 } });
@@ -550,7 +567,13 @@ describe('without a connection', () => {
 
     // The queue loads afresh, as after a reload; the refused answer is still in
     // the outbox and is taken back into the sitting's list.
-    const reloaded = createSessionController({ api, engine, store, accountId: 'test' });
+    const reloaded = createSessionController({
+      api,
+      engine,
+      store,
+      accountId: 'test',
+      countsTowardMastery: () => true,
+    });
     await reloaded.load();
     expect(reloaded.getState().refused.map((answer) => answer.requestId)).toEqual([requestId]);
 

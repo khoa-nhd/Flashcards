@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useApp, useSettings, useSync, useVocabulary } from '../app-context.js';
+import { useApp, useCounting, useSettings, useSync, useVocabulary } from '../app-context.js';
 import { AccountSection, DatabaseStatus, TimeZoneSection, TrashSection } from '../components/AccountSettings.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { GoalSection } from '../components/GoalSection.js';
@@ -35,6 +35,8 @@ const SAVING_TEXT = {
 export function SettingsPage() {
   const { api, settings: store, vocabulary, account, local } = useApp();
   const settings = useSettings();
+  const counting = useCounting();
+  const { counting: countingPreference } = useApp();
   const state = useVocabulary();
   const { meta, entries } = state;
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => store.update({ [key]: value });
@@ -74,6 +76,22 @@ export function SettingsPage() {
 
         <section className={`${CARD} flex flex-col gap-4 p-5`}>
           <h2 className={SECTION_TITLE}>Review</h2>
+          <label className="flex cursor-pointer items-start gap-3 text-sm">
+            <input
+              type="checkbox"
+              className="mt-0.5 size-4 accent-[var(--accent)]"
+              checked={counting}
+              onChange={(event) => countingPreference.set(event.target.checked)}
+            />
+            <span>
+              <span className="font-medium">Count reviews toward mastery</span>
+              <span className={`block ${HELP}`}>
+                The same switch as the one in the Review tab, kept here as well. With it off, an answer is still recorded
+                and still counts in your accuracy, streak and daily goal, but the word keeps the mastery, review date and
+                FSRS state it had — which is what lets a word be answered before it is due.
+              </span>
+            </span>
+          </label>
           <label className="flex cursor-pointer items-start gap-3 text-sm">
             <input
               type="checkbox"

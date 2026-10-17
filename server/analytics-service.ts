@@ -5,14 +5,20 @@ import type {
   ReviewDaysResponse,
   WeakWordsResponse,
 } from '../shared/api.js';
-import { RECENTLY_ADDED_DAYS, REVIEW_DAYS_MAX } from '../shared/api.js';
+import { REVIEW_DAYS_MAX } from '../shared/api.js';
 import { MIN_SAMPLE, analyseReviews } from '../shared/analytics.js';
 import { addDays, calendarDateInTimeZone, compareDates, daysBetween, type IsoDate } from '../shared/dates.js';
 import type { ReviewRules } from '../shared/review-logic.js';
 import { dueDateUnder } from '../shared/scheduler/active.js';
 import { goalProblem, planDay, type DailyGoal } from '../shared/session-planner.js';
 import { classifyReviewStatus, isReviewableNow } from '../shared/vocabulary-status.js';
-import { WEAK_WORD_WINDOW_DAYS, rankWeakWords, type WeakWordInput } from '../shared/weak-words.js';
+import { WEAK_WORD_WINDOW_DAYS, rankWeakWords, scoreWeakWord, type WeakWordInput } from '../shared/weak-words.js';
+import {
+  cardHistoryFromDays,
+  computeRecovery,
+  type RecoveryProgress,
+  type WeakWordDayRow,
+} from '../shared/weak-recovery.js';
 import { HttpError } from './errors.js';
 import { NO_GOAL_STORE, type GoalStore } from './goal-store.js';
 import { MASTERY_ONLY, type SchedulerStore } from './scheduler-store.js';
@@ -200,35 +206,33 @@ export class AnalyticsService {
     return this.dayPlan();
   }
 
-  /** Live words added within the last few days, today included. */
-  async recentlyAddedIds(): Promise<string[]> {
-    const today = this.today();
-    const since = addDays(today, -(RECENTLY_ADDED_DAYS - 1));
-    const { entries } = await this.options.catalog.listEntries();
-    return entries
-      .filter(
-        (entry) =>
-          entry.dateAdded !== null && compareDates(entry.dateAdded, since) >= 0 && compareDates(entry.dateAdded, today) <= 0,
-      )
-      .map((entry) => entry.id);
-  }
-
   /** Every live word with something against it, weakest first, each with its reasons. */
   async weakWords(): Promise<WeakWordsResponse> {
     const { repository, catalog, rules } = this.options;
     const today = this.today();
     const historyAvailable = repository.capabilities.analytics;
-    const [{ entries }, histories] = await Promise.all([
+    const [{ entries }, dayRows] = await Promise.all([
       catalog.listEntries(),
-      historyAvailable ? repository.cardReviewStats(addDays(today, -(WEAK_WORD_WINDOW_DAYS - 1))) : new Map(),
+      repository.capabilities.weakRecovery ? repository.weakWordDays() : [],
     ]);
 
+    const daysById = new Map<string, WeakWordDayRow[]>();
+    for (const row of dayRows) {
+      const days = daysById.get(row.vocabularyId) ?? [];
+      days.push(row);
+      daysById.set(row.vocabularyId, days);
+    }
+
+    const since = addDays(today, -(WEAK_WORD_WINDOW_DAYS - 1));
     const reviewable = new Map<string, boolean>();
+    const recoveryById = new Map<string, RecoveryProgress>();
     const inputs: WeakWordInput[] = entries.map((entry) => {
       const scheduled = this.scheduled(entry);
       const status = classifyReviewStatus(scheduled, today, rules);
       reviewable.set(entry.id, isReviewableNow(status, rules));
-      return {
+      const days = daysById.get(entry.id) ?? [];
+      const history = days.length === 0 ? null : cardHistoryFromDays(days, { since, lastGraduatedOn: null });
+      const base: WeakWordInput = {
         id: entry.id,
         word: entry.word,
         mastery: entry.mastery,
@@ -237,7 +241,18 @@ export class AnalyticsService {
         meaning: entry.meaning,
         definition: entry.definition,
         example: entry.example,
-        history: histories.get(entry.id) ?? null,
+        history,
+      };
+      // The requirement is fixed by how heavy the word is before recovery: the
+      // clean slate changes the score, not how many points the word needs.
+      const provisional = scoreWeakWord(base, today);
+      const recovery = computeRecovery(days, { severity: provisional?.severity ?? 'low', today });
+      recoveryById.set(entry.id, recovery);
+      return {
+        ...base,
+        history:
+          days.length === 0 ? null : cardHistoryFromDays(days, { since, lastGraduatedOn: recovery.lastGraduatedOn }),
+        overdueForgiven: recovery.forgivesOverdue,
       };
     });
 
@@ -247,7 +262,11 @@ export class AnalyticsService {
       today,
       windowDays: WEAK_WORD_WINDOW_DAYS,
       total: ranked.length,
-      words: ranked.slice(0, WEAK_WORD_LIMIT).map((word) => ({ ...word, reviewable: reviewable.get(word.id) ?? false })),
+      words: ranked.slice(0, WEAK_WORD_LIMIT).map((word) => ({
+        ...word,
+        reviewable: reviewable.get(word.id) ?? false,
+        recovery: recoveryById.get(word.id),
+      })),
     };
   }
 }

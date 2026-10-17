@@ -126,7 +126,7 @@ const WORD = '00000000-0000-4000-8000-000000000001';
 const REQUESTS: Array<[label: string, path: string, method?: 'POST' | 'PUT', body?: unknown]> = [
   ['the review queue', '/api/review-queue'],
   ['the review queue, weakest first', '/api/review-queue?focus=weak'],
-  ['the review queue, recently added', '/api/review-queue?focus=recent'],
+  ['the review queue, words the reviewer picked', '/api/review-queue', 'POST', { ids: [WORD] }],
   ['the word list', '/api/vocabulary'],
   ['one word', `/api/vocabulary/${WORD}`],
   ['a word’s practice mastery', `/api/vocabulary/${WORD}/practice-mastery`],
@@ -143,6 +143,7 @@ const REQUESTS: Array<[label: string, path: string, method?: 'POST' | 'PUT', bod
   ['a session summary', `/api/sessions/${newId()}/summary`],
   ['saving the time zone', '/api/settings', 'PUT', { timeZone: 'UTC' }],
   ['saving the FSRS target', '/api/settings', 'PUT', { fsrsRetention: 0.85 }],
+  ['saving whether a review counts', '/api/settings', 'PUT', { countReviewsTowardMastery: false }],
   ['saving a daily goal', '/api/goal', 'PUT', { reviews: 5, minutes: null }],
   ['choosing FSRS', '/api/scheduler', 'PUT', { scheduler: 'fsrs' }],
   ['adding a word', '/api/vocabulary', 'POST', { requestId: newId(), word: 'candid' }],
@@ -309,7 +310,7 @@ describe('the recording itself', () => {
       'undo_review',
       'session_summary',
       'review_daily_stats',
-      'card_review_stats',
+      'weak_word_days',
       'confidence_stats',
       'practice_daily_stats',
       'record_practice',
@@ -333,5 +334,12 @@ describe('the recording itself', () => {
       new Set((await askedAt(version)).filter((item) => item.name === 'user_settings').flatMap((item) => [...item.columns]));
     expect(await settingsColumns(7)).not.toContain('scheduler');
     expect(await settingsColumns(8)).toContain('scheduler');
+  });
+
+  it('reads whether a review counts towards mastery only where the column exists', async () => {
+    const settingsColumns = async (version: number) =>
+      new Set((await askedAt(version)).filter((item) => item.name === 'user_settings').flatMap((item) => [...item.columns]));
+    expect(await settingsColumns(12)).not.toContain('count_reviews_toward_mastery');
+    expect(await settingsColumns(LATEST_SCHEMA_VERSION)).toContain('count_reviews_toward_mastery');
   });
 });

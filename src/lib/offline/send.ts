@@ -24,7 +24,8 @@ export function createSender(api: AppApi, resolveId: IdResolver): Sender {
           requestId: op.id,
           durationMs: payload.durationMs ?? undefined,
           sessionId: payload.sessionId ?? undefined,
-          ...(payload.focus == null ? {} : { focus: payload.focus }),
+          allowNotDue: payload.allowNotDue === true,
+          countsTowardMastery: payload.countsTowardMastery !== false,
           ...(payload.confidence == null ? {} : { confidence: payload.confidence }),
           // The instant the answer was given, so an offline answer lands on the
           // day it was answered rather than the day it synced.

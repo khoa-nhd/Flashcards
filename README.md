@@ -9,14 +9,14 @@ in on.
 | Tab | What it does |
 | --- | --- |
 | **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
-| **Review** | Flashcards: flip, then answer Remember or Not remember. Narrow the queue (weakest, overdue, due today, recently added, one collection). Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. Answers are recorded on the device first and sent in the background, so nothing waits on the network. |
+| **Review** | Flashcards: flip, then answer Remember or Not remember. Choose what to review (everything due, the weakest words, or words you pick yourself) and whether the session counts towards mastery. Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. Answers are recorded on the device first and sent in the background, so nothing waits on the network. |
 | **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, and listening (experimental). Recorded for your statistics; never changes mastery or a review date. |
 | **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
 | **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples and related words. |
 | **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
 | **Calendar** | A month at a glance: words by the day they were added, or saved reviews by the day you did them. |
 | **AI Chat** | Ask an AI, in **General** for anything or **Vocabulary Expert** to look at a word or phrase in depth. Conversations and messages are saved to your account. Off unless the server is configured (see Deploying). |
-| **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of just those that are due, or practice with all of them. |
+| **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of them, weakest first, whether or not they are due, or practice with all of them. |
 | **Insights** | Reviews per day, accuracy and time per card week by week, accuracy and retention by period, confidence calibration, practice by mode, additions over time, share mastered, busiest days, incomplete entries. |
 | **Settings** | Account, time zone, daily goal, review preferences, scheduling (which schedule is in charge, the FSRS comparison and estimate, and a what-if on your saved answers), display preferences, exports, deleted words, connection and database status. |
 
@@ -96,10 +96,29 @@ its undo; nothing is erased.
 and not remembered, accuracy, time on cards, how many words were new to you,
 and how many answers were undone.
 
-**Weakest words only.** The Weak words page can start a review of just the
-listed words that are already due (`/review?focus=weak`). It only narrows the
-normal queue; it never brings a word forward, and answers are saved by the
-same rules.
+**Choosing what to review.** The Review tab offers exactly three choices:
+
+- **Everything due** — the whole queue, most overdue first.
+- **Weakest words** — the words on the Weak words list, weakest first, *whether
+  or not they are due*. It may take a word before its date.
+- **Select words** — pick any words yourself, in the order you want them, and
+  review those whether or not they are due. The picker reuses the Bank's list,
+  hides words that have reached full mastery, and can seed itself from one of
+  your collections.
+
+Each choice starts a fresh sitting, and the chosen one survives a refresh.
+Selecting words is client-side: nothing is narrowed by the address bar beyond
+opening the picker, and the server learns which words to send only when the
+session starts.
+
+**Counting towards mastery.** Beside the choices is one switch, also kept in
+Settings → Review and remembered for your account *and* on the device, so it
+still holds without a connection. With it off, an answer is still recorded and
+still counts towards your accuracy, streak and daily goal, but the word keeps
+the mastery, review date and FSRS state it had — which is what lets a word be
+answered again before it is due. Weakest words leaves the switch off for you;
+you can turn it back on, and your choice is remembered. With the switch on, a
+word taken early moves exactly as a due answer would.
 
 **A daily goal** (Settings) is a number of reviews, a number of minutes, or
 both. It is only ever compared with what you saved: it never hides, reorders
@@ -190,6 +209,7 @@ in the Supabase dashboard (SQL Editor → paste the file → Run):
 | `20261020090000_ai_conversations.sql` | 10 | AI Chat: saved conversations and messages. |
 | `20261025090000_vocabulary_analysis.sql` | 11 | The structured analysis Vocabulary Expert stores for a word. |
 | `20261026090000_ai_message_saved.sql` | 12 | The link from a Vocabulary Expert reply to the word it was added to, so "Added" survives a reload. Changes nothing until a word is added from the chat. |
+| `20261027090000_review_counting.sql` | 13 | Per-account choice of whether a review counts towards mastery. Changes nothing until an account turns it off. |
 
 Each file only adds things; none changes or removes existing data. The app
 checks the database version and keeps working on an older one, with the newer
@@ -493,8 +513,9 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | --- | --- |
 | `GET /api/health` | Configuration status. Public; contains no secrets. |
 | `GET /api/config` | Public. How to sign in: the project address and public key. |
-| `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. `?focus=weak`, `overdue`, `due_today` or `recent`, or `?collection=<id>`, narrows it; none can add a word that is not due. |
-| `POST /api/review-action` | `{ pageId, action, expected, requestId, sessionId?, durationMs?, confidence? }` → `applied`, `already_applied` or `dry_run`. `409` if the word changed. |
+| `GET /api/review-queue` | Due cards in order, with fields already filtered by mastery. `?focus=weak` narrows it to the weakest words, weakest first, and may include a word that is not due yet. |
+| `POST /api/review-queue` | `{ ids }` → the cards for exactly those words, in the order given, whether or not they are due. Words that are not the caller's, or that have reached full mastery, are left out. Read-only, but a body is what carries a choice too long for an address. |
+| `POST /api/review-action` | `{ pageId, action, expected, requestId, sessionId?, durationMs?, confidence?, allowNotDue?, countsTowardMastery? }` → `applied`, `already_applied` or `dry_run`. `409` if the word changed. `allowNotDue` licenses an answer for a word the schedule does not call due yet; `countsTowardMastery: false` records the answer but leaves mastery, review date and FSRS state untouched. |
 | `POST /api/practice` | `{ pageId, mode, answer, requestId, sessionId? }` → the verdict, and the word's practice mastery in that mode once the answer is counted. Judged on the server and recorded as practice; it cannot change mastery or a review date. |
 | `GET /api/vocabulary/:id/practice-mastery` | One word's practice mastery in every mode, counted from its recorded practice answers. Read-only. |
 | `POST /api/review-undo` | `{ reviewRequestId, requestId }` → the word's restored state. `409` if the answer is no longer the latest for that word. |
@@ -520,7 +541,7 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | `PUT /api/collections/:id/words/:wordId` | `{ member }`: put a word in a collection or take it out. |
 | `POST /api/vocabulary/:id/examples`, `PATCH`, `DELETE /api/examples/:id` | Further example sentences for a word. |
 | `POST /api/relations`, `DELETE /api/relations/:id` | `{ fromId, toId, kind }`: link two of your words. Stored once per pair and kind. |
-| `GET /api/settings`, `PUT /api/settings` | The account's time zone and FSRS target retention; the database version found. |
+| `GET /api/settings`, `PUT /api/settings` | The account's time zone, FSRS target retention and whether reviews count towards mastery; the database version found. |
 
 ## Development
 

@@ -1,10 +1,12 @@
 /**
- * The ways a review can be narrowed, as the reviewer reads them. Every one
- * selects among words that are already due, except `weak`, which may also
- * bring a weak word forward. Answers in `weak` are practice: they never
- * change a word's mastery or review date.
+ * The words a review can be narrowed to, as the reviewer reads them. Everything
+ * due and the weakest words are named by the address; the reviewer's own picked
+ * words are chosen on the page itself. Either narrowing may take a word before
+ * it is due. Whether an answer moves the word is a separate choice, made with
+ * the switch beside the card.
  */
-import { RECENTLY_ADDED_DAYS, reviewFocusSchema, type ReviewFocus } from '../../shared/api.js';
+import type { ReviewFocus } from '../../shared/api.js';
+import { ALL_SCOPE, WEAK_SCOPE, type ReviewScope } from './review-scope.js';
 
 export interface FocusText {
   /** In the chooser. */
@@ -21,38 +23,34 @@ export interface FocusText {
 export const FOCUS_TEXT: Record<ReviewFocus, FocusText> = {
   weak: {
     label: 'Weakest words',
-    banner: 'Weakest words only, whether or not they are due. Practice only: mastery and review dates stay as they are.',
+    banner: 'Weakest words only, whether or not they are due.',
     emptyTitle: 'No weak words',
     emptyDetail: 'Nothing is flagged as needing attention right now.',
     done: 'They were your weakest words.',
   },
-  overdue: {
-    label: 'Overdue only',
-    banner: 'Overdue words only.',
-    emptyTitle: 'Nothing is overdue',
-    emptyDetail: 'No word is past its review date.',
-    done: 'They were the words past their review date.',
-  },
-  due_today: {
-    label: 'Due today only',
-    banner: 'Words due today only.',
-    emptyTitle: 'Nothing is dated today',
-    emptyDetail: 'No word has today as its review date.',
-    done: 'They were the words dated today.',
-  },
-  recent: {
-    label: 'Recently added',
-    banner: `Words added in the last ${RECENTLY_ADDED_DAYS} days only, from those due now.`,
-    emptyTitle: 'No recent words are due',
-    emptyDetail: `None of the words added in the last ${RECENTLY_ADDED_DAYS} days is due for review right now.`,
-    done: `They were the due words added in the last ${RECENTLY_ADDED_DAYS} days.`,
-  },
+};
+
+/** The reviewer's own picked words. Not a focus: the server is told the ids, not a name. */
+export const SELECT_TEXT: FocusText = {
+  label: 'Select words',
+  banner: 'Words you picked, whether or not they are due.',
+  emptyTitle: 'Nothing to review from your picks',
+  emptyDetail: 'None of these words can be reviewed right now.',
+  done: 'They were the words you picked.',
 };
 
 export const EVERYTHING_LABEL = 'Everything due';
 
-/** The selection an address asks for; anything unrecognised means everything due. */
-export function focusFromQuery(query: URLSearchParams): ReviewFocus | null {
-  const parsed = reviewFocusSchema.safeParse(query.get('focus'));
-  return parsed.success ? parsed.data : null;
+/** What the chooser calls the picked-words entry. Not a focus value the server knows. */
+export const SELECT_VALUE = 'select';
+
+/**
+ * The narrowing an address asks for. Anything unrecognised means everything
+ * due: an address kept from an older version still opens something sensible.
+ */
+export function scopeFromQuery(query: URLSearchParams): ReviewScope {
+  const focus = query.get('focus');
+  if (focus === 'weak') return WEAK_SCOPE;
+  if (focus === SELECT_VALUE) return { kind: 'selection', ids: [] };
+  return ALL_SCOPE;
 }

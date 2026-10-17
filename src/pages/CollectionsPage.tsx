@@ -195,9 +195,12 @@ export function CollectionsPage() {
                     )}
                     {!editing && (
                       <div className="flex flex-wrap gap-2">
-                        {dueHere > 0 && (
-                          <Link to={buildHref(ROUTES.review, { collection: collection.id })} className={BUTTON_SECONDARY}>
-                            Review the due words
+                        {collection.wordIds.length > 0 && (
+                          <Link
+                            to={buildHref(ROUTES.review, { focus: 'select', collection: collection.id })}
+                            className={BUTTON_SECONDARY}
+                          >
+                            Review these words
                           </Link>
                         )}
                         {collection.wordIds.length > 0 && (

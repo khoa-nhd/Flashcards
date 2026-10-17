@@ -16,7 +16,7 @@ import {
   type SimulationResponse,
   type PracticeHistoryRow,
 } from '../shared/api.js';
-import { calendarDateInTimeZone, compareDates, type IsoDate } from '../shared/dates.js';
+import { calendarDateInTimeZone, type IsoDate } from '../shared/dates.js';
 import {
   applyAction,
   areDetailsVisible,
@@ -47,6 +47,7 @@ import { DEFAULT_RATING_MAP, ratingFor, type RatingMap } from '../shared/schedul
 import { simulate } from '../shared/scheduler/simulation.js';
 import { PRACTICE_MASTERY_MAX, STUDY_MODES, judge, practiceMasteryOf, type PracticeWord } from '../shared/study-modes.js';
 import type { CardFieldConfig, VocabularyRecord } from '../shared/vocabulary.js';
+import type { WeakRecoveryView } from '../shared/api.js';
 import { HttpError } from './errors.js';
 import { KeyedMutex } from './keyed-mutex.js';
 import { MASTERY_ONLY, type SchedulerStore } from './scheduler-store.js';
@@ -81,14 +82,14 @@ const ANSWER_CLOCK_SKEW_MS = 24 * 60 * 60 * 1000;
 const ANSWER_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
 /**
- * A way to narrow the queue. `weak` and `recent` name the words to keep
- * (`weak` also sets their order); the others are read off the review date.
+ * A way to narrow the queue to words named from outside. `weak` arrives
+ * weakest-first; a `selection` arrives in the order the reviewer ticked the
+ * words. Both are read as a set and both may bring a word forward before it is
+ * due, since only the ids decide what belongs in the queue.
  */
 export type QueueFocus =
-  | { kind: 'weak' | 'recent'; ids: readonly string[] }
-  | { kind: 'overdue' | 'due_today' }
-  /** The due words of one collection, in the usual order. */
-  | { kind: 'collection'; ids: readonly string[]; collection: { id: string; name: string } };
+  | { kind: 'weak'; ids: readonly string[]; recovery?: ReadonlyMap<string, WeakRecoveryView> }
+  | { kind: 'selection'; ids: readonly string[] };
 
 /** An answer as the service takes it. Without a request id, one is made up for this attempt. */
 export type ReviewSubmission = ReviewActionRequest;
@@ -157,9 +158,8 @@ export class ReviewService {
   }
 
   /**
-   * The cards to review. A `focus` keeps only some of them. Every focus
-   * narrows the queue to words the schedule says are ready, except `weak`,
-   * which may also bring a weak word forward before its due date.
+   * The cards to review. A `focus` keeps only the words it names; a queue with
+   * no focus holds everything the schedule says is ready.
    */
   async getQueue(focus: QueueFocus | null = null): Promise<QueueResponse> {
     const { repository, rules, timeZone } = this.options;
@@ -170,32 +170,25 @@ export class ReviewService {
 
     const today = this.today();
     const scheduler = this.activeScheduler();
-    // The mastery date narrows the read only while it is what decides. A weak focus reads every live word,
-    // because it may bring a word forward and so its review date cannot decide which are candidates.
-    const weakFocus = focus?.kind === 'weak';
+    // A narrowed queue names its own words, so the review date cannot decide which are candidates:
+    // both narrowings may bring a word forward before it is due.
+    const narrowed = focus !== null;
     const { records, invalid } =
-      scheduler === 'fsrs' || weakFocus ? await repository.listLiveRecords() : await repository.listDueCandidates(today);
+      scheduler === 'fsrs' || narrowed ? await repository.listLiveRecords() : await repository.listDueCandidates(today);
     const candidates: Candidate[] = records.map((record) => ({
       ...record,
       storedReview: record.nextReview,
       nextReview: this.dueDate(record, scheduler),
     }));
-    const built = buildQueue(candidates, today, rules, { allowNotDue: weakFocus });
+    const built = buildQueue(candidates, today, rules, { allowNotDue: narrowed });
     const { excluded } = built;
     let { queue } = built;
     if (focus !== null) {
-      if (!('ids' in focus)) {
-        queue = queue.filter((item) =>
-          focus.kind === 'due_today'
-            ? item.nextReview === today
-            : item.nextReview !== null && compareDates(item.nextReview, today) < 0,
-        );
-      } else {
-        const rank = new Map(focus.ids.map((id, position) => [id, position]));
-        queue = queue.filter((item) => rank.has(item.id));
-        // Weakest first; any other selection keeps the usual order, most overdue first.
-        if (focus.kind === 'weak') queue.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
-      }
+      // The order the ids arrive in is the order to review them in: weakest first for a weak
+      // review, and the order the reviewer ticked them in for their own picked words.
+      const rank = new Map(focus.ids.map((id, position) => [id, position]));
+      queue = queue.filter((item) => rank.has(item.id));
+      queue.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
     }
 
     const skipped = [...invalid];
@@ -209,15 +202,29 @@ export class ReviewService {
     }
 
     return {
-      cards: queue.map((record) => this.toCard(record)),
+      cards: queue.map((record) => {
+        const card = this.toCard(record);
+        const recovery = focus?.kind === 'weak' ? focus.recovery?.get(card.id) : undefined;
+        return recovery === undefined
+          ? card
+          : {
+              ...card,
+              recovery: {
+                points: recovery.points,
+                threshold: recovery.threshold,
+                recovered: recovery.recovered,
+                lastRememberedOn: recovery.lastRememberedOn,
+              },
+            };
+      }),
       today,
       timeZone,
       mode: repository.mode,
       writesEnabled: await this.writesEnabled(),
       capabilities: repository.capabilities,
       scheduler,
-      focus: focus === null || focus.kind === 'collection' ? null : focus.kind,
-      collection: focus?.kind === 'collection' ? focus.collection : null,
+      focus: focus?.kind === 'weak' ? 'weak' : null,
+      selection: focus?.kind === 'selection',
       skipped,
       // Only worth asking when there is nothing to review. A narrowed queue being empty says nothing about the rest.
       vocabulary: queue.length > 0 || focus !== null ? 'in_progress' : await repository.vocabularyStatus(),
@@ -270,14 +277,14 @@ export class ReviewService {
       throw conflict(current);
     }
     // Unchanged since it was shown, but still not something that may be reviewed now.
-    // Whether it is due is the one thing the schedule in charge decides, except for a weak
-    // focused review, which may take a word early.
+    // Whether it is due is the one thing the schedule in charge decides, except where the answer
+    // came from a review that names its own words, which may take one early.
     const scheduler = this.activeScheduler();
     const eligibility = checkEligibility(
       { mastery: current.mastery, nextReview: this.dueDate(record, scheduler) },
       today,
       rules,
-      { allowNotDue: request.focus === 'weak' },
+      { allowNotDue: request.allowNotDue === true },
     );
     if (!eligibility.eligible) {
       const why: Record<typeof eligibility.reason, string> = {
@@ -292,11 +299,12 @@ export class ReviewService {
       });
     }
 
-    // Reviewing the weakest words is extra practice: the answer is recorded, but the word does not
-    // move. The owner's rule (2026-10-15): mastery, review date and FSRS state all stay as they are,
-    // for either answer. It is saved as an answer whose state after equals its state before, so
-    // Undo, statistics and the request-id guard against saving twice work as for any answer.
-    const practiceOnly = request.focus === 'weak';
+    // A review that does not count is extra practice: the answer is recorded, but the word does
+    // not move. The owner's rule (2026-10-17): the reviewer chooses this, and while it is off
+    // mastery, the review date and the FSRS state all stay as they are, for either answer. It is
+    // saved as an answer whose state after equals its state before, so Undo, statistics and the
+    // request-id guard against saving twice work as for any answer.
+    const practiceOnly = request.countsTowardMastery === false;
     const next =
       ruleFor(action, rules) === null ? null : practiceOnly ? { ...current } : applyAction(action, current, today, rules);
     if (next === null || !(await this.writesEnabled())) return { outcome: 'dry_run', state: next };

@@ -1,6 +1,6 @@
 # Review logic: what the app does and where each rule comes from
 
-Last updated 2026-10-10.
+Last updated 2026-10-17.
 
 This document describes how reviewing works. The rules were not designed for
 this app: they were carried over, unchanged, from the owner's original
@@ -131,8 +131,9 @@ can be changed per word in the Add form.
 ## 9. What is stored
 
 A review answer changes **only** the word's mastery and review date, and
-appends one row to the review history. See
-[supabase-schema.md](supabase-schema.md) for the tables.
+appends one row to the review history — unless the reviewer has switched
+counting off, in which case it appends the history row and changes nothing else
+(section 15). See [supabase-schema.md](supabase-schema.md) for the tables.
 
 Past reviews made before 2026-10-10 are not in the history: the original
 system kept only the current mastery and date, so there was nothing to bring
@@ -212,6 +213,43 @@ added by the app and changes none of the rules above.
   schedule for comparison. It never decides what is due. See
   [supabase-schema.md](supabase-schema.md).
 - **Reviewing the weakest words** shows the words on the weak list, in a
-  different order, and it may take a weak word before its due date. Its answers
-  follow sections 5 and 6 unchanged.
+  different order, and it may take a weak word before its due date. It arrives
+  with counting switched off, so its answers leave the word alone unless the
+  reviewer turns counting back on (section 15).
 - **Review activity and weak-word scores** only read the history.
+
+## 15. Choosing what to review — STATED (the app's own rule)
+
+The original system had one view. At the owner's request (2026-10-17) the Review
+tab offers three ways into the same rules:
+
+| Choice | Which words | Order |
+| --- | --- | --- |
+| Everything due | Section 2, unchanged | Section 3 |
+| Weakest words | The weak list, due or not | Weakest first |
+| Select words | Exactly the words the reviewer ticked | The order they were ticked |
+
+The first cannot take a word before its review date; the other two can. Words
+already at mastery 10 are never listed by any of them.
+
+**Counting towards mastery.** An answer has always moved the word (sections 5
+and 6). The reviewer can now say that a sitting's answers should not count.
+Then mastery, the review date and the FSRS state are left exactly as they were,
+while the answer is still recorded, and still counts towards accuracy, the
+streak and the daily goal. This is the only way to answer a word the schedule
+does not call due yet without changing it, and it is what makes taking a word
+early safe to try.
+
+The switch is one switch in two places — beside the choices in the Review tab,
+and in Settings → Review — remembered per account and on the device, so it
+still holds without a connection. It is **on** by default: doing nothing changes
+nothing. Everything due always counts. Weakest words arrives with it off, and
+the reviewer may switch it back on; that choice is remembered like any other.
+
+A word taken early **with counting on** follows sections 5 and 6 exactly:
+Remember raises mastery and moves the date from the day of the review. Picking
+one word and answering it ten times therefore takes it to mastery 10 in a single
+sitting. That is the reviewer's own doing, not an accident of the rule.
+
+Which words a sitting holds is fixed when it starts, whatever happens to the
+switch afterwards: a mid-sitting change applies from the next card.

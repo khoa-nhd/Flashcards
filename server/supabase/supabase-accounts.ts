@@ -175,7 +175,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         // A brand-new account now has a zone; remember it is set, so the next
         // request reads it instead of writing it again.
         settingsCache.set(account.id, {
-          value: { timeZone, fsrsRetention: null, dailyGoal: null, scheduler: null },
+          value: { timeZone, fsrsRetention: null, dailyGoal: null, scheduler: null, countReviewsTowardMastery: null },
           at: (now ?? (() => new Date()))().getTime(),
         });
       }
@@ -186,6 +186,11 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
       const fsrsRetention =
         schemaVersion < 3 ? null : stored !== null && isValidRetention(stored) ? stored : DEFAULT_FSRS_SETTINGS.requestRetention;
       const fsrs = fsrsRetention === null ? null : { settings: { requestRetention: fsrsRetention }, ratingMap };
+
+      // Whether a review counts is the account's own choice, kept only where the database has
+      // somewhere to put it. Anywhere else every review counts, as one always did.
+      const countReviewsTowardMastery =
+        schemaVersion < 13 ? true : (settings?.countReviewsTowardMastery ?? true);
 
       const repository = new SupabaseVocabularyRepository(database, rules, schemaVersion);
       // A goal is kept only where the database has somewhere to put it.
@@ -216,6 +221,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         timeZone,
         database: { version: schemaVersion, latest: LATEST_SCHEMA_VERSION },
         fsrsRetention,
+        countReviewsTowardMastery,
         review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, now }),
         vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, now }),
         analytics: new AnalyticsService({
@@ -232,7 +238,13 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           repository,
           catalog: repository,
           library,
-          settings: () => ({ timeZone, dailyGoal: goals.get(), fsrsRetention, scheduler: scheduler.get() }),
+          settings: () => ({
+            timeZone,
+            dailyGoal: goals.get(),
+            fsrsRetention,
+            scheduler: scheduler.get(),
+            countReviewsTowardMastery,
+          }),
           now,
         }),
         ai: (() => {
@@ -262,6 +274,14 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           }
           if (!isValidRetention(next)) throw new DatabaseError('invalid', 'That retention is outside the supported range.');
           const saved = await database.saveFsrsRetention(next);
+          forgetSettings(account.id);
+          return saved;
+        },
+        async saveCountReviewsTowardMastery(next) {
+          if (schemaVersion < 13) {
+            throw new DatabaseError('invalid', 'This setting needs the latest database update.');
+          }
+          const saved = await database.saveCountReviewsTowardMastery(next);
           forgetSettings(account.id);
           return saved;
         },

@@ -42,7 +42,6 @@ import {
   type PracticeMasteryResponse,
   type PracticeRequest,
   type PracticeResponse,
-  type ReviewFocus,
   type AppConfigResponse,
   type CreateEntryInput,
   type QueueResponse,
@@ -65,6 +64,7 @@ import type { ImportItem } from '../../shared/import.js';
 import type { Collection, ExtraExample, Relation, RelationKind } from '../../shared/library.js';
 import type { SchedulerId } from '../../shared/scheduler/active.js';
 import type { DailyGoal } from '../../shared/session-planner.js';
+import { ALL_SCOPE, type ReviewScope } from './review-scope.js';
 import { TIMEOUTS } from '../config.js';
 
 /** Any failed request, reduced to a stable `code` and a message fit for the reviewer. */
@@ -82,8 +82,8 @@ export class ApiError extends Error {
 }
 
 export interface ReviewApi {
-  /** The due cards. With a focus, only the due cards that match it. */
-  fetchQueue(options?: { focus?: ReviewFocus | null; collection?: string | null }): Promise<QueueResponse>;
+  /** The due cards, or the narrowing asked for. The reviewer's own picks travel in the body. */
+  fetchQueue(options?: { scope?: ReviewScope }): Promise<QueueResponse>;
   submitAction(request: ReviewActionRequest): Promise<ReviewActionResponse>;
   /** Takes back one saved answer. */
   undoAction(request: ReviewUndoRequest): Promise<ReviewUndoResponse>;
@@ -105,7 +105,7 @@ export interface VocabularyApi {
 
 export interface AccountApi {
   fetchSettings(): Promise<AccountSettings>;
-  saveSettings(input: { timeZone?: string; fsrsRetention?: number }): Promise<AccountSettings>;
+  saveSettings(input: { timeZone?: string; fsrsRetention?: number; countReviewsTowardMastery?: boolean }): Promise<AccountSettings>;
   /** The two schedules side by side, and which of them is in charge. */
   fetchScheduler(): Promise<SchedulerReport>;
   /** Puts one schedule in charge of what is due, and returns the report as it now stands. */
@@ -354,10 +354,9 @@ export function fetchAppConfig(): Promise<AppConfigResponse> {
   );
 }
 
-/** The queue's address: everything due, one of the narrower selections, or one collection. */
-function queuePath(options?: { focus?: ReviewFocus | null; collection?: string | null }): string {
-  if (options?.collection != null) return '/api/review-queue?collection=' + encodeURIComponent(options.collection);
-  return options?.focus == null ? '/api/review-queue' : '/api/review-queue?focus=' + options.focus;
+/** The queue's address for the one narrowing the server can work out for itself. */
+function queuePath(scope: ReviewScope): string {
+  return scope.kind === 'weak' ? '/api/review-queue?focus=weak' : '/api/review-queue';
 }
 
 /** Enough to know the reply is an export of the kind this app writes; the rest is passed through untouched. */
@@ -381,12 +380,22 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
     call(path, schema, { method, body, timeoutMs: TIMEOUTS.actionMs, timeoutMessage: SAVE_TIMEOUT_MESSAGE });
 
   return {
-    fetchQueue: (options) =>
-      call(queuePath(options), queueResponseSchema, {
-        method: 'GET',
+    fetchQueue: (options) => {
+      const scope = options?.scope ?? ALL_SCOPE;
+      const timeouts = {
         timeoutMs: TIMEOUTS.queueMs,
         timeoutMessage: 'Loading the review queue took too long.',
-      }),
+      } as const;
+      // Picked words are sent as a body: the list may be as long as the bank.
+      if (scope.kind === 'selection') {
+        return call('/api/review-queue', queueResponseSchema, {
+          method: 'POST',
+          body: { ids: [...scope.ids] },
+          ...timeouts,
+        });
+      }
+      return call(queuePath(scope), queueResponseSchema, { method: 'GET', ...timeouts });
+    },
 
     submitAction: (body) =>
       call('/api/review-action', reviewActionResponseSchema, {

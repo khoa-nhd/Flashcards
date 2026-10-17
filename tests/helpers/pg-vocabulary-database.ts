@@ -36,6 +36,7 @@ import {
   settingsFromRow,
   toDatabaseError,
   undoResultSchema,
+  weakWordDayRowSchema,
   type CardRow,
   type SettingsRow,
   type VocabularyDatabase,
@@ -289,6 +290,13 @@ export function createPgVocabularyDatabase(
         session.query<{ stat: unknown }>('select to_jsonb(s) as stat from public.card_review_stats($1::date) s', [since]),
       );
       return z.array(cardStatRowSchema).parse(rows.map((row) => row.stat));
+    },
+
+    async weakWordDays() {
+      const rows = await run((session) =>
+        session.query<{ stat: unknown }>('select to_jsonb(s) as stat from public.weak_word_days() s'),
+      );
+      return z.array(weakWordDayRowSchema).parse(rows.map((row) => row.stat));
     },
 
     async listReviewLogs() {
@@ -551,6 +559,18 @@ export function createPgVocabularyDatabase(
         ),
       );
       return isSchedulerId(rows[0]?.scheduler) ? rows[0].scheduler : value;
+    },
+
+    async saveCountReviewsTowardMastery(value) {
+      const rows = await run((session) =>
+        session.query<{ count: boolean }>(
+          `insert into public.user_settings (count_reviews_toward_mastery) values ($1)
+           on conflict (user_id) do update set count_reviews_toward_mastery = excluded.count_reviews_toward_mastery
+           returning count_reviews_toward_mastery as count`,
+          [value],
+        ),
+      );
+      return rows[0]?.count ?? value;
     },
 
     async getTimeZone() {

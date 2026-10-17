@@ -118,6 +118,28 @@ export function PracticePage() {
   const sent = useRef(new Map<string, { sessionId: string; index: number; word: PracticeWord; correct: boolean }>());
   /** The sitting on screen; a late confirmation from an older one (or a new one) is ignored. */
   const liveSession = useRef<string | null>(null);
+  /** The weak list the sitting started from, so any word that left it can be named. */
+  const weakBefore = useRef<Map<string, string> | null>(null);
+  const [recovered, setRecovered] = useState<readonly string[]>([]);
+
+  // Name any word that left the weak list during the sitting that just ended.
+  useEffect(() => {
+    if (finished === null) return;
+    const before = weakBefore.current;
+    if (before === null) return;
+    let active = true;
+    api
+      .fetchWeakWords()
+      .then((weak) => {
+        if (!active) return;
+        const after = new Set(weak.words.map((word) => word.id));
+        setRecovered([...before].filter(([id]) => !after.has(id)).map(([, word]) => word));
+      })
+      .catch(() => setRecovered([]));
+    return () => {
+      active = false;
+    };
+  }, [api, finished]);
 
   const today = state.meta?.today ?? null;
   const pool = useMemo(() => state.entries.map(toPracticeWord), [state.entries]);
@@ -171,6 +193,8 @@ export function PracticePage() {
     if (words.length === 0) return;
     const sessionId = newRequestId();
     setFinished(null);
+    weakBefore.current = new Map((weak.data?.words ?? []).map((word) => [word.id, word.word]));
+    setRecovered([]);
     outcomes.current = new Map();
     sent.current.clear();
     liveSession.current = sessionId;
@@ -404,7 +428,7 @@ export function PracticePage() {
           </div>
         ) : (
           <div className="flex max-w-2xl flex-col gap-6">
-            {finished !== null && <Summary mode={finished.mode} outcomes={finished.outcomes} />}
+            {finished !== null && <Summary mode={finished.mode} outcomes={finished.outcomes} recovered={recovered} />}
 
             <section className={`${CARD} flex flex-col gap-4 p-5`} aria-labelledby="practice-setup-title">
               <h2 id="practice-setup-title" className={SECTION_TITLE}>
@@ -558,7 +582,7 @@ export function PracticePage() {
   );
 }
 
-function Summary({ mode, outcomes }: { mode: StudyMode; outcomes: Outcome[] }) {
+function Summary({ mode, outcomes, recovered = [] }: { mode: StudyMode; outcomes: Outcome[]; recovered?: readonly string[] }) {
   const correct = outcomes.filter((outcome) => outcome.correct).length;
   const missed = outcomes.filter((outcome) => !outcome.correct);
   const unrecorded = outcomes.filter((outcome) => !outcome.recorded).length;
@@ -570,6 +594,13 @@ function Summary({ mode, outcomes }: { mode: StudyMode; outcomes: Outcome[] }) {
         <span className="tabular-nums">{count(outcomes.length, 'answer')}</span> correct
         {outcomes.length > 0 && ` (${Math.round((correct / outcomes.length) * 100)}%)`}.
       </p>
+      {recovered.length > 0 && (
+        <p className="rounded-2xl bg-good-soft px-3 py-2 text-sm text-good-ink">
+          {recovered.length === 1
+            ? `“${recovered[0]}” has left your weak list.`
+            : `${recovered.length} words have left your weak list: ${recovered.join(', ')}.`}
+        </p>
+      )}
       {missed.length > 0 && (
         <div>
           <p className="text-sm font-medium">To look at again</p>

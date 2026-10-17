@@ -6,7 +6,7 @@ import type { ReviewActionResponse, ReviewCard, VocabularyEntry, VocabularyListR
 import { App } from '../../src/App.js';
 import { ApiError } from '../../src/lib/api-client.js';
 import { createSettingsStore } from '../../src/lib/settings.js';
-import { createFakeApi, entry } from '../helpers/fake-api.js';
+import { createFakeApi, entry, weakWord, weakWordsResponse } from '../helpers/fake-api.js';
 import { TODAY, card, type Deferred } from '../helpers/fixtures.js';
 
 // TODAY is Friday 9 October 2026; its week runs Monday 5 to Sunday 11.
@@ -442,6 +442,22 @@ describe('Insights and settings', () => {
     expect(first).toHaveTextContent('due-a');
   });
 
+});
+
+describe('weak words page', () => {
+  it('shows how far each word is from leaving the list again', async () => {
+    window.history.replaceState(null, '', '/weak');
+    const fake = createFakeApi({
+      weakWords: weakWordsResponse({
+        words: [weakWord(1, { recovery: { points: 2, threshold: 3, recovered: false, lastRememberedOn: TODAY } })],
+      }),
+    });
+    render(<App api={fake.api} settings={createSettingsStore(null)} />);
+    expect(await screen.findByText('Recovery 2 of 3')).toBeInTheDocument();
+  });
+});
+
+describe('settings page', () => {
   it('reports the connection honestly', async () => {
     await open('/settings', { list: { writesEnabled: false } });
     const connection = (await screen.findByRole('heading', { name: 'Connection' })).closest('section')!;

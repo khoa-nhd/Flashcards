@@ -240,7 +240,7 @@ library has no "suspended" state; none will be invented.
 | --- | --- |
 | **Goals** | Time, review count, or both, stored with the account. Progress comes from saved reviews. Reaching the goal never hides overdue cards; the app says when the due workload exceeds the goal. Goals never touch scheduler parameters. |
 | **Planner** | `shared/session-planner.ts`: overdue first, then high-risk, with a workload estimate from the user's own average time per review. |
-| **Filters** | Due today, overdue, weak, recently added, a collection (Phase 6), a study mode (Phase 5). |
+| **Filters** | The final shape is three: everything due, the weakest words, and words the reviewer picks (a collection seeds the picking). See the note below. |
 | **Shortcuts** | Help panel, configurable answer keys, Enter, Escape, Undo. The existing guard against firing while typing is kept. |
 | **Confidence** | Optional low / medium / high before the reveal, stored separately from correctness; a calibration view shows over- and under-confidence. |
 
@@ -314,7 +314,7 @@ done is in "Status" at the top**, and every one of these can be revisited.
 | Phase 2 | FSRS has no "mastered and never shown again". Keep retiring at mastery 10? | Under FSRS, cards keep returning at long intervals; the dashboard's "mastered" becomes "interval of N days or more". |
 | Phase 2 | Same-day relearning steps? | Off at first, so every interval is a whole number of days, as today. |
 | Phase 2 | Two answer buttons or four? | Keep two (mapped to Good and Again); offer four as an account option later. |
-| Phase 4 | Reviewing a card that is not due (weak words, recently added) under the legacy schedule | Record it as practice without moving mastery or the date. Under FSRS it counts as a real review. |
+| Phase 4 | Reviewing a card that is not due (weak words) under the legacy schedule | Settled 2026-10-17: the reviewer chooses. The weakest words start with counting off, so an early word is extra practice unless counting is switched on; words picked by hand follow the same switch. With it on, an answer taken early moves the word exactly as a due one would. |
 | Phase 5 | Which study modes move the schedule? | Flashcard, recall, typing and cloze do; recognition is practice only. |
 | Phase 5 | Listening through the browser's built-in speech? | Yes, optional and labelled experimental; otherwise skip the mode. |
 | Phase 7 | Excel import? | Defer. |

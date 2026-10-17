@@ -86,11 +86,10 @@ describe('the card front', () => {
     expect(screen.queryByText('definition of word-1')).not.toBeInTheDocument();
   });
 
-  it('shows progress and how many cards remain', async () => {
-    await renderApp();
-    expect(screen.getByLabelText('Card 1 of 3')).toHaveTextContent('1 / 3');
-    expect(screen.getByText('3 left')).toBeInTheDocument();
-    expect(screen.getByRole('progressbar')).toHaveAttribute('aria-valuenow', '0');
+  it('shows how far the card is from leaving the weak list', async () => {
+    const withRecovery = card(1, { recovery: { points: 2, threshold: 3, recovered: false, lastRememberedOn: TODAY } });
+    await renderApp([withRecovery]);
+    expect(screen.getByText('Recovery 2 of 3')).toBeInTheDocument();
   });
 
   it('keeps the answer buttons inert until the card is flipped', async () => {
@@ -201,6 +200,8 @@ describe('answering with the keyboard', () => {
       requestId: expect.any(String),
       durationMs: expect.any(Number),
       sessionId: expect.any(String),
+      allowNotDue: false,
+      countsTowardMastery: true,
       answeredAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
     });
   });

@@ -214,42 +214,45 @@ describe('collections', () => {
   });
 });
 
-describe('reviewing one collection', () => {
-  const queueOf = async (app: TestApp, user: TestUser, query: string) =>
-    queueResponseSchema.parse(await (await call(app, user, `/api/review-queue${query}`)).json());
+describe('reviewing words the reviewer picked', () => {
+  const picked = async (app: TestApp, user: TestUser, ids: string[]) =>
+    queueResponseSchema.parse(await (await send(app, user, 'POST', '/api/review-queue', { ids })).json());
 
-  it('shows only the due words in it, in the usual order', async () => {
+  it('holds every word picked, in the order it was ticked, whether or not it is due', async () => {
     const app = on(TODAY);
     const late = await addWord(app, alice, { word: 'late', mastery: 2, reviewDate: '2026-10-01' });
     const now = await addWord(app, alice, { word: 'now', mastery: 2, reviewDate: TODAY });
     const later = await addWord(app, alice, { word: 'later', mastery: 2, reviewDate: '2026-10-20' });
-    await addWord(app, alice, { word: 'outside', mastery: 2, reviewDate: '2026-10-02' });
-    const made = await newCollection(app, alice, 'Exam');
-    for (const word of [now, later, late]) await ok(put(app, alice, made.id, word.id, true));
+    const outside = await addWord(app, alice, { word: 'outside', mastery: 2, reviewDate: '2026-10-02' });
 
-    const queue = await queueOf(app, alice, `?collection=${made.id}`);
-    expect(queue.cards.map((card) => card.word)).toEqual(['late', 'now']);
-    expect(queue).toMatchObject({ focus: null, collection: { id: made.id, name: 'Exam' }, vocabulary: 'in_progress' });
-    // The word that is in the collection but not due is not brought forward.
-    expect(queue.cards.map((card) => card.word)).not.toContain('later');
-    expect((await queueOf(app, alice, '')).collection).toBeNull();
+    // The tick order decides the review order, not the dates: a word that is not
+    // due yet is brought forward rather than left out.
+    const queue = await picked(app, alice, [later.id, now.id, late.id]);
+    expect(queue.cards.map((card) => card.word)).toEqual(['later', 'now', 'late']);
+    expect(queue).toMatchObject({ focus: null, selection: true, vocabulary: 'in_progress' });
+    expect(queue.cards.map((card) => card.id)).not.toContain(outside.id);
   });
 
-  it('is empty for an empty collection, without claiming nothing at all is due', async () => {
+  it('drops ids that are not the caller’s words, and lists a word ticked twice once', async () => {
+    const app = on(TODAY);
+    const mine = await addWord(app, alice, { word: 'mine' });
+    const theirs = await addWord(app, bob, { word: 'theirs' });
+    const queue = await picked(app, alice, [mine.id, theirs.id, mine.id, newId()]);
+    expect(queue.cards.map((card) => card.word)).toEqual(['mine']);
+  });
+
+  it('is empty when nothing was picked, without claiming nothing at all is due', async () => {
     const app = on(TODAY);
     await addWord(app, alice, { word: 'due' });
-    const made = await newCollection(app, alice, 'Empty');
-    expect(await queueOf(app, alice, `?collection=${made.id}`)).toMatchObject({ cards: [], vocabulary: 'in_progress' });
+    expect(await picked(app, alice, [])).toMatchObject({ cards: [], selection: true, vocabulary: 'in_progress' });
   });
 
-  it('refuses a collection that is not the caller’s, an unknown one, and a second way of narrowing', async () => {
+  it('refuses a body that is not a list of word ids', async () => {
     const app = on(TODAY);
-    const theirs = await newCollection(app, bob, 'Bob');
-    expect((await call(app, alice, `/api/review-queue?collection=${theirs.id}`)).status).toBe(404);
-    expect((await call(app, alice, `/api/review-queue?collection=${newId()}`)).status).toBe(404);
-    expect((await call(app, alice, '/api/review-queue?collection=nope')).status).toBe(400);
-    const mine = await newCollection(app, alice, 'Mine');
-    expect((await call(app, alice, `/api/review-queue?collection=${mine.id}&focus=weak`)).status).toBe(400);
+    expect((await send(app, alice, 'POST', '/api/review-queue', { ids: ['nope'] })).status).toBe(400);
+    expect((await send(app, alice, 'POST', '/api/review-queue', {})).status).toBe(400);
+    // The GET address still names only the one narrowing the server knows.
+    expect((await call(app, alice, '/api/review-queue?focus=overdue')).status).toBe(400);
   });
 });
 
@@ -626,7 +629,12 @@ describe('where none of this can be kept', () => {
     const queue = queueResponseSchema.parse(await (await call(app, carol, '/api/review-queue')).json());
     expect(queue.cards.map((card) => card.word)).toEqual(['candid']);
     expect(queue.capabilities).toEqual({ ...NO_CAPABILITIES, sessions: true, undo: true, fsrs: true, analytics: true, goals: true, confidence: true, practice: true });
-    expect((await call(app, carol, `/api/review-queue?collection=${newId()}`)).status).toBe(404);
+    expect((await call(app, carol, `/api/review-queue?focus=overdue`)).status).toBe(400);
+    // Picking words works here too: it needs no new column.
+    const picked = queueResponseSchema.parse(
+      await (await call(app, carol, '/api/review-queue', { method: 'POST', body: { ids: [word.id] } })).json(),
+    );
+    expect(picked.cards.map((card) => card.word)).toEqual(['candid']);
   });
 
   it('with saving switched off, everything can be read and nothing changed', async () => {

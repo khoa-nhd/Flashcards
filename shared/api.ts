@@ -37,6 +37,20 @@ export const cardFieldSchema = z.object({
   value: z.string(),
 });
 
+/** How far a word is from leaving the weak list, and whether it has left. */
+export const weakRecoverySchema = z.object({
+  /** Points earned in the current cycle, after forgotten answers and expiry. */
+  points: z.number().int().min(0),
+  /** Points the word needs; a High word needs one more than the rest. */
+  threshold: z.number().int().min(3),
+  /** True when the word has graduated and has not slipped since. */
+  recovered: z.boolean(),
+  /** The last day the word was remembered, review or practice. */
+  lastRememberedOn: isoDateSchema.nullable(),
+});
+
+export type WeakRecoveryView = z.infer<typeof weakRecoverySchema>;
+
 export const reviewCardSchema = z.object({
   id: z.string().min(1),
   word: z.string(),
@@ -53,6 +67,8 @@ export const reviewCardSchema = z.object({
   back: z.array(cardFieldSchema),
   /** True when the mastery rule withheld detail fields from `back`. */
   detailsHidden: z.boolean(),
+  /** How far this word is from leaving the weak list, where it is on that list. */
+  recovery: weakRecoverySchema.optional(),
 });
 
 export const skippedRecordSchema = z.object({
@@ -83,6 +99,8 @@ export const capabilitiesSchema = z.object({
   library: z.boolean().default(false),
   /** AI chat conversations and messages can be kept. */
   aiChat: z.boolean().default(false),
+  /** A weak word's recovery is worked out from saved answers. */
+  weakRecovery: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -97,13 +115,17 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   practiceHistory: false,
   library: false,
   aiChat: false,
+  weakRecovery: false,
 };
 
 /**
- * Ways to narrow the review queue. Each name selects among the words that are
- * already due, except `weak`, which may also bring a weak word forward.
+ * Ways to narrow the review queue. `weak` is the only narrowing the server can
+ * work out for itself: it selects among the words that are already due, and may
+ * also bring a weak word forward. The reviewer's own picked words are not named
+ * here — only the device knows which ones were ticked — so they travel as ids
+ * on the queue request instead.
  */
-export const REVIEW_FOCUSES = ['weak', 'overdue', 'due_today', 'recent'] as const;
+export const REVIEW_FOCUSES = ['weak'] as const;
 export const reviewFocusSchema = z.enum(REVIEW_FOCUSES);
 export type ReviewFocus = z.infer<typeof reviewFocusSchema>;
 
@@ -124,10 +146,14 @@ export const queueResponseSchema = z.object({
   capabilities: capabilitiesSchema.default(NO_CAPABILITIES),
   /** The schedule that decided what is in this queue. */
   scheduler: schedulerIdSchema.default(DEFAULT_SCHEDULER),
-  /** Set when the queue was narrowed on request. `weak` is ordered weakest first; the others keep the usual order. */
+  /** Set when the queue was narrowed on request. `weak` is ordered weakest first. */
   focus: reviewFocusSchema.nullable().default(null),
-  /** Set when the queue was narrowed to one collection instead: the due words in it, in the usual order. */
-  collection: z.object({ id: z.string(), name: z.string() }).nullable().default(null),
+  /**
+   * Set when the queue is the reviewer's own picked words, in the order they
+   * were ticked. The words themselves are never echoed back; the device that
+   * picked them already has them.
+   */
+  selection: z.boolean().default(false),
   /** Records the source returned that could not be used, so nothing vanishes silently. */
   skipped: z.array(skippedRecordSchema),
   /**
@@ -135,6 +161,15 @@ export const queueResponseSchema = z.object({
    * simply nothing due yet. Always `in_progress` when there are cards.
    */
   vocabulary: z.enum(['empty', 'all_mastered', 'in_progress']),
+});
+
+/**
+ * The words the reviewer picked, in the order they were ticked. Sent as a body
+ * rather than in the address: a handful of words would fit in a URL, the whole
+ * bank would not.
+ */
+export const reviewQueueSelectionRequestSchema = z.strictObject({
+  ids: z.array(pageIdSchema),
 });
 
 export const reviewActionRequestSchema = z.strictObject({
@@ -169,11 +204,19 @@ export const reviewActionRequestSchema = z.strictObject({
    */
   confidence: confidenceSchema.optional(),
   /**
-   * The selection the answer came from, where it changes what is allowed.
-   * A `weak` answer may be taken before the word is due; every other selection
-   * is due-only. Absent on an ordinary review.
+   * Licenses an answer for a word the schedule does not call due yet. The
+   * weakest-words review and the reviewer's own picked words both allow it;
+   * every other review is due-only. Absent means due-only, so an answer sent by
+   * a page loaded before this field existed is judged as it always was.
    */
-  focus: reviewFocusSchema.optional(),
+  allowNotDue: z.boolean().optional(),
+  /**
+   * Whether this answer moves the word. False records the answer but leaves
+   * mastery, the review date and the FSRS state exactly as they were. The
+   * reviewer chooses this beside the words being reviewed. Absent means it
+   * counts, which is what every review did before the choice existed.
+   */
+  countsTowardMastery: z.boolean().optional(),
 });
 
 export const reviewActionResponseSchema = z.object({
@@ -622,6 +665,8 @@ export const weakWordSchema = z.object({
   action: z.string(),
   /** Whether the word is in the review queue right now. */
   reviewable: z.boolean(),
+  /** How far the word is from leaving the list again, and whether it already has. */
+  recovery: weakRecoverySchema.optional(),
 });
 
 export const weakWordsResponseSchema = z.object({
@@ -813,14 +858,23 @@ export const accountSettingsSchema = z.object({
   database: z.object({ version: z.number().int(), latest: z.number().int() }).nullable().default(null),
   /** The retention FSRS aims for, from 0 to 1; `null` where it cannot be stored. */
   fsrsRetention: z.number().nullable().default(null),
+  /** Whether a review moves a word by default, and the value the switch starts on. */
+  countReviewsTowardMastery: z.boolean().default(true),
 });
 
 export const updateSettingsRequestSchema = z
   .strictObject({
     timeZone: timeZoneSchema.optional(),
     fsrsRetention: z.number().min(0.7).max(0.97).optional(),
+    countReviewsTowardMastery: z.boolean().optional(),
   })
-  .refine((value) => value.timeZone !== undefined || value.fsrsRetention !== undefined, 'Nothing to change');
+  .refine(
+    (value) =>
+      value.timeZone !== undefined ||
+      value.fsrsRetention !== undefined ||
+      value.countReviewsTowardMastery !== undefined,
+    'Nothing to change',
+  );
 
 export const apiErrorSchema = z.object({
   error: z.object({

@@ -5,6 +5,7 @@ import type { HistoryEvent } from '../shared/export-format.js';
 import type { ReviewAction, ReviewState } from '../shared/review-logic.js';
 import type { StudyMode } from '../shared/study-modes.js';
 import type { CardHistory } from '../shared/weak-words.js';
+import type { WeakWordDayRow } from '../shared/weak-recovery.js';
 import type { SchedulerId } from '../shared/scheduler/active.js';
 import type { ScheduleCard } from '../shared/scheduler/comparison.js';
 import type { FsrsRating, FsrsState } from '../shared/scheduler/fsrs.js';
@@ -168,6 +169,8 @@ export interface VocabularyRepository {
   reviewDailyStats(from: IsoDate, to: IsoDate): Promise<DailyStat[]>;
   /** How each reviewed word has gone, by word id. Empty where no history is kept. */
   cardReviewStats(since: IsoDate): Promise<Map<string, CardHistory>>;
+  /** One day of one word's answers, review and practice together, for the recovery rule. Empty where none are kept. */
+  weakWordDays(): Promise<WeakWordDayRow[]>;
   /** The whole review history, oldest first, exactly as recorded. For the account's own export. */
   listHistory(): Promise<HistoryEvent[]>;
   /** Records one practice answer, once per request id. It never changes mastery, the review date or FSRS state. */

@@ -69,68 +69,72 @@ async function refuse(saves: Saves, at = 0, error: unknown) {
 describe('choosing what to review', () => {
   const chooser = () => screen.getByLabelText('Cards to review') as HTMLSelectElement;
 
-  it('offers every selection, starting on everything due', async () => {
+  it('offers exactly three choices, starting on everything due', async () => {
     await open('/review', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
     expect(chooser().value).toBe('');
     expect(within(chooser()).getAllByRole('option').map((option) => option.textContent)).toEqual([
       'Everything due',
       'Weakest words',
-      'Overdue only',
-      'Due today only',
-      'Recently added',
+      'Select words',
     ]);
   });
 
-  it('loads the chosen selection as a new session and says what is shown', async () => {
+  it('loads the weakest words as a new session and says what is shown', async () => {
     const { api, user } = await open('/review', { cards: [card(1), card(2)] });
     await screen.findByTestId('flashcard');
-    await user.selectOptions(chooser(), 'overdue');
+    await user.selectOptions(chooser(), 'weak');
 
-    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: 'overdue' }));
-    expect(window.location.pathname + window.location.search).toBe('/review?focus=overdue');
-    expect(await screen.findByText(/Overdue words only\./)).toBeInTheDocument();
-    expect(chooser().value).toBe('overdue');
+    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'weak' } }));
+    expect(window.location.pathname + window.location.search).toBe('/review?focus=weak');
+    expect(await screen.findByText(/Weakest words only, whether or not they are due\./)).toBeInTheDocument();
+    expect(chooser().value).toBe('weak');
+  });
+
+  it('opens the picker for "Select words" instead of loading a queue', async () => {
+    const { api, user } = await open('/review', { cards: [card(1)] });
+    await screen.findByTestId('flashcard');
+    await user.selectOptions(chooser(), 'select');
+
+    expect(await screen.findByRole('heading', { name: 'Select words' })).toBeInTheDocument();
+    expect(window.location.search).toBe('?focus=select');
+    // Nothing is loaded until the words have been ticked.
+    expect(api.fetchQueue).toHaveBeenCalledTimes(1);
   });
 
   it('hands the keyboard back to the card after a choice, so an arrow key answers instead of changing it', async () => {
     const { api, user } = await open('/review', { cards: [card(1), card(2)] });
     await screen.findByTestId('flashcard');
-    await user.selectOptions(chooser(), 'recent');
-    await screen.findByText(/Words added in the last 7 days only/);
+    await user.selectOptions(chooser(), 'weak');
+    await screen.findByText(/Weakest words only/);
     expect(document.activeElement).not.toBe(chooser());
 
     press(' ');
     press('ArrowRight');
     await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
-    expect(chooser().value).toBe('recent');
+    expect(chooser().value).toBe('weak');
   });
 
   it('goes back to everything due', async () => {
-    const { api, user } = await open('/review?focus=due_today', { cards: [card(1)] });
-    await screen.findByText(/Words due today only\./);
+    const { api, user } = await open('/review?focus=weak', { cards: [card(1)] });
+    await screen.findByText(/Weakest words only/);
     await user.selectOptions(chooser(), '');
-    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null }));
+    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'all' } }));
     expect(window.location.search).toBe('');
-    await waitFor(() => expect(screen.queryByText(/Words due today only\./)).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByText(/Weakest words only/)).not.toBeInTheDocument());
   });
 
-  it.each([
-    ['overdue', 'Nothing is overdue'],
-    ['due_today', 'Nothing is dated today'],
-    ['recent', 'No recent words are due'],
-    ['weak', 'No weak words'],
-  ])('says what an empty "%s" selection means, without claiming nothing at all is due', async (focus, title) => {
-    await open(`/review?focus=${focus}`, { cards: [] });
-    expect(await screen.findByRole('heading', { name: title })).toBeInTheDocument();
+  it('says what an empty weakest-words review means, without claiming nothing at all is due', async () => {
+    await open('/review?focus=weak', { cards: [] });
+    expect(await screen.findByRole('heading', { name: 'No weak words' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: 'Nothing is due right now' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Review everything due' })).toHaveAttribute('href', '/review');
   });
 
-  it('treats an unknown selection in the address as everything due', async () => {
+  it('treats an address it does not know as everything due', async () => {
     const { api } = await open('/review?focus=everything-and-more', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
-    expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: null });
+    expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'all' } });
     expect(chooser().value).toBe('');
   });
 
@@ -143,9 +147,203 @@ describe('choosing what to review', () => {
 
     // The answer waits in the outbox; the choice is never held hostage by it.
     expect(chooser()).not.toBeDisabled();
-    await user.selectOptions(chooser(), 'recent');
-    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ focus: 'recent' }));
+    await user.selectOptions(chooser(), 'weak');
+    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'weak' } }));
     expect(saves).toHaveLength(1);
+  });
+});
+
+describe('counting towards mastery', () => {
+  const headerSwitch = () => screen.getByLabelText('Count toward mastery') as HTMLInputElement;
+  const note = () => screen.queryByText(/Not counting toward mastery/);
+  const settingsSwitch = () => screen.getByLabelText(/Count reviews toward mastery/) as HTMLInputElement;
+  /** The sidebar item, wherever else a link of the same name may be drawn. */
+  const navLink = (name: string) => screen.getAllByRole('link', { name })[0]!;
+
+  /** Flips the card and answers Remember, waiting for the answer to leave. */
+  const answerOne = async (api: ReturnType<typeof createFakeApi>['api'], times: number) => {
+    press(' ');
+    await waitFor(() => expect(isFlipped()).toBe(true));
+    press('ArrowRight');
+    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(times));
+  };
+
+  it('counts by default, and says nothing about mastery', async () => {
+    const { api } = await open('/review', { cards: [card(1)] });
+    await screen.findByTestId('flashcard');
+    expect(headerSwitch()).toBeChecked();
+    expect(note()).not.toBeInTheDocument();
+
+    await answerOne(api, 1);
+    expect(lastRequest(api)).toMatchObject({ countsTowardMastery: true });
+  });
+
+  it('turns counting off for the answers that follow, and says so', async () => {
+    const { api, user } = await open('/review', { cards: [card(1), card(2)] });
+    await screen.findByTestId('flashcard');
+    await user.click(headerSwitch());
+    expect(note()).toBeInTheDocument();
+
+    await answerOne(api, 1);
+    expect(lastRequest(api)).toMatchObject({ countsTowardMastery: false });
+  });
+
+  it('applies a change from the next card, never to an answer already given', async () => {
+    const { api, saves, user } = await open('/review', { cards: [card(1), card(2)] });
+    await screen.findByTestId('flashcard');
+    await answerOne(api, 1);
+    expect(lastRequest(api)).toMatchObject({ countsTowardMastery: true });
+
+    // The first answer settles, so the outbox is free to send the next one.
+    await save(saves, 0);
+    await user.click(headerSwitch());
+    await answerOne(api, 2);
+    expect(lastRequest(api)).toMatchObject({ countsTowardMastery: false });
+    // The answer already given keeps the choice it was given under.
+    expect(api.submitAction.mock.calls[0]?.[0]).toMatchObject({ countsTowardMastery: true });
+  });
+
+  it('arrives switched off for the weakest words, and the reviewer can switch it back on', async () => {
+    const { api, saves, user } = await open('/review?focus=weak', { cards: [card(1), card(2)] });
+    await screen.findByTestId('flashcard');
+    expect(headerSwitch()).not.toBeChecked();
+    expect(note()).toBeInTheDocument();
+
+    await answerOne(api, 1);
+    expect(lastRequest(api)).toMatchObject({ countsTowardMastery: false });
+
+    await save(saves, 0);
+    await user.click(headerSwitch());
+    await answerOne(api, 2);
+    expect(lastRequest(api)).toMatchObject({ countsTowardMastery: true });
+  });
+
+  it('starts from the choice the account already holds', async () => {
+    await open('/review', { cards: [card(1)], account: { countReviewsTowardMastery: false } });
+    await screen.findByTestId('flashcard');
+    await waitFor(() => expect(headerSwitch()).not.toBeChecked());
+    expect(note()).toBeInTheDocument();
+  });
+
+  it('is one switch wherever it is flipped, Settings included', async () => {
+    const { user } = await open('/review', { cards: [card(1)] });
+    await screen.findByTestId('flashcard');
+    await user.click(headerSwitch());
+
+    await user.click(navLink('Settings'));
+    expect(await screen.findByLabelText(/Count reviews toward mastery/)).not.toBeChecked();
+
+    // And back the other way: the Review tab reads the same choice.
+    await user.click(settingsSwitch());
+    await user.click(navLink('Review'));
+    await screen.findByTestId('flashcard');
+    expect(headerSwitch()).toBeChecked();
+  });
+
+  it('says a chosen review counts again once the switch is back on', async () => {
+    const { api, user } = await open('/review', { cards: [card(1)] });
+    await screen.findByTestId('flashcard');
+    await user.click(headerSwitch());
+    expect(note()).toBeInTheDocument();
+    await user.click(headerSwitch());
+    expect(note()).not.toBeInTheDocument();
+    await answerOne(api, 1);
+    expect(lastRequest(api)).toMatchObject({ countsTowardMastery: true });
+  });
+
+  it('says at the end that the answers left their words as they were', async () => {
+    const { api, user } = await open('/review', { cards: [card(1)] });
+    await screen.findByTestId('flashcard');
+    await user.click(headerSwitch());
+    await answerOne(api, 1);
+
+    expect(await screen.findByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(screen.getByText(/Counting towards mastery was off/)).toBeInTheDocument();
+  });
+
+  it('says nothing of the kind when every answer counted', async () => {
+    const { api } = await open('/review', { cards: [card(1)] });
+    await screen.findByTestId('flashcard');
+    await answerOne(api, 1);
+
+    expect(await screen.findByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(screen.queryByText(/Counting towards mastery was off/)).not.toBeInTheDocument();
+  });
+});
+
+describe('picking the words yourself', () => {
+  const picker = () => screen.findByRole('heading', { name: 'Select words' });
+  const row = (word: string) => screen.getByRole('checkbox', { name: new RegExp(`^${word}`) });
+  /** The ticked list, in the order the words will be reviewed in. */
+  const ticked = () =>
+    Array.from(
+      screen
+        .getByText('Reviewing in this order. Ticking a word again moves it to the end.')
+        .parentElement!.querySelectorAll('ol li'),
+    ).map((item) => item.textContent ?? '');
+
+  it('is the order the words were ticked in, and taking one out and back puts it last', async () => {
+    const { user } = await open('/review?focus=select', {
+      cards: [card(1)],
+      entries: [entry(1), entry(2), entry(3)],
+    });
+    await picker();
+
+    await user.click(row('word-1'));
+    await user.click(row('word-2'));
+    expect(ticked()).toHaveLength(2);
+    expect(ticked()[0]).toContain('word-1');
+
+    // Out of the selection, then back: the reviewer's newest tick is last.
+    await user.click(row('word-1'));
+    await user.click(row('word-1'));
+    expect(ticked()[0]).toContain('word-2');
+    expect(ticked()[1]).toContain('word-1');
+    expect(screen.getByRole('button', { name: 'Review 2 words' })).toBeEnabled();
+  });
+
+  it('narrows the list with the same search as the bank, and can take a word out again', async () => {
+    const { user } = await open('/review?focus=select', { entries: [entry(1), entry(2)] });
+    await picker();
+    await user.click(row('word-1'));
+    // The ticked row itself takes the word back out.
+    await user.click(screen.getByTitle('Take this word out of the selection'));
+    expect(screen.getByRole('button', { name: 'Pick at least one word' })).toBeDisabled();
+
+    await user.type(screen.getByLabelText('Search your vocabulary'), 'word-2');
+    expect(screen.queryByRole('checkbox', { name: /^word-1/ })).not.toBeInTheDocument();
+    expect(row('word-2')).toBeInTheDocument();
+  });
+
+  it('leaves mastered words out, and says how many', async () => {
+    await open('/review?focus=select', {
+      entries: [entry(1), entry(2, { mastery: 10, reviewStatus: 'mastered' })],
+    });
+    await picker();
+    expect(screen.queryByRole('checkbox', { name: /^word-2/ })).not.toBeInTheDocument();
+    expect(screen.getByText(/1 mastered word is not listed/)).toBeInTheDocument();
+  });
+
+  it('brings the running sitting’s own words back when the reviewer changes them', async () => {
+    const { user } = await open('/review?focus=select', { cards: [card(1)], entries: [entry(1)] });
+    await picker();
+    await user.click(row('word-1'));
+    await user.click(screen.getByRole('button', { name: 'Review 1 word' }));
+    await screen.findByTestId('flashcard');
+
+    await user.click(screen.getByRole('button', { name: 'Change words' }));
+    await picker();
+    expect(ticked()[0]).toContain('word-1');
+  });
+
+  it('leaves the picking for everything due when it is cancelled', async () => {
+    const { api, user } = await open('/review?focus=select', { cards: [card(1)] });
+    await picker();
+    await user.click(screen.getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(api.fetchQueue).toHaveBeenLastCalledWith({ scope: { kind: 'all' } }));
+    expect(window.location.search).toBe('');
+    expect(await screen.findByTestId('flashcard')).toBeInTheDocument();
   });
 });
 
@@ -454,7 +652,13 @@ describe('the session rules for confidence', () => {
       sender: async () => applied,
       backoffMs: { base: 10, max: 20 },
     });
-    const session = createSessionController({ api, engine, store, accountId: 'test' });
+    const session = createSessionController({
+      api,
+      engine,
+      store,
+      accountId: 'test',
+      countsTowardMastery: () => true,
+    });
     await session.load();
     expect(session.rateConfidence(3)).toBe(false);
     expect(session.getState()).toMatchObject({ status: 'ready', confidence: null, revealed: false });
@@ -552,6 +756,14 @@ describe('review preferences in Settings', () => {
     expect(await screen.findByLabelText(/Ask how sure I am/)).not.toBeChecked();
     expect(screen.getByLabelText('Extra answer keys')).toHaveValue('none');
     expect(store.getState()).toMatchObject({ askConfidence: false, answerKeys: 'none' });
+  });
+
+  it('count reviews towards mastery until told otherwise', async () => {
+    const { user } = await open('/settings');
+    const counting = await screen.findByLabelText(/Count reviews toward mastery/);
+    expect(counting).toBeChecked();
+    await user.click(counting);
+    expect(counting).not.toBeChecked();
   });
 });
 

@@ -223,6 +223,7 @@ describe('access', () => {
       email: null,
       database: null,
       fsrsRetention: null,
+      countReviewsTowardMastery: true,
     });
     const change = await app.request('/api/settings', { ...post({ timeZone: 'UTC' }), method: 'PUT' });
     expect(change.status).toBe(409);

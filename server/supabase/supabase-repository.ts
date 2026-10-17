@@ -3,6 +3,7 @@ import type { DailyStat } from '../../shared/analytics.js';
 import type { IsoDate } from '../../shared/dates.js';
 import type { HistoryEvent } from '../../shared/export-format.js';
 import type { CardHistory } from '../../shared/weak-words.js';
+import type { WeakWordDayRow } from '../../shared/weak-recovery.js';
 import type { ReviewRules } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
 import type { StudyMode } from '../../shared/study-modes.js';
@@ -81,6 +82,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     library: schemaVersion >= 7,
     practiceHistory: schemaVersion >= 9,
     aiChat: schemaVersion >= 10,
+    weakRecovery: schemaVersion >= 14,
   };
 }
 
@@ -201,6 +203,23 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
           lastAction: row.last_action === 'remember' || row.last_action === 'not_remember' ? row.last_action : null,
         },
       ]),
+    );
+  }
+
+  async weakWordDays(): Promise<WeakWordDayRow[]> {
+    if (!this.capabilities.weakRecovery) return [];
+    return this.database.weakWordDays().then((rows) =>
+      rows.map((row) => ({
+        vocabularyId: row.vocabulary_id,
+        day: row.day,
+        reviewAnswers: row.review_answers,
+        reviewFails: row.review_fails,
+        practiceAnswers: row.practice_answers,
+        practiceFails: row.practice_fails,
+        dayPoints: row.day_points,
+        lastAction:
+          row.last_action === 'remember' || row.last_action === 'not_remember' ? row.last_action : null,
+      })),
     );
   }
 

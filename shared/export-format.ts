@@ -76,6 +76,8 @@ export interface AccountExport {
     fsrsRequestRetention: number | null;
     /** Which of a word's two schedules decides when it is due: `mastery_v1` or `fsrs`. */
     scheduler: SchedulerId;
+    /** Whether a review moves a word by default. */
+    countReviewsTowardMastery: boolean;
   };
   counts: {
     words: number;

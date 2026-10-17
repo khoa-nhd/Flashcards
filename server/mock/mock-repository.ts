@@ -4,6 +4,7 @@ import type { DailyStat } from '../../shared/analytics.js';
 import { addDays, type IsoDate } from '../../shared/dates.js';
 import type { HistoryEvent } from '../../shared/export-format.js';
 import type { CardHistory } from '../../shared/weak-words.js';
+import type { WeakWordDayRow } from '../../shared/weak-recovery.js';
 import type { ReviewAction, ReviewState } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
 import { DEFAULT_SCHEDULER, type SchedulerId } from '../../shared/scheduler/active.js';
@@ -119,6 +120,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     practiceHistory: true,
     library: true,
     aiChat: true,
+    weakRecovery: true,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
@@ -363,6 +365,72 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         return [id, history];
       }),
     );
+  }
+
+  async weakWordDays(): Promise<WeakWordDayRow[]> {
+    interface Day {
+      reviewAnswers: number;
+      reviewFails: number;
+      practiceAnswers: number;
+      practiceFails: number;
+      weight: number;
+      at: string;
+      lastAction: 'remember' | 'not_remember' | null;
+    }
+    const empty = (): Day => ({
+      reviewAnswers: 0,
+      reviewFails: 0,
+      practiceAnswers: 0,
+      practiceFails: 0,
+      weight: 0,
+      at: '',
+      lastAction: null,
+    });
+    const groups = new Map<string, Day>();
+    const add = (wordId: string, day: IsoDate, change: (acc: Day) => void) => {
+      const key = `${wordId} ${day}`;
+      const acc = groups.get(key) ?? empty();
+      change(acc);
+      groups.set(key, acc);
+    };
+    for (const log of this.logs) {
+      if (!this.stands(log)) continue;
+      add(log.wordId, log.reviewedOn, (acc) => {
+        acc.reviewAnswers += 1;
+        acc.reviewFails += log.action === 'not_remember' ? 1 : 0;
+        acc.weight += log.action === 'remember' ? 0.5 : 0;
+        if (log.at > acc.at) {
+          acc.at = log.at;
+          acc.lastAction = log.action;
+        }
+      });
+    }
+    for (const answer of this.practice) {
+      add(answer.id, answer.reviewedOn, (acc) => {
+        acc.practiceAnswers += 1;
+        acc.practiceFails += answer.correct ? 0 : 1;
+        acc.weight += answer.correct ? (answer.grading === 'auto' ? 1 : 0.5) : 0;
+        if (answer.at > acc.at) {
+          acc.at = answer.at;
+          acc.lastAction = answer.correct ? 'remember' : 'not_remember';
+        }
+      });
+    }
+    return [...groups]
+      .map(([key, acc]) => {
+        const [wordId, day] = key.split(' ') as [string, IsoDate];
+        return {
+          vocabularyId: wordId,
+          day,
+          reviewAnswers: acc.reviewAnswers,
+          reviewFails: acc.reviewFails,
+          practiceAnswers: acc.practiceAnswers,
+          practiceFails: acc.practiceFails,
+          dayPoints: Math.min(1, acc.weight),
+          lastAction: acc.lastAction,
+        };
+      })
+      .sort((a, b) => a.vocabularyId.localeCompare(b.vocabularyId) || a.day.localeCompare(b.day));
   }
 
   async recordPractice(write: PracticeWrite): Promise<PracticeWriteResult> {

@@ -47,9 +47,15 @@ order.
 | 6 | `20261015090000_practice_modes.sql` | The `practice` kind of history row; `answer_correct`, `submitted_answer`, `grading` on `review_logs`; `record_practice`, `practice_daily_stats`. | Recording practice in the other study modes. |
 | 7 | `20261016090000_collections_and_relations.sql` | `collections`, `collection_items`, `vocabulary_examples`, `vocabulary_relations`; `set_preferred_example`. | Collections, further examples, related words. |
 | 8 | `20261017090000_scheduler_switch.sql` | `scheduler` on `user_settings`; `record_review` now stamps the history with the schedule in charge. | Choosing which schedule decides what is due. |
+| 9 | `20261018090000_true_mastery_practice_history.sql` | `practice_history` for one word's saved practice answers. | The True Mastery estimate, counted from practice. |
+| 10 | `20261020090000_ai_conversations.sql` | `ai_conversations`, `ai_messages`, `ai_rate_limits`. | AI Chat, with conversations saved to the account. |
+| 11 | `20261025090000_vocabulary_analysis.sql` | `vocabulary_analysis`. | The structured analysis Vocabulary Expert stores for a word. |
+| 12 | `20261026090000_ai_message_saved.sql` | `saved_vocabulary_id` (and its marker) on `ai_messages`. | "Added" on a Vocabulary Expert reply survives a reload. |
+| 13 | `20261027090000_review_counting.sql` | `count_reviews_toward_mastery` on `user_settings`. | The reviewer's choice of whether a sitting's answers move a word. |
+| 14 | `20261028090000_weak_word_recovery.sql` | `weak_word_days`. | Recovering out of the weak list: practice counts, clean slate, overdue forgiveness, and the recovery progress shown on the page and the card. |
 
 There are no database credentials in the project, so the owner runs each file
-in the Supabase SQL Editor. Nothing in versions 2 to 8 alters or removes
+in the Supabase SQL Editor. Nothing in versions 2 to 13 alters or removes
 existing rows.
 
 If the hosting project is linked to Supabase through Vercel's integration,
@@ -66,7 +72,7 @@ has been applied.
 | `card_states` | word | Current schedule: mastery (0–10) and review date; from version 3 also the FSRS state. |
 | `review_logs` | answer or undo | Append-only history of every review and every undo. |
 | `study_sessions` | sitting | (Version 2.) One row per queue load that had an answer saved in it. |
-| `user_settings` | account | Time zone; from version 3 the FSRS target retention. |
+| `user_settings` | account | Time zone; from version 3 the FSRS target retention; from version 5 the daily goal; from version 8 the schedule in charge; from version 13 whether reviews count towards mastery. |
 | `collections` | collection | (Version 7.) A named group of words. |
 | `collection_items` | word in a collection | (Version 7.) Which word is in which collection; a word can be in several. |
 | `vocabulary_examples` | further example | (Version 7.) Extra example sentences for a word, with a source note. |
@@ -181,7 +187,12 @@ each empty for no goal of that kind. A goal is compared with saved reviews;
 nothing reads it when deciding what is due. From version 8: `scheduler`,
 `mastery_v1` (the default) or `fsrs`, checked: which schedule decides when the
 account's words are due. A new account, and every account that existed before
-the column did, has `mastery_v1`.
+the column did, has `mastery_v1`. From version 13:
+`count_reviews_toward_mastery` (default true), the reviewer's own choice of
+whether an answer moves a word. False records the answer and leaves mastery, the
+review date and the FSRS state alone; the answer still counts in accuracy,
+streaks and the daily goal. It is a preference, not a rule about what is due,
+and it never hides a word from the queue.
 
 Display preferences (table or list view, sort order, reduced motion) are not
 stored here. They stay in the browser.

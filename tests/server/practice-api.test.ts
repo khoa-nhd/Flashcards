@@ -58,6 +58,9 @@ async function practised(app: TestApp, user: TestUser, body: Record<string, unkn
 const entryOf = async (app: TestApp, user: TestUser, id: string) =>
   entryResponseSchema.parse(await (await call(app, user, `/api/vocabulary/${id}`)).json()).entry;
 
+const weakOf = async (app: TestApp, user: TestUser) =>
+  weakWordsResponseSchema.parse(await (await call(app, user, '/api/weak-words')).json());
+
 const rows = () =>
   db.admin<{
     kind: string;
@@ -297,7 +300,7 @@ describe('practice and the schedule', () => {
 });
 
 describe('practice kept apart from reviews', () => {
-  it('is not counted as a review anywhere: activity, streak, goal or weak words', async () => {
+  it('is not counted as a review in activity, streak or goal, but does count towards weak words', async () => {
     const app = on(TODAY);
     const { candid } = await library(app);
     await call(app, alice, '/api/goal', { method: 'PUT', body: { reviews: 1, minutes: null } });
@@ -314,9 +317,14 @@ describe('practice kept apart from reviews', () => {
     const plan = dayPlanSchema.parse(await (await call(app, alice, '/api/plan')).json());
     expect(plan).toMatchObject({ met: false, done: { reviews: 0, durationMs: 0 } });
 
-    // Six wrong answers in practice do not make the word "weak": that list reads scheduled reviews.
+    // Six wrong answers in practice are not a review — activity, streak and the goal
+    // still read scheduled reviews only — but they do count towards the weak list.
     const weak = weakWordsResponseSchema.parse(await (await call(app, alice, '/api/weak-words')).json());
-    expect(weak.words.find((item) => item.id === candid.id)).toBeUndefined();
+    expect(weak.words.find((item) => item.id === candid.id)).toMatchObject({
+      score: 9,
+      severity: 'high',
+      recovery: { points: 0, threshold: 4, recovered: false, lastRememberedOn: null },
+    });
     expect(await db.admin('select count(*)::int as count from public.effective_reviews')).toEqual([{ count: 0 }]);
   });
 
@@ -357,6 +365,34 @@ describe('practice kept apart from reviews', () => {
     expect(await db.admin('select confidence from public.review_logs')).toEqual([{ confidence: 3 }]);
     const { calibration } = analyticsResponseSchema.parse(await (await call(app, alice, '/api/analytics')).json());
     expect(calibration.levels.every((level) => level.reviews === 0)).toBe(true);
+  });
+});
+
+describe('practice and recovery', () => {
+  it('recovers a word through practice alone', async () => {
+    const day1 = on('2026-10-06');
+    const { candid } = await library(day1);
+    // One forgotten review makes it weak.
+    const current = await entryOf(day1, alice, candid.id);
+    await call(day1, alice, '/api/review-action', {
+      method: 'POST',
+      body: {
+        pageId: candid.id,
+        action: 'not_remember',
+        expected: { mastery: current.mastery, nextReview: current.reviewDate },
+        requestId: newId(),
+        allowNotDue: true,
+        countsTowardMastery: false,
+      },
+    });
+    expect((await weakOf(day1, alice)).words.find((word) => word.id === candid.id)).toBeDefined();
+
+    // One correct typing answer a day is one auto-graded point a day: three days and it is back.
+    for (const day of ['2026-10-06', '2026-10-07', '2026-10-08', '2026-10-09']) {
+      await practised(on(day), alice, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } });
+    }
+    const weak = await weakOf(on('2026-10-09'), alice);
+    expect(weak.words.find((word) => word.id === candid.id)).toBeUndefined();
   });
 });
 

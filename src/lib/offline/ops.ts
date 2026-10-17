@@ -11,13 +11,7 @@
  * The functions here are pure, so the projection can be tested without a
  * browser, a database or a clock.
  */
-import type {
-  Confidence,
-  CreateEntryInput,
-  ReviewFocus,
-  UpdateEntryInput,
-  VocabularyEntry,
-} from '../../../shared/api.js';
+import type { Confidence, CreateEntryInput, UpdateEntryInput, VocabularyEntry } from '../../../shared/api.js';
 import type { ReviewAction, ReviewState } from '../../../shared/review-logic.js';
 import type { StudyMode } from '../../../shared/study-modes.js';
 import { compareDates, isIsoDate } from '../../../shared/dates.js';
@@ -34,7 +28,16 @@ export type ReviewActionPayload = {
   /** The sitting the answer belongs to. */
   sessionId: string | null;
   durationMs: number | null;
-  focus: ReviewFocus | null;
+  /**
+   * Whether this answer may be taken for a word the schedule does not call due
+   * yet. Set by the narrowing it was given under, and read by the server.
+   */
+  allowNotDue: boolean;
+  /**
+   * Whether this answer moves the word. Read when the answer was given, not
+   * when it is sent, so the switch may be changed mid-sitting.
+   */
+  countsTowardMastery: boolean;
   confidence: Confidence | null;
   /**
    * The word, for notices on this device only. The request the server hears is

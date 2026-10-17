@@ -200,7 +200,8 @@ export function WeakWordsPage() {
                 {dueNow === 0
                   ? 'None of these is due for review right now.'
                   : `${dueNow} ${dueNow === 1 ? 'is' : 'are'} due for review now.`}{' '}
-                A focused review can bring any of these forward, even if it is not due yet.
+                A focused review can bring any of these forward, even if it is not due yet. It starts with counting off, so
+                the words keep the mastery and review date they had; switch it on beside the card to have them move.
               </p>
 
               {shown.length === 0 ? (
@@ -259,6 +260,11 @@ export function WeakWordsPage() {
                           <p className="text-xs text-muted">Also: {others.map((reason) => reason.detail).join(' ')}</p>
                         )}
                         <p className="text-xs text-muted">{recentText(word, weak.data.windowDays)}</p>
+                        {word.recovery !== undefined && (
+                          <p className="text-xs font-medium text-accent">
+                            Recovery {word.recovery.points} of {word.recovery.threshold}
+                          </p>
+                        )}
                         <p className="text-sm">
                           <span className="text-muted">Suggested: </span>
                           {word.action}

@@ -13,7 +13,7 @@
  * The queue itself, and the sitting in progress, are written to this device's
  * own storage, so a reload without a connection resumes where it stopped.
  */
-import type { Confidence, QueueResponse, ReviewActionResponse, ReviewFocus } from '../../shared/api.js';
+import type { Confidence, QueueResponse, ReviewActionResponse } from '../../shared/api.js';
 import { calendarDateInTimeZone } from '../../shared/dates.js';
 import { reviewRules } from '../../config/review.config.js';
 import type { ReviewAction } from '../../shared/review-logic.js';
@@ -24,6 +24,7 @@ import type { LocalStore } from './offline/storage.js';
 import type { SyncEngine } from './offline/sync-engine.js';
 import { startTiming } from './perf.js';
 import { newRequestId } from './request-id.js';
+import { ALL_SCOPE, allowsEarly, sameScope, scopeKey, type ReviewScope } from './review-scope.js';
 import {
   currentCard,
   initialSessionState,
@@ -41,13 +42,14 @@ export interface SessionController {
   getState(): SessionState;
   subscribe(listener: () => void): () => void;
   /**
-   * (Re)loads the queue. Reads only; never changes review data. Given a focus
-   * (or `null` for everything due) it switches to it; given nothing, it keeps
-   * the one in use, which is what Refresh wants. Where the server cannot be
-   * reached, the last queue (and the sitting in progress) comes back from this
-   * device's own storage.
+   * (Re)loads the queue. Reads only; never changes review data. Given a scope it
+   * switches to it; given nothing, it keeps the one in use, which is what
+   * Refresh wants. Where the server cannot be reached, the last queue (and the
+   * sitting in progress) comes back from this device's own storage.
    */
-  load(options?: { focus: ReviewFocus | null; collection?: string | null }): Promise<void>;
+  load(options?: { scope: ReviewScope }): Promise<void>;
+  /** The narrowing this session is on: everything due, the weakest words, or the reviewer's picks. */
+  scope(): ReviewScope;
   flip(): void;
   /**
    * Records how sure the reviewer is and shows the answer. Returns false when
@@ -81,10 +83,9 @@ const UNDO_IS_OVER = new Set(['conflict', 'not_found', 'not_supported', 'read_on
 
 /** The sitting as it is written to this device, so a reload can resume it. */
 interface SessionSnapshot {
-  version: 1;
+  version: 2;
   sessionId: string;
-  focus: ReviewFocus | null;
-  collection: string | null;
+  scope: ReviewScope;
   cards: SessionState['cards'];
   index: number;
   meta: SessionMeta;
@@ -119,13 +120,15 @@ export interface SessionControllerOptions {
   /** This device's storage, for the queue cache and the sitting in progress. */
   store: LocalStore;
   accountId: string;
+  /**
+   * Whether an answer moves the word. Read as each answer is given rather than
+   * when the session starts, so the switch may be changed mid-sitting.
+   */
+  countsTowardMastery: () => boolean;
   /** Called once an answer is confirmed as saved, so other views know their data has changed. */
   onSaved?: () => void;
   now?: () => number;
 }
-
-const focusKey = (focus: ReviewFocus | null, collection: string | null): string =>
-  collection === null ? focus ?? 'all' : `collection:${collection}`;
 
 export function createSessionController(options: SessionControllerOptions): SessionController {
   const { api, engine, store, accountId } = options;
@@ -136,9 +139,7 @@ export function createSessionController(options: SessionControllerOptions): Sess
   let loadSequence = 0;
   let sessionId = newRequestId();
   /** What the queue is narrowed to, if anything. */
-  let focus: ReviewFocus | null = null;
-  /** The collection the queue is narrowed to instead, if any. */
-  let collection: string | null = null;
+  let scope: ReviewScope = ALL_SCOPE;
   /** Timer for the currently active card. */
   let timer: ReviewTimer | null = null;
   /** Visibility change handler reference for cleanup. */
@@ -220,10 +221,9 @@ export function createSessionController(options: SessionControllerOptions): Sess
     if (state.meta === null) return;
     if (state.status !== 'ready' && state.status !== 'flipped' && state.status !== 'completed') return;
     const snapshot: SessionSnapshot = {
-      version: 1,
+      version: 2,
       sessionId,
-      focus,
-      collection,
+      scope,
       cards: state.cards,
       index: state.index,
       meta: state.meta,
@@ -239,7 +239,7 @@ export function createSessionController(options: SessionControllerOptions): Sess
   /** Writes the queue the server just sent, so it can be shown again without one. */
   const cacheQueue = (response: QueueResponse): void => {
     const cache: QueueCache = { version: 1, response, cachedAt: now() };
-    void store.kv.put(`${accountId}:queue:${focusKey(focus, collection)}`, cache).catch(() => undefined);
+    void store.kv.put(`${accountId}:queue:${scopeKey(scope)}`, cache).catch(() => undefined);
   };
 
   const dispatch = (event: SessionEvent): boolean => {
@@ -314,16 +314,15 @@ export function createSessionController(options: SessionControllerOptions): Sess
     const snapshot = await store.kv.get<SessionSnapshot>(`${accountId}:session`);
     if (
       snapshot !== null &&
-      snapshot.version === 1 &&
-      snapshot.focus === focus &&
-      snapshot.collection === collection &&
+      snapshot.version === 2 &&
+      sameScope(snapshot.scope, scope) &&
       snapshot.meta !== null &&
       now() - snapshot.savedAt < MAX_SNAPSHOT_AGE_MS
     ) {
       return { kind: 'snapshot', snapshot };
     }
 
-    const cache = await store.kv.get<QueueCache>(`${accountId}:queue:${focusKey(focus, collection)}`);
+    const cache = await store.kv.get<QueueCache>(`${accountId}:queue:${scopeKey(scope)}`);
     if (cache === null || cache.version !== 1) return null;
     const { cards: cachedCards, ...cachedMeta } = cache.response;
     const response = cache.response;
@@ -332,14 +331,14 @@ export function createSessionController(options: SessionControllerOptions): Sess
     let cards = cachedCards.filter((card) => !answered.has(card.id));
     if (response.today !== today) {
       // The queue was fetched on an earlier day. A word that has stopped being
-      // due since then is left out; a weak review may still take one early.
+      // due since then is left out; a narrowed review may still take one early.
       cards = cards.filter(
         (card) =>
           checkEligibility(
             { mastery: card.mastery, nextReview: card.dueOn ?? card.nextReview },
             today,
             reviewRules,
-            { allowNotDue: focus === 'weak' },
+            { allowNotDue: allowsEarly(scope) },
           ).eligible,
       );
     }
@@ -384,11 +383,7 @@ export function createSessionController(options: SessionControllerOptions): Sess
 
     async load(options) {
       if (state.undoing) return;
-      if (options !== undefined) {
-        collection = options.collection ?? null;
-        // One selection at a time: a collection takes the place of a focus.
-        focus = collection === null ? options.focus : null;
-      }
+      if (options !== undefined) scope = options.scope;
       // A newer load supersedes any still in flight.
       const sequence = ++loadSequence;
       // Clean up any existing timer and visibility handler before starting fresh
@@ -396,7 +391,7 @@ export function createSessionController(options: SessionControllerOptions): Sess
       cleanupVisibilityHandler();
       dispatch({ type: 'LOAD' });
       try {
-        const response = await api.fetchQueue(collection === null ? { focus } : { focus: null, collection });
+        const response = await api.fetchQueue({ scope });
         if (sequence !== loadSequence) return;
         // A freshly loaded queue is a new sitting.
         sessionId = newRequestId();
@@ -474,7 +469,8 @@ export function createSessionController(options: SessionControllerOptions): Sess
         expected: { mastery: card.mastery, nextReview: card.nextReview },
         sessionId,
         durationMs,
-        focus,
+        allowNotDue: allowsEarly(scope),
+        countsTowardMastery: options.countsTowardMastery(),
         confidence: recorded?.confidence ?? null,
         // Local detail only, never sent: names the card in notices.
         word: card.word,
@@ -501,5 +497,7 @@ export function createSessionController(options: SessionControllerOptions): Sess
     },
 
     sessionId: () => sessionId,
+
+    scope: () => scope,
   };
 }

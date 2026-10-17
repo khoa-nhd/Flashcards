@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import type { DayPlanResponse, SessionSummary } from '../../shared/api.js';
-import { useApp } from '../app-context.js';
+import { useApp, useCounting } from '../app-context.js';
 import { formatDuration } from '../lib/format.js';
-import { FOCUS_TEXT, type FocusText } from '../lib/review-focus.js';
+import { FOCUS_TEXT, SELECT_TEXT, type FocusText } from '../lib/review-focus.js';
 import { ROUTES } from '../lib/router.js';
 import { canUndo, type SessionState } from '../lib/session-machine.js';
 import { GoalProgress, hasGoal } from './GoalStatus.js';
@@ -20,12 +20,15 @@ export interface CompletionScreenProps {
   onRetry: (requestId: string) => void;
   /** Gives up on a refused answer for good. */
   onDismiss: (requestId: string) => void;
+  /** Words that left the weak list during this session, named for the reviewer. */
+  recovered?: readonly string[];
 }
 
 type Loaded = { for: string; summary: SessionSummary | null };
 
-export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, onDismiss }: CompletionScreenProps) {
+export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, onDismiss, recovered = [] }: CompletionScreenProps) {
   const { api } = useApp();
+  const counting = useCounting();
   const { meta, tally } = state;
   const total = state.cards.length;
   const preview = meta !== null && !meta.writesEnabled;
@@ -70,15 +73,7 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
   }
   // A narrowed queue being empty says nothing about the rest of the vocabulary.
   const focus: Pick<FocusText, 'emptyTitle' | 'emptyDetail' | 'done'> | null =
-    meta?.collection != null
-      ? {
-          emptyTitle: 'Nothing in this collection is due',
-          emptyDetail: `None of the words in “${meta.collection.name}” is due for review right now.`,
-          done: `They were the due words in “${meta.collection.name}”.`,
-        }
-      : meta?.focus == null
-        ? null
-        : FOCUS_TEXT[meta.focus];
+    meta?.selection === true ? SELECT_TEXT : meta?.focus == null ? null : FOCUS_TEXT[meta.focus];
   if (focus !== null) {
     emptyTitle = focus.emptyTitle;
     emptyDetail = focus.emptyDetail;
@@ -177,6 +172,21 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
       )}
 
       {summary !== null && <p className="-mt-3 text-xs text-muted">These are the answers that were saved.</p>}
+
+      {!counting && reviewed > 0 && (
+        <p className="w-full rounded-2xl border border-line px-4 py-3 text-left text-sm text-muted">
+          Counting towards mastery was off, so those answers left every word’s mastery and review date as they were.
+          They are still saved, and still count in your accuracy, streak and daily goal.
+        </p>
+      )}
+
+      {recovered.length > 0 && (
+        <p className="w-full rounded-2xl bg-good-soft px-4 py-3 text-left text-sm text-good-ink">
+          {recovered.length === 1
+            ? `“${recovered[0]}” has left your weak list.`
+            : `${recovered.length} words have left your weak list: ${recovered.join(', ')}.`}
+        </p>
+      )}
 
       {goal !== null && hasGoal(goal) && (
         <div className="w-full rounded-2xl border border-line px-4 py-3 text-left">

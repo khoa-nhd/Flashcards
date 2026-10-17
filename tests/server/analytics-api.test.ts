@@ -61,6 +61,22 @@ async function answer(app: TestApp, user: TestUser, id: string, action: 'remembe
   return requestId;
 }
 
+/** Answers a card without moving it, the way a weak review does by default. */
+async function answerOff(app: TestApp, user: TestUser, id: string, action: 'remember' | 'not_remember') {
+  const current = entryResponseSchema.parse(await (await call(app, user, `/api/vocabulary/${id}`)).json()).entry;
+  const response = await call(app, user, '/api/review-action', {
+    method: 'POST',
+    body: {
+      pageId: id,
+      action,
+      expected: { mastery: current.mastery, nextReview: current.reviewDate },
+      requestId: newId(),
+      countsTowardMastery: false,
+    },
+  });
+  expect(response.status, `${action} on ${current.word}`).toBe(200);
+}
+
 const analyticsOf = async (app: TestApp, user: TestUser) =>
   analyticsResponseSchema.parse(await (await call(app, user, '/api/analytics')).json());
 const weakOf = async (app: TestApp, user: TestUser) =>
@@ -230,6 +246,87 @@ describe('weak words', () => {
   });
 });
 
+describe('weak words recovery', () => {
+  const full = { meaning: 'm', definition: 'd', example: 'e' };
+
+  /** A word that is weak from one forgotten answer, then remembered without moving it. */
+  const weakWord = async (day: string, word: string) => {
+    const app = on(day);
+    const entry = await addWord(app, alice, { word, ...full, mastery: 2, reviewDate: day });
+    await answerOff(app, alice, entry.id, 'not_remember');
+    return entry;
+  };
+
+  it('earns a point a day from being remembered, and leaves the list once it has enough', async () => {
+    const word = await weakWord('2026-10-06', 'recover');
+    expect((await weakOf(on('2026-10-06'), alice)).words.find((item) => item.id === word.id)).toMatchObject({
+      severity: 'low',
+      recovery: { points: 0, threshold: 3, recovered: false },
+    });
+
+    // A weak review is judged by the reviewer, so two remembers in a day make one point.
+    const day2 = on('2026-10-07');
+    await answerOff(day2, alice, word.id, 'remember');
+    await answerOff(day2, alice, word.id, 'remember');
+    expect((await weakOf(day2, alice)).words.find((item) => item.id === word.id)).toMatchObject({
+      recovery: { points: 1, threshold: 3 },
+    });
+
+    const day3 = on('2026-10-08');
+    await answerOff(day3, alice, word.id, 'remember');
+    await answerOff(day3, alice, word.id, 'remember');
+    expect((await weakOf(day3, alice)).words.find((item) => item.id === word.id)).toMatchObject({
+      recovery: { points: 2, threshold: 3 },
+    });
+
+    const day4 = on('2026-10-09');
+    await answerOff(day4, alice, word.id, 'remember');
+    await answerOff(day4, alice, word.id, 'remember');
+    expect((await weakOf(day4, alice)).words.find((item) => item.id === word.id)).toBeUndefined();
+  });
+
+  it('takes a point back when the word is forgotten again', async () => {
+    const word = await weakWord('2026-10-06', 'setback');
+    const day2 = on('2026-10-07');
+    await answerOff(day2, alice, word.id, 'remember');
+    await answerOff(day2, alice, word.id, 'remember');
+    await answerOff(day2, alice, word.id, 'not_remember');
+    expect((await weakOf(day2, alice)).words.find((item) => item.id === word.id)).toMatchObject({
+      recovery: { points: 0 },
+    });
+  });
+
+  it('starts again from a clean slate after a slip', async () => {
+    const word = await weakWord('2026-10-06', 'fresh-start');
+    for (const day of ['2026-10-07', '2026-10-08', '2026-10-09']) {
+      const app = on(day);
+      await answerOff(app, alice, word.id, 'remember');
+      await answerOff(app, alice, word.id, 'remember');
+    }
+    expect((await weakOf(on('2026-10-09'), alice)).words.find((item) => item.id === word.id)).toBeUndefined();
+
+    // One more forget, and the word is back, but lightly: its old failures are gone.
+    const day5 = on('2026-10-10');
+    await answerOff(day5, alice, word.id, 'not_remember');
+    expect((await weakOf(day5, alice)).words.find((item) => item.id === word.id)).toMatchObject({
+      severity: 'low',
+      score: 2,
+      recovery: { points: 0, threshold: 3, recovered: false },
+    });
+  });
+
+  it('forgives an overdue word once it has been remembered recently', async () => {
+    const app = on('2026-10-09');
+    const word = await addWord(app, alice, { word: 'waiting', ...full, mastery: 3, reviewDate: '2026-09-20' });
+    expect((await weakOf(app, alice)).words.find((item) => item.id === word.id)).toMatchObject({
+      severity: 'low',
+      recovery: { points: 0, threshold: 3 },
+    });
+    await answerOff(app, alice, word.id, 'remember');
+    expect((await weakOf(app, alice)).words.find((item) => item.id === word.id)).toBeUndefined();
+  });
+});
+
 describe('focusing a review on the weakest words', () => {
   it('holds every weak word, weakest first, whether or not it is due', async () => {
     const app = on('2026-10-09');
@@ -270,7 +367,8 @@ describe('focusing a review on the weakest words', () => {
         action: 'remember',
         expected: { mastery: 3, nextReview: '2026-10-20' },
         requestId: newId(),
-        focus: 'weak',
+        allowNotDue: true,
+        countsTowardMastery: false,
       },
     });
     expect(response.status).toBe(200);
@@ -279,8 +377,28 @@ describe('focusing a review on the weakest words', () => {
       state: { mastery: 3, nextReview: '2026-10-20' },
     });
     const after = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${word.id}`)).json()).entry;
-    // Reviewing the weakest words is extra practice: Remember does not raise mastery or move the date.
+    // A review that does not count is extra practice: Remember does not raise mastery or move the date.
     expect(after).toMatchObject({ mastery: 3, reviewDate: '2026-10-20' });
+  });
+
+  it('moves a word taken early when the same review is set to count', async () => {
+    const app = on('2026-10-09');
+    const word = await addWord(app, alice, { word: 'early', mastery: 3, reviewDate: '2026-10-20' });
+    const response = await call(app, alice, '/api/review-action', {
+      method: 'POST',
+      body: {
+        pageId: word.id,
+        action: 'remember',
+        expected: { mastery: 3, nextReview: '2026-10-20' },
+        requestId: newId(),
+        allowNotDue: true,
+        countsTowardMastery: true,
+      },
+    });
+    expect(response.status).toBe(200);
+    const after = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${word.id}`)).json()).entry;
+    // The reviewer asked for it to count, so it behaves exactly like a due answer.
+    expect(after).toMatchObject({ mastery: 4, reviewDate: '2026-10-12' });
   });
 
   it('leaves a due weak word unchanged on Not remember too, records the answer, and can be undone', async () => {
@@ -290,7 +408,14 @@ describe('focusing a review on the weakest words', () => {
     const answer = () =>
       call(app, alice, '/api/review-action', {
         method: 'POST',
-        body: { pageId: word.id, action: 'not_remember', expected: { mastery: 2, nextReview: '2026-10-01' }, requestId, focus: 'weak' },
+        body: {
+          pageId: word.id,
+          action: 'not_remember',
+          expected: { mastery: 2, nextReview: '2026-10-01' },
+          requestId,
+          allowNotDue: true,
+          countsTowardMastery: false,
+        },
       });
     expect((await answer()).status).toBe(200);
     // Sent again, it is recognised rather than saved twice.

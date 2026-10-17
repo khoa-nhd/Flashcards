@@ -117,6 +117,8 @@ export interface Database {
           daily_goal_minutes: number | null;
           /** From schema version 8. Which scheduler decides what is due. */
           scheduler: 'mastery_v1' | 'fsrs';
+          /** From schema version 13. Whether a review moves a word's mastery. */
+          count_reviews_toward_mastery: boolean;
         };
         Insert: {
           user_id?: string;
@@ -125,6 +127,7 @@ export interface Database {
           daily_goal_reviews?: number | null;
           daily_goal_minutes?: number | null;
           scheduler?: 'mastery_v1' | 'fsrs';
+          count_reviews_toward_mastery?: boolean;
         };
         Update: {
           time_zone?: string;
@@ -132,6 +135,7 @@ export interface Database {
           daily_goal_reviews?: number | null;
           daily_goal_minutes?: number | null;
           scheduler?: 'mastery_v1' | 'fsrs';
+          count_reviews_toward_mastery?: boolean;
         };
         Relationships: [];
       };
@@ -347,6 +351,11 @@ export interface Database {
       };
       card_review_stats: {
         Args: { p_since: string };
+        Returns: Array<Record<string, string | number | null>>;
+      };
+      /** From schema version 14. */
+      weak_word_days: {
+        Args: Record<string, never>;
         Returns: Array<Record<string, string | number | null>>;
       };
       confidence_stats: {
