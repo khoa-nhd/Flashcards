@@ -211,7 +211,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
       // somewhere to put it. Anywhere else, and for every account that has not chosen, it is the mastery schedule.
       const scheduler =
         schemaVersion >= 8
-          ? createSchedulerStore(settings?.scheduler ?? undefined, (next) => {
+          ? createSchedulerStore(settings?.scheduler ?? 'fsrs', (next) => {
               forgetSettings(account.id);
               return database.saveScheduler(next);
             })
