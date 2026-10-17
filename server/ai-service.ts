@@ -185,35 +185,23 @@ leaving out any part that does not apply:
   1. Simple: "<everyday English sentence>" — <Vietnamese translation>
   2. More academic: "<formal English sentence>" — <Vietnamese translation>
   3. Super academic: "<scholarly English sentence>" — <Vietnamese translation>
-- **Word family:** one bullet per related form:
-  - **word (part of speech)** /IPA/
-    - **Nghĩa tiếng Việt:** ...
-    - **English explanation:** ...
-    - **Difference from the root word:** ...
-    - **Example:** ...
-    - **Translation:** ...
-- **Synonyms:** one bullet per synonym:
-  - **Synonym:** word
-    - **Meaning:** Vietnamese meaning in this context
-    - **When to use:** ...
-    - **Nuance:** ...
-    - **Example:** ... (Vietnamese translation if useful)
-- **Synonym Nuance:** bullet points comparing easily confused words:
-  - **A vs. B**
-    - Core difference: ...
-    - Intensity / tone / register: ...
-    - Best context for each: ...
-    - When not to substitute: ...
-    - Contrastive examples: ...
-- **Collocations:** one bullet per collocation:
-  - **Collocation:** phrase
-    - **Meaning:** Vietnamese meaning of the whole phrase
-    - **Usage:** typical situation and tone
-    - **Example:** ...
-    - **Translation:** ...
-- **Antonyms:** with a few words on how they differ (if applicable)
-- **Usage notes and common mistakes**
-- **Revision summary:** a short recap of the key points
+
+#### 4. Word Family & Derivatives
+- **word (part of speech /IPA/):** Vietnamese meaning. Short English note only if useful.
+
+#### 5. Collocations & Phrasal Verbs
+High-Frequency Collocations:
+- **collocation:** Vietnamese meaning.
+  Example: "<English sentence>" — <Vietnamese translation>
+
+Synonyms & Antonyms:
+- **Synonyms:** word (short nuance), word (short nuance)
+- **Synonyms Nuance:**
+  - **word:** when to use it and how it differs
+- **Antonyms:** word (short note), word (short note)
+
+#### 6. Usage notes and common mistakes
+#### 7. Revision summary: a short recap of the key points
 
 Rules:
 - Keep it accurate. Say so when you are unsure; never invent a meaning, IPA, word form, collocation or etymological relation.
