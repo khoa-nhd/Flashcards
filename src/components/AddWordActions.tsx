@@ -6,10 +6,11 @@
  */
 import { useState, type ReactNode } from 'react';
 import type { AiMessage, CreateEntryInput, UpdateEntryInput, VocabularyEntry } from '../../shared/api.js';
-import { useApp } from '../app-context.js';
+import { useApp, useLibrary } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { openWord } from '../lib/router.js';
 import { extractVocabularyAnalysis } from '../lib/vocabulary-analysis.js';
+import type { ExtractedExample, ExampleRegister } from '../lib/vocabulary-analysis.js';
 import { createInputOf, type FormValues } from '../lib/vocabulary-form.js';
 import type { WriteResult } from '../lib/vocabulary-store.js';
 import { AddWordDialog, type AddWordDraft } from './AddWordDialog.js';
@@ -27,6 +28,12 @@ interface Attempt {
   /** The word as the reply spells it, for the messages. */
   word: string;
   values: FormValues;
+  /** All register-labelled examples parsed from the reply. */
+  examples: ExtractedExample[];
+  /** The register-labelled examples chosen in the dialog. */
+  selectedExamples: ExtractedExample[];
+  /** The register chosen as the primary example. */
+  primaryRegister: ExampleRegister | null;
   /** What a fresh save would send. */
   input: Omit<CreateEntryInput, 'requestId'>;
   /** Whether a retry repeats the create or the update. */
@@ -54,7 +61,11 @@ export interface AddWordActionsProps {
 
 export function AddWordActions({ message, conversationId, savedVocabularyId, onSaved, children }: AddWordActionsProps) {
   const { api, vocabulary } = useApp();
+  const libraryService = useApp().library;
+  const library = useLibrary();
   const [attempt, setAttempt] = useState<Attempt | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [parsedExamples, setParsedExamples] = useState<ExtractedExample[]>([]);
   /** When open: what the dialog shows. Parsing waits for the click, so a long reply costs nothing. */
   const [dialog, setDialog] = useState<AddWordDraft | null>(null);
 
@@ -88,8 +99,9 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
     setAttempt({ ...attempt, status: 'failed', error: outcome.message, duplicates: outcome.duplicates });
   };
 
-  const start = (values: FormValues) => {
+  const start = (values: FormValues, selectedExamples: ExtractedExample[] = [], primaryRegister: ExampleRegister | null = null) => {
     setDialog(null);
+    setNotice(null);
     const input = createInputOf(values);
     const { localId, result } = vocabulary.create(input);
     const attempt: Attempt = {
@@ -97,6 +109,9 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
       kind: 'create',
       word: values.word,
       values,
+      examples: parsedExamples,
+      selectedExamples,
+      primaryRegister,
       input,
       operationId: localId,
       target: null,
@@ -105,7 +120,13 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
       error: null,
     };
     setAttempt(attempt);
-    void result.then((outcome) => settleCreate(attempt, outcome));
+    const furtherSelected = selectedExamples.filter((example) => example.register !== primaryRegister);
+    void result.then((outcome) => {
+      settleCreate(attempt, outcome);
+      if (outcome.ok && outcome.entry !== null) {
+        void addFurtherExamples(outcome.entry.id, furtherSelected);
+      }
+    });
   };
 
   /** Writes only the text fields onto the existing word, keeping its progress and review dates. */
@@ -115,20 +136,28 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
       definition: attempt.values.definition,
       example: attempt.values.example,
     };
+    const furtherSelected = attempt.selectedExamples.filter((example) => example.register !== attempt.primaryRegister);
     if (vocabulary.getState().entries.some((entry) => entry.id === target.id)) {
       const { operationId, result } = vocabulary.update(target.id, input);
-      const next: Attempt = { ...attempt, kind: 'update', status: 'saving', target, operationId, error: null, duplicates: [] };
+      const next: Attempt = { ...attempt, kind: 'update', status: 'saving', target, operationId, error: null, duplicates: [], examples: attempt.examples, selectedExamples: attempt.selectedExamples, primaryRegister: attempt.primaryRegister };
       setAttempt(next);
-      void result.then((outcome) => settleUpdate(next, outcome));
+      void result.then((outcome) => {
+        settleUpdate(next, outcome);
+        if (outcome.ok) {
+          const entry = outcome.entry ?? target;
+          if (entry !== null) void addFurtherExamples(entry.id, furtherSelected);
+        }
+      });
       return;
     }
     // The word is not in the loaded copy (rare): send the change straight, so nothing is lost.
-    const next: Attempt = { ...attempt, kind: 'update', status: 'saving', target, operationId: null, error: null, duplicates: [] };
+    const next: Attempt = { ...attempt, kind: 'update', status: 'saving', target, operationId: null, error: null, duplicates: [], examples: attempt.examples, selectedExamples: attempt.selectedExamples, primaryRegister: attempt.primaryRegister };
     setAttempt(next);
     void api.updateEntry(target.id, input).then(
       (entry) => {
         vocabulary.upsert(entry);
         settleUpdate(next, { ok: true, entry });
+        void addFurtherExamples(entry.id, furtherSelected);
       },
       (error: unknown) => {
         const failure =
@@ -156,29 +185,42 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
       if (attempt.operationId !== null) {
         const retrying = vocabulary.retry(attempt.operationId);
         if (retrying !== null) {
-          const next: Attempt = { ...attempt, status: 'saving', error: null };
+          const next: Attempt = { ...attempt, status: 'saving', error: null, selectedExamples: attempt.selectedExamples, primaryRegister: attempt.primaryRegister };
           setAttempt(next);
-          void retrying.then((outcome) => settleUpdate(next, outcome));
+          void retrying.then((outcome) => {
+            settleUpdate(next, outcome);
+            if (outcome.ok) {
+              const entry = outcome.entry ?? attempt.target;
+              if (entry !== null) void addFurtherExamples(entry.id, attempt.selectedExamples.filter((example) => example.register !== attempt.primaryRegister));
+            }
+          });
           return;
         }
       }
       runUpdate(attempt, attempt.target);
       return;
     }
+    const furtherSelected = attempt.selectedExamples.filter((example) => example.register !== attempt.primaryRegister);
     // A create: send the very same write again; its request id keeps it one word.
     if (attempt.operationId !== null) {
       const retrying = vocabulary.retry(attempt.operationId);
       if (retrying !== null) {
-        const next: Attempt = { ...attempt, status: 'saving', error: null };
+        const next: Attempt = { ...attempt, status: 'saving', error: null, selectedExamples: attempt.selectedExamples, primaryRegister: attempt.primaryRegister };
         setAttempt(next);
-        void retrying.then((outcome) => settleCreate(next, outcome));
+        void retrying.then((outcome) => {
+          settleCreate(next, outcome);
+          if (outcome.ok && outcome.entry !== null) void addFurtherExamples(outcome.entry.id, furtherSelected);
+        });
         return;
       }
     }
     const { localId, result } = vocabulary.create(attempt.input);
-    const next: Attempt = { ...attempt, status: 'saving', error: null, operationId: localId };
+    const next: Attempt = { ...attempt, status: 'saving', error: null, operationId: localId, selectedExamples: attempt.selectedExamples, primaryRegister: attempt.primaryRegister };
     setAttempt(next);
-    void result.then((outcome) => settleCreate(next, outcome));
+    void result.then((outcome) => {
+      settleCreate(next, outcome);
+      if (outcome.ok && outcome.entry !== null) void addFurtherExamples(outcome.entry.id, furtherSelected);
+    });
   };
 
   const edit = () => {
@@ -186,18 +228,62 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
     if (attempt.operationId !== null) vocabulary.dismiss(attempt.operationId);
     setAttempt(null);
     // Nothing is typed again: the dialog opens with what was there.
-    setDialog({ ...attempt.values, missing: [] });
+    setDialog({ ...attempt.values, examples: attempt.examples, missing: [] });
   };
 
   const discard = () => {
     if (attempt !== null && attempt.operationId !== null) vocabulary.dismiss(attempt.operationId);
     setAttempt(null);
+    setNotice(null);
+  };
+
+  const addFurtherExamples = async (entryId: string, furtherSelected: ExtractedExample[]) => {
+    if (furtherSelected.length === 0) return;
+    if (!library.available) {
+      setNotice('Word saved. Further examples were skipped because the vocabulary bank is not available here.');
+      return;
+    }
+    const canWrite = vocabulary.getState().meta?.writesEnabled === true;
+    if (!canWrite) {
+      setNotice('Word saved. Further examples were skipped because saving is switched off for this workspace.');
+      return;
+    }
+    const existing = new Set(
+      library.examples
+        .filter((example) => example.vocabularyId === entryId)
+        .map((example) => example.sentence.trim().toLowerCase()),
+    );
+    const failed: string[] = [];
+    let added = 0;
+    for (const example of furtherSelected) {
+      const sentence = example.sentence.trim();
+      if (sentence === '') continue;
+      if (existing.has(sentence.toLowerCase())) continue;
+      try {
+        const created = await api.addExample(entryId, { sentence, source: example.label });
+        libraryService.putExample(created);
+        existing.add(sentence.toLowerCase());
+        added += 1;
+      } catch {
+        failed.push(example.label);
+      }
+    }
+    if (failed.length > 0) {
+      setNotice(`Word saved. Could not add: ${failed.join(', ')}.`);
+    } else if (added > 0) {
+      setNotice(`Added ${added} further example${added === 1 ? '' : 's'} to the vocabulary bank.`);
+    }
   };
 
   const savedId = savedVocabularyId ?? (attempt?.status === 'added' ? (attempt.entry?.id ?? null) : null);
 
   return (
     <div className="flex w-full min-w-0 flex-col items-start gap-2">
+      {notice !== null && (
+        <p role="status" className="w-full rounded-xl border border-line bg-surface px-3 py-2 text-xs text-muted">
+          {notice}
+        </p>
+      )}
       {attempt?.status === 'duplicate' && (
         <div role="alert" className="w-full rounded-xl border border-warn-ink/30 bg-warn-soft p-3 text-warn-ink">
           <p className="text-sm font-semibold">“{attempt.word}” is already in your vocabulary</p>
@@ -278,7 +364,11 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
         ) : attempt === null ? (
           <button
             type="button"
-            onClick={() => setDialog(extractVocabularyAnalysis(message.content))}
+            onClick={() => {
+              const analysis = extractVocabularyAnalysis(message.content);
+              setParsedExamples(analysis.examples);
+              setDialog(analysis);
+            }}
             className={`${BUTTON_PRIMARY} font-bold`}
           >
             <Icon name="add" className="size-4" />

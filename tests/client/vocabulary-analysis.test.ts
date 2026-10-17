@@ -26,6 +26,7 @@ describe('a reply in the pinned format', () => {
       meaning: 'sự gia tăng nhanh chóng; sự lan tràn',
       definition: 'a rapid increase in the number or amount of something',
       example: 'The proliferation of fake news worries educators.',
+      examples: [{ register: 'simple', label: 'Simple', sentence: 'The proliferation of fake news worries educators.' }],
       missing: [],
     });
   });
@@ -138,6 +139,7 @@ describe('a reply that is missing parts', () => {
       meaning: '',
       definition: '',
       example: '',
+      examples: [],
       missing: ['word', 'meaning', 'definition', 'example'],
     });
   });

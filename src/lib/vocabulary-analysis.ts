@@ -11,11 +11,23 @@
 
 export type ExtractedField = 'word' | 'meaning' | 'definition' | 'example';
 
+export type ExampleRegister = 'simple' | 'more_academic' | 'super_academic';
+
+export interface ExtractedExample {
+  register: ExampleRegister;
+  /** Display label: "Simple", "More academic" or "Super academic". */
+  label: string;
+  /** The English sentence only, translation dropped. */
+  sentence: string;
+}
+
 export interface ExtractedAnalysis {
   word: string;
   meaning: string;
   definition: string;
   example: string;
+  /** The three register-labelled examples parsed from the reply, when present. */
+  examples: ExtractedExample[];
   /** The fields the reply did not carry, for the notice above the form. */
   missing: ExtractedField[];
 }
@@ -287,6 +299,68 @@ function firstExample(section: Section | undefined): string {
   return first === undefined ? '' : englishSentence(first);
 }
 
+// ---- The register-labelled examples -----------------------------------------
+
+const REGISTER_LABELS: Record<string, { register: ExampleRegister; label: string }> = {
+  simple: { register: 'simple', label: 'Simple' },
+  'more academic': { register: 'more_academic', label: 'More academic' },
+  'super academic': { register: 'super_academic', label: 'Super academic' },
+};
+
+/** Groups the Example section's lines into one block per bullet/paragraph, like firstExample does. */
+function exampleBlocks(section: Section | undefined): string[] {
+  if (section === undefined) return [];
+  const blocks: string[] = [];
+  if (section.lines.some((line) => BULLET.test(line))) {
+    let current: string[] | null = null;
+    for (const line of section.lines) {
+      const bullet = BULLET.exec(line);
+      if (bullet !== null) {
+        if (current !== null) blocks.push(current.join('\\n'));
+        current = [bullet[1]!.trim()];
+      } else if (current !== null) {
+        current.push(line.trim());
+      }
+    }
+    if (current !== null) blocks.push(current.join('\\n'));
+  } else {
+    for (const line of section.lines) if (line.trim() !== '') blocks.push(line.trim());
+  }
+  return blocks;
+}
+
+/** Strips list markers and emphasis so a block can be matched against a register label. */
+function stripListAndEmphasis(text: string): string {
+  return text
+    .replace(/^[-*•]\s*/, '')
+    .replace(/^\d+[.)]\s*/, '')
+    .replace(/^\*{1,2}\s*/, '')
+    .replace(/\*{1,2}\s*$/, '')
+    .trim();
+}
+
+function parseExamples(section: Section | undefined): ExtractedExample[] {
+  const blocks = exampleBlocks(section);
+  const parsed: ExtractedExample[] = [];
+  for (const block of blocks) {
+    const cleaned = stripListAndEmphasis(block);
+    const match = /^([A-Za-z ]+?)\s*[:：]\s*(.*)$/s.exec(cleaned);
+    if (match === null) continue;
+    const key = match[1]!.trim().toLowerCase();
+    const info = REGISTER_LABELS[key];
+    if (info === undefined) continue;
+    const sentence = englishSentence(match[2]!.trim());
+    if (sentence === '') continue;
+    parsed.push({ register: info.register, label: info.label, sentence });
+  }
+  // Fall back: an old reply with unlabelled examples counts as a single simple one.
+  if (parsed.length === 0) {
+    const first = firstExample(section);
+    if (first !== '') parsed.push({ register: 'simple', label: 'Simple', sentence: first });
+  }
+  return parsed;
+}
+
 // ---- The whole reply --------------------------------------------------------
 
 export function extractVocabularyAnalysis(content: string): ExtractedAnalysis {
@@ -303,7 +377,9 @@ export function extractVocabularyAnalysis(content: string): ExtractedAnalysis {
     textOf(findSection(sections, 'vietnamese')) ||
     textOf(findSection(sections, 'nghia'));
   const definition = textOf(findSection(sections, 'definition'));
-  const example = firstExample(findSection(sections, 'example'));
+  const exampleSection = findSection(sections, 'example');
+  const examples = parseExamples(exampleSection);
+  const example = examples.find((item) => item.register === 'simple')?.sentence || firstExample(exampleSection);
 
   const missing: ExtractedField[] = [];
   if (word === '') missing.push('word');
@@ -311,5 +387,5 @@ export function extractVocabularyAnalysis(content: string): ExtractedAnalysis {
   if (definition === '') missing.push('definition');
   if (example === '') missing.push('example');
 
-  return { word, meaning, definition, example, missing };
+  return { word, meaning, definition, example, examples, missing };
 }

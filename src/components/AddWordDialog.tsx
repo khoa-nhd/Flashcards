@@ -14,7 +14,7 @@ import { Spinner } from '../components/Spinner.js';
 import { VocabularyFields } from '../components/VocabularyFields.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY } from '../components/ui.js';
 import { FORM_FIELDS, validate, type FormErrors, type FormValues } from '../lib/vocabulary-form.js';
-import type { ExtractedField } from '../lib/vocabulary-analysis.js';
+import type { ExtractedExample, ExampleRegister, ExtractedField } from '../lib/vocabulary-analysis.js';
 import type { VocabularyMeta } from '../lib/vocabulary-store.js';
 
 const FIELD_LABEL: Record<ExtractedField, string> = {
@@ -30,6 +30,8 @@ export interface AddWordDraft {
   meaning: string;
   definition: string;
   example: string;
+  /** The register-labelled examples parsed from the reply, when present. */
+  examples?: ExtractedExample[];
   /** The fields the reply did not carry, for the notice above the form. */
   missing: ExtractedField[];
   /** Set when a failed attempt is edited, so nothing is typed again. */
@@ -41,8 +43,8 @@ export interface AddWordDraft {
 export interface AddWordDialogProps {
   /** The four fields read out of the reply, and any it did not carry. */
   initial: AddWordDraft;
-  /** Called with the reviewed values; the caller saves them. */
-  onSubmit: (values: FormValues) => void;
+  /** Called with the reviewed values; the caller saves them. The selected examples (with edits) and the primary register follow. */
+  onSubmit: (values: FormValues, selectedExamples?: ExtractedExample[], primaryRegister?: ExampleRegister | null) => void;
   onClose: () => void;
 }
 
@@ -92,7 +94,7 @@ function AddWordForm({
   meta: VocabularyMeta;
   entries: VocabularyEntry[];
   initial: AddWordDraft;
-  onSubmit: (values: FormValues) => void;
+  onSubmit: (values: FormValues, selectedExamples?: ExtractedExample[], primaryRegister?: ExampleRegister | null) => void;
   onCancel: () => void;
 }) {
   const [values, setValues] = useState<FormValues>(() => ({
@@ -107,6 +109,30 @@ function AddWordForm({
   }));
   const [errors, setErrors] = useState<FormErrors>({});
   const [showSchedule, setShowSchedule] = useState(false);
+  const examples = initial.examples ?? [];
+  const [selected, setSelected] = useState<Set<ExampleRegister>>(() => new Set());
+  const [primary, setPrimary] = useState<ExampleRegister | null>(null);
+  const [edited, setEdited] = useState<Record<string, string>>(() =>
+    Object.fromEntries(examples.map((example) => [example.register, example.sentence])),
+  );
+
+  const toggleExample = (register: ExampleRegister, checked: boolean) => {
+    setSelected((previous) => {
+      const next = new Set(previous);
+      if (checked) next.add(register);
+      else next.delete(register);
+      return next;
+    });
+    if (!checked && primary === register) {
+      const remaining = [...selected].filter((item) => item !== register);
+      setPrimary(remaining.length > 0 ? remaining[0]! : null);
+    }
+    if (checked && primary === null) setPrimary(register);
+  };
+
+  const choosePrimary = (register: ExampleRegister) => {
+    if (selected.has(register)) setPrimary(register);
+  };
 
   const wordInput = useRef<HTMLInputElement>(null);
   const disabled = !meta.writesEnabled;
@@ -140,7 +166,13 @@ function AddWordForm({
       if (first) setTimeout(() => document.getElementById(`addword-${first}`)?.focus(), 0);
       return;
     }
-    onSubmit(values);
+    const selectedExamples = examples
+      .filter((example) => selected.has(example.register))
+      .map((example) => ({ ...example, sentence: (edited[example.register] ?? example.sentence).trim() }));
+    const primarySentence = primary !== null ? (edited[primary] ?? '').trim() : '';
+    const submitValues =
+      primarySentence === '' ? values : { ...values, example: primarySentence };
+    onSubmit(submitValues, selectedExamples, primary);
   };
 
   const onSubmitForm = (event: FormEvent) => {
@@ -181,6 +213,62 @@ function AddWordForm({
         masteryDefault={meta.defaults.mastery}
         wordInputRef={wordInput}
       />
+
+      {examples.length > 0 && (
+        <section className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
+          <p className="text-sm font-medium text-ink">Examples from this reply</p>
+          <p className="text-xs text-muted">Tick the ones to save. The primary becomes the word’s main example; the rest are saved as further examples.</p>
+          <ul className="m-0 flex list-none flex-col gap-3 p-0">
+            {examples.map((example) => {
+              const checked = selected.has(example.register);
+              return (
+                <li key={example.register} className="flex flex-col gap-1">
+                  <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-ink">
+                    <input
+                      type="checkbox"
+                      className="size-4 accent-[var(--accent)]"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={(event) => toggleExample(example.register, event.target.checked)}
+                    />
+                    <span>{example.label}</span>
+                    {checked && (
+                      <label className="ml-auto flex items-center gap-1 text-xs font-normal text-muted">
+                        <input
+                          type="radio"
+                          name="primary-example"
+                          className="size-3.5 accent-[var(--accent)]"
+                          checked={primary === example.register}
+                          disabled={disabled}
+                          onChange={() => choosePrimary(example.register)}
+                        />
+                        Primary
+                      </label>
+                    )}
+                  </label>
+                  {checked && (
+                    <textarea
+                      className="min-h-[3rem] w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink"
+                      value={edited[example.register] ?? example.sentence}
+                      disabled={disabled}
+                      onChange={(event) => setEdited((previous) => ({ ...previous, [example.register]: event.target.value }))}
+                    />
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {selected.size > 0 && (
+            <p className="text-xs text-muted">
+              Saving: {primary !== null ? 1 : 0} primary
+              {selected.size - (primary !== null ? 1 : 0) > 0
+                ? ` + ${selected.size - (primary !== null ? 1 : 0)} further`
+                : ''}
+              .
+            </p>
+          )}
+        </section>
+      )}
 
       {disabled && (
         <p className="text-sm text-muted">Saving is switched off for this workspace, so this word cannot be added here.</p>
