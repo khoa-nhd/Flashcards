@@ -1,5 +1,7 @@
 # Vocabulary
 
+**Website: <https://flashcards-gold-psi.vercel.app/>**
+
 A vocabulary learning app with flashcards and spaced review. Your words live
 in your own account on Supabase, so they are the same on every device you sign
 in on.
