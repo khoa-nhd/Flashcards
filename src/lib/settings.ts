@@ -18,8 +18,6 @@ const settingsSchema = z.object({
   dashboardDays: z.union([z.literal(14), z.literal(30), z.literal(90)]),
   /** Turns animations off regardless of the system setting. */
   reduceMotion: z.boolean(),
-  /** Ask how sure the reviewer is before showing each answer. */
-  askConfidence: z.boolean(),
   /** An extra pair of answer keys beside the arrow keys. */
   answerKeys: z.enum(['none', 'jk', 'fj', 'numbers']),
   /** The accent Listening practice asks the browser to read in. */
@@ -35,7 +33,6 @@ export const DEFAULT_SETTINGS: Settings = {
   bankPageSize: 50,
   dashboardDays: 30,
   reduceMotion: false,
-  askConfidence: false,
   answerKeys: 'none',
   speechLang: DEFAULT_SPEECH_LANGUAGE,
 };

@@ -1,12 +1,10 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { HINT_DURATION_MS } from '../config.js';
-import type { Confidence } from '../../shared/api.js';
 import { useSettings } from '../app-context.js';
 import { ANSWER_KEY_SETS, useReviewShortcuts } from '../hooks/useReviewShortcuts.js';
 import type { SessionController } from '../lib/session-controller.js';
 import { canUndo, currentCard, type SessionState } from '../lib/session-machine.js';
-import { ConfidencePrompt } from './ConfidencePrompt.js';
 import { Flashcard } from './Flashcard.js';
 import { RefusedAnswersPanel } from './RefusedAnswersPanel.js';
 import { ReviewControls } from './ReviewControls.js';
@@ -28,7 +26,7 @@ const ACTION_TEXT: Record<ReviewAction, string> = {
 };
 
 export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewScreenProps) {
-  const { askConfidence, answerKeys } = useSettings();
+  const { answerKeys } = useSettings();
   const card = currentCard(state);
   const cardId = card?.id ?? null;
   const { status } = state;
@@ -68,25 +66,9 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
     session.undo();
   }, [session]);
 
-  const rate = useCallback(
-    (level: Confidence) => {
-      setHintVisible(false);
-      session.rateConfidence(level);
-    },
-    [session],
-  );
-
-  // Asked only where the rating will be stored, and only before this card's answer has been seen.
-  const askingConfidence =
-    askConfidence &&
-    status === 'ready' &&
-    !state.revealed &&
-    state.meta?.capabilities.confidence === true &&
-    state.meta.writesEnabled;
-
   useReviewShortcuts(
-    { onFlip: flip, onGrade: grade, onUndo: undo, onConfidence: rate, onHelp },
-    { answerKeys, ratingConfidence: askingConfidence, enabled: !paused },
+    { onFlip: flip, onGrade: grade, onUndo: undo, onHelp },
+    { answerKeys, ratingConfidence: false, enabled: !paused },
   );
 
   // Keep keyboard focus somewhere useful: a control that was just clicked may
@@ -166,8 +148,6 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
           />
         </div>
       </div>
-
-      {askingConfidence && <ConfidencePrompt onRate={rate} />}
 
       <ReviewControls enabled={flipped} onGrade={grade} onBlocked={showFlipHint} />
 

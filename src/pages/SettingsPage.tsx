@@ -92,22 +92,6 @@ export function SettingsPage() {
               </span>
             </span>
           </label>
-          <label className="flex cursor-pointer items-start gap-3 text-sm">
-            <input
-              type="checkbox"
-              className="mt-0.5 size-4 accent-[var(--accent)]"
-              checked={settings.askConfidence}
-              onChange={(event) => set('askConfidence', event.target.checked)}
-            />
-            <span>
-              <span className="font-medium">Ask how sure I am before showing the answer</span>
-              <span className={`block ${HELP}`}>
-                Three buttons appear under each card (keys 1, 2 and 3). Your rating is saved beside your answer, and
-                Insights then shows how well your confidence matches your results. It never changes what an answer
-                does, and you can skip it by simply flipping the card.
-              </span>
-            </span>
-          </label>
           <div className="flex flex-col gap-1.5 sm:max-w-sm">
             <label htmlFor="answer-keys" className="text-sm font-medium">
               Extra answer keys
