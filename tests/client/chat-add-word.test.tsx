@@ -100,7 +100,7 @@ describe('the Add Word action', () => {
     );
     await user.type(within(thread()).getByLabelText('Message'), 'and proliferation?{Enter}');
 
-    await screen.findByText('Thinking…');
+    await screen.findByText('Assistant is thinking');
     const arriving = within(thread()).getAllByTestId('message-assistant').at(-1)!;
     expect(within(arriving).queryByRole('button', { name: 'Add Word' })).not.toBeInTheDocument();
 

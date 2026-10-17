@@ -11,6 +11,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog.js';
 import { Icon } from '../components/Icon.js';
 import { Markdown } from '../components/Markdown.js';
 import { Spinner } from '../components/Spinner.js';
+import { ThinkingIndicator } from '../components/ThinkingIndicator.js';
 import { BUTTON_PRIMARY } from '../components/ui.js';
 import { ApiError } from '../lib/api-client.js';
 import { readChatStream } from '../lib/chat-stream.js';
@@ -492,12 +493,11 @@ function MessageBubble({
         >
           {mine ? (
             message.content
-          ) : message.content === '' && pending ? (
-            <span className="flex items-center gap-2 text-muted">
-              <Spinner /> Thinking…
-            </span>
           ) : (
-            <Markdown content={message.content} />
+            <>
+              {pending && <ThinkingIndicator messageId={message.id} streaming={message.content !== ''} />}
+              {message.content !== '' && <Markdown content={message.content} />}
+            </>
           )}
         </div>
         {!mine && message.content !== '' && !pending && (

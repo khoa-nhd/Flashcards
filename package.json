@@ -18,7 +18,9 @@
     "test:watch": "vitest",
     "dev:mock": "vite --mode mock --port 5174",
     "supabase:import": "tsx scripts/supabase-import.ts",
-    "supabase:verify": "tsx scripts/supabase-verify.ts"
+    "supabase:verify": "tsx scripts/supabase-verify.ts",
+    "emoji:generate": "tsx scripts/generate-emoji-pool.ts",
+    "thinking:variety": "tsx scripts/thinking-variety.ts"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.4",

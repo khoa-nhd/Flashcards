@@ -194,6 +194,16 @@ kbd {
   }
 }
 
+.thinking-swap {
+  animation: thinking-swap 150ms ease-out;
+}
+
+@keyframes thinking-swap {
+  from {
+    opacity: 0;
+  }
+}
+
 .spinner {
   animation: spin 700ms linear infinite;
 }
@@ -210,6 +220,10 @@ kbd {
   }
 
   .card-enter {
+    animation: none;
+  }
+
+  .thinking-swap {
     animation: none;
   }
 
