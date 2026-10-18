@@ -187,6 +187,63 @@ function AddWordForm({
     }
   };
 
+  const exampleChooser =
+    examples.length > 0 ? (
+      <section className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
+        <p className="text-sm font-medium text-ink">Examples from this reply</p>
+        <p className="text-xs text-muted">Tick the ones to save. The primary becomes the word’s main example; the rest are saved as further examples.</p>
+        <ul className="m-0 flex list-none flex-col gap-3 p-0">
+          {examples.map((example) => {
+            const checked = selected.has(example.register);
+            return (
+              <li key={example.register} className="flex flex-col gap-1">
+                <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-ink">
+                  <input
+                    type="checkbox"
+                    className="size-4 accent-[var(--accent)]"
+                    checked={checked}
+                    disabled={disabled}
+                    onChange={(event) => toggleExample(example.register, event.target.checked)}
+                  />
+                  <span>{example.label}</span>
+                  {checked && (
+                    <label className="ml-auto flex items-center gap-1 text-xs font-normal text-muted">
+                      <input
+                        type="radio"
+                        name="primary-example"
+                        className="size-3.5 accent-[var(--accent)]"
+                        checked={primary === example.register}
+                        disabled={disabled}
+                        onChange={() => choosePrimary(example.register)}
+                      />
+                      Primary
+                    </label>
+                  )}
+                </label>
+                {checked && (
+                  <textarea
+                    className="min-h-[3rem] w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink"
+                    value={edited[example.register] ?? example.sentence}
+                    disabled={disabled}
+                    onChange={(event) => setEdited((previous) => ({ ...previous, [example.register]: event.target.value }))}
+                  />
+                )}
+              </li>
+            );
+          })}
+        </ul>
+        {selected.size > 0 && (
+          <p className="text-xs text-muted">
+            Saving: {primary !== null ? 1 : 0} primary
+            {selected.size - (primary !== null ? 1 : 0) > 0
+              ? ` + ${selected.size - (primary !== null ? 1 : 0)} further`
+              : ''}
+            .
+          </p>
+        )}
+      </section>
+    ) : null;
+
   return (
     <form onSubmit={onSubmitForm} noValidate className="mt-3 flex flex-col gap-4" aria-label="Add this word">
       <p className="text-sm text-muted">
@@ -212,63 +269,9 @@ function AddWordForm({
         similar={similar}
         masteryDefault={meta.defaults.mastery}
         wordInputRef={wordInput}
+        hideExample={examples.length > 0}
+        exampleSlot={exampleChooser}
       />
-
-      {examples.length > 0 && (
-        <section className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-3">
-          <p className="text-sm font-medium text-ink">Examples from this reply</p>
-          <p className="text-xs text-muted">Tick the ones to save. The primary becomes the word’s main example; the rest are saved as further examples.</p>
-          <ul className="m-0 flex list-none flex-col gap-3 p-0">
-            {examples.map((example) => {
-              const checked = selected.has(example.register);
-              return (
-                <li key={example.register} className="flex flex-col gap-1">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-ink">
-                    <input
-                      type="checkbox"
-                      className="size-4 accent-[var(--accent)]"
-                      checked={checked}
-                      disabled={disabled}
-                      onChange={(event) => toggleExample(example.register, event.target.checked)}
-                    />
-                    <span>{example.label}</span>
-                    {checked && (
-                      <label className="ml-auto flex items-center gap-1 text-xs font-normal text-muted">
-                        <input
-                          type="radio"
-                          name="primary-example"
-                          className="size-3.5 accent-[var(--accent)]"
-                          checked={primary === example.register}
-                          disabled={disabled}
-                          onChange={() => choosePrimary(example.register)}
-                        />
-                        Primary
-                      </label>
-                    )}
-                  </label>
-                  {checked && (
-                    <textarea
-                      className="min-h-[3rem] w-full rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink"
-                      value={edited[example.register] ?? example.sentence}
-                      disabled={disabled}
-                      onChange={(event) => setEdited((previous) => ({ ...previous, [example.register]: event.target.value }))}
-                    />
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-          {selected.size > 0 && (
-            <p className="text-xs text-muted">
-              Saving: {primary !== null ? 1 : 0} primary
-              {selected.size - (primary !== null ? 1 : 0) > 0
-                ? ` + ${selected.size - (primary !== null ? 1 : 0)} further`
-                : ''}
-              .
-            </p>
-          )}
-        </section>
-      )}
 
       {disabled && (
         <p className="text-sm text-muted">Saving is switched off for this workspace, so this word cannot be added here.</p>

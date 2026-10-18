@@ -3,7 +3,7 @@
  * "Add Word" dialog in chat. Both show the same words, hints and schedule
  * section, so a word entered either way looks the same as it is typed.
  */
-import type { KeyboardEvent, Ref } from 'react';
+import type { KeyboardEvent, ReactNode, Ref } from 'react';
 import { FIELD_LIMITS, type VocabularyEntry } from '../../shared/api.js';
 import { formatDate } from './badges.js';
 import { Field, describedBy } from './Field.js';
@@ -32,6 +32,10 @@ export interface VocabularyFieldsProps {
   /** What a new word's mastery starts at, shown under the mastery field. */
   masteryDefault: number;
   wordInputRef?: Ref<HTMLInputElement>;
+  /** Hides the "Example sentences" field (used where examples are chosen instead). */
+  hideExample?: boolean;
+  /** Rendered in place of the "Example sentences" field. */
+  exampleSlot?: ReactNode;
 }
 
 export function VocabularyFields({
@@ -48,6 +52,8 @@ export function VocabularyFields({
   hideSimilar = false,
   masteryDefault,
   wordInputRef,
+  hideExample = false,
+  exampleSlot,
 }: VocabularyFieldsProps) {
   const id = (field: string) => `${idPrefix}-${field}`;
 
@@ -132,19 +138,22 @@ export function VocabularyFields({
               disabled={disabled}
             />
           </Field>
-          <Field id={id('example')} label="Example sentences" error={errors.example}>
-            <textarea
-              id={id('example')}
-              rows={3}
-              className={TEXTAREA}
-              value={values.example}
-              onChange={(event) => onChange('example', event.target.value)}
-              onKeyDown={onSubmitModifiedEnter}
-              placeholder="A sentence that uses the word"
-              aria-describedby={describedBy(id('example'), null, errors.example)}
-              disabled={disabled}
-            />
-          </Field>
+          {!hideExample && (
+            <Field id={id('example')} label="Example sentences" error={errors.example}>
+              <textarea
+                id={id('example')}
+                rows={3}
+                className={TEXTAREA}
+                value={values.example}
+                onChange={(event) => onChange('example', event.target.value)}
+                onKeyDown={onSubmitModifiedEnter}
+                placeholder="A sentence that uses the word"
+                aria-describedby={describedBy(id('example'), null, errors.example)}
+                disabled={disabled}
+              />
+            </Field>
+          )}
+          {exampleSlot}
           <Field id={id('dateAdded')} label="Date added" error={errors.dateAdded}>
             <input
               id={id('dateAdded')}
