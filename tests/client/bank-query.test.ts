@@ -4,6 +4,7 @@ import {
   BANK_PRESETS,
   activePreset,
   bankQueryParams,
+  defaultSortDirection,
   filterEntries,
   hasActiveFilters,
   missingFields,
@@ -180,6 +181,14 @@ describe('sorting', () => {
   it('sorts by review date and puts unscheduled words last in both directions', () => {
     expect(names(sortEntries(words, 'reviewDate', 'asc'))).toEqual(['candid', 'Serendipity', 'alleviate', 'banal', 'zeal']);
     expect(names(sortEntries(words, 'reviewDate', 'desc')).at(-1)).toBe('zeal');
+  });
+
+  it('starts every weakness sort from the weakest and every addition sort from the newest', () => {
+    expect(defaultSortDirection('word')).toBe('asc');
+    expect(defaultSortDirection('mastery')).toBe('asc');
+    expect(defaultSortDirection('trueMastery')).toBe('asc');
+    expect(defaultSortDirection('reviewDate')).toBe('asc');
+    expect(defaultSortDirection('dateAdded')).toBe('desc');
   });
 });
 

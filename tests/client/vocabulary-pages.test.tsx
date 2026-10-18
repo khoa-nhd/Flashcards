@@ -382,8 +382,16 @@ describe('Vocabulary bank', () => {
     expect(header('Word')).toHaveAttribute('aria-sort', 'descending');
 
     await user.click(within(header('^Mastery$')).getByRole('button'));
-    expect(rowWords()).toEqual(['candid', 'alleviate', 'serendipity']);
+    // A weakness sort starts from the weakest: mastery lowest first.
+    expect(rowWords()).toEqual(['serendipity', 'alleviate', 'candid']);
+    expect(header('^Mastery$')).toHaveAttribute('aria-sort', 'ascending');
     expect(screen.getByLabelText('Sort by')).toHaveValue('mastery');
+
+    // Choosing a sort from the select uses the same rule, whatever the direction was.
+    await user.click(screen.getByRole('button', { name: /Sort direction/ }));
+    expect(rowWords()).toEqual(['candid', 'alleviate', 'serendipity']);
+    await user.selectOptions(screen.getByLabelText('Sort by'), 'reviewDate');
+    expect(rowWords()).toEqual(['serendipity', 'alleviate', 'candid']);
   });
 
   it('pages through a long list', async () => {

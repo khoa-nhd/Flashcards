@@ -167,6 +167,17 @@ export function filterEntries(entries: readonly VocabularyEntry[], query: BankQu
 
 const collator = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
 
+/**
+ * The direction a sort starts in when it is chosen: text reads best A to Z,
+ * additions are wanted newest first, and weakness — a low mastery or an early
+ * review date — is wanted first, so mastery and review date read from the
+ * weakest. Changing the sort to the direction already in use is a separate
+ * press of the direction control.
+ */
+export function defaultSortDirection(key: SortKey): SortDirection {
+  return key === 'dateAdded' ? 'desc' : 'asc';
+}
+
 /** Sorted copy. Empty values always go last, and ties fall back to the word so the order is stable. */
 export function sortEntries(
   entries: readonly VocabularyEntry[],

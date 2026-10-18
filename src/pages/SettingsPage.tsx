@@ -9,7 +9,7 @@ import { SchedulerSection } from '../components/SchedulerSection.js';
 import { SkippedNotice } from '../components/SkippedNotice.js';
 import { BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { ApiError } from '../lib/api-client.js';
-import { sortEntries } from '../lib/bank-query.js';
+import { defaultSortDirection, sortEntries } from '../lib/bank-query.js';
 import { downloadFile, toCsv, toJson } from '../lib/export.js';
 import { ROUTES } from '../lib/router.js';
 import type { Settings, SortKey } from '../lib/settings.js';
@@ -145,7 +145,13 @@ export function SettingsPage() {
               <select
                 className={INPUT}
                 value={settings.bankSort}
-                onChange={(event) => set('bankSort', event.target.value as SortKey)}
+                onChange={(event) => {
+                  // A newly chosen sort takes its natural direction too: weakest first for mastery
+                  // and review date. "Default direction" beside it can still override this.
+                  const key = event.target.value as SortKey;
+                  set('bankSort', key);
+                  set('bankDirection', defaultSortDirection(key));
+                }}
               >
                 {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
                   <option key={key} value={key}>

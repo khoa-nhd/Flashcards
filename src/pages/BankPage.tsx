@@ -15,6 +15,7 @@ import {
   STATUS_LABELS,
   activePreset,
   bankQueryParams,
+  defaultSortDirection,
   filterEntries,
   hasActiveFilters,
   paginate,
@@ -336,8 +337,8 @@ export function BankPage() {
 
   const sortBy = (key: SortKey) => {
     if (query.sort === key) update({ direction: query.direction === 'asc' ? 'desc' : 'asc' });
-    // Text reads best A to Z; dates and mastery are usually wanted newest or highest first.
-    else update({ sort: key, direction: key === 'word' ? 'asc' : 'desc' });
+    // A new sort starts in its own natural direction: weakest first for mastery and review date.
+    else update({ sort: key, direction: defaultSortDirection(key) });
   };
 
   const preset = today === null ? null : activePreset(query, today);
@@ -501,7 +502,11 @@ export function BankPage() {
                     <select
                       className={`${INPUT} w-auto`}
                       value={query.sort}
-                      onChange={(event) => update({ sort: event.target.value as SortKey })}
+                      onChange={(event) => {
+                        // The same rule as a column heading: a newly chosen sort starts weakest first.
+                        const key = event.target.value as SortKey;
+                        update({ sort: key, direction: defaultSortDirection(key) });
+                      }}
                     >
                       {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
                         <option key={key} value={key}>
