@@ -44,6 +44,25 @@ const messageOf = (error: unknown, fallback: string) => (error instanceof ApiErr
 
 const isMode = (value: string | null): value is AiMode => value === 'general' || value === 'vocabulary_expert';
 
+const LAST_MODE_KEY = 'vocabulary-review:chat-mode:v1';
+
+const readLastMode = (): AiMode | null => {
+  try {
+    const value = window.localStorage.getItem(LAST_MODE_KEY);
+    return isMode(value) ? value : null;
+  } catch {
+    return null;
+  }
+};
+
+const writeLastMode = (mode: AiMode) => {
+  try {
+    window.localStorage.setItem(LAST_MODE_KEY, mode);
+  } catch {
+    // Storage can be blocked; the choice then only lasts for this visit.
+  }
+};
+
 interface ListError {
   message: string;
   /** The server has no AI settings, so nothing here can work until it does. */
@@ -85,7 +104,7 @@ export function ChatPage() {
   const loaded = thread !== null && thread.id === conversationId ? thread : null;
   const current = loaded?.conversation ?? null;
   // An open conversation decides the mode; otherwise the address does.
-  const mode: AiMode = current?.mode ?? (isMode(queryMode) ? queryMode : 'general');
+  const mode: AiMode = current?.mode ?? (isMode(queryMode) ? queryMode : (readLastMode() ?? 'general'));
 
   const loadConversations = async () => {
     try {
@@ -249,24 +268,35 @@ export function ChatPage() {
         aria-label="Conversations"
         className={`${threadOpen ? 'hidden md:flex' : 'flex'} w-full min-w-0 shrink-0 flex-col border-line md:w-72 md:border-r`}
       >
-        <div className="flex items-center gap-2 border-b border-line p-3">
-          <label htmlFor="chat-mode" className="sr-only">
-            Assistant
-          </label>
-          <select
-            id="chat-mode"
-            value={mode}
-            onChange={(event) => open(null, event.target.value as AiMode)}
-            className="h-10 min-w-0 flex-1 cursor-pointer rounded-xl border border-line bg-surface px-3 text-sm font-medium text-ink"
-          >
-            <option value="general">{MODE_LABEL.general}</option>
-            <option value="vocabulary_expert">{MODE_LABEL.vocabulary_expert}</option>
-          </select>
+        <div className="flex flex-col gap-2 border-b border-line p-3">
+          <div role="radiogroup" aria-label="Assistant" className="flex flex-col gap-1">
+            {(['general', 'vocabulary_expert'] as AiMode[]).map((option) => (
+              <label
+                key={option}
+                className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition ${
+                  mode === option ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-surface text-ink hover:bg-line/40'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="chat-mode"
+                  value={option}
+                  checked={mode === option}
+                  onChange={() => {
+                    writeLastMode(option);
+                    open(null, option);
+                  }}
+                  className="size-4 accent-[var(--accent)]"
+                />
+                {MODE_LABEL[option]}
+              </label>
+            ))}
+          </div>
           <button
             type="button"
             onClick={() => void createConversation()}
             disabled={creating || listProblem?.unavailable === true}
-            className={`${BUTTON_PRIMARY} shrink-0 px-3`}
+            className={`${BUTTON_PRIMARY} w-full px-3`}
           >
             {creating ? <Spinner /> : <Icon name="add" className="size-4" />}
             New
