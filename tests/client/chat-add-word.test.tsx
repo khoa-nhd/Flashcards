@@ -116,9 +116,8 @@ describe('the Add Word dialog', () => {
     expect(within(dialog).getByLabelText(/^Word/)).toHaveValue('proliferation');
     expect(within(dialog).getByLabelText('Vietnamese meaning')).toHaveValue('sự gia tăng nhanh chóng');
     expect(within(dialog).getByLabelText('Definition')).toHaveValue('a rapid increase');
-    expect(within(dialog).getByLabelText('Example sentences')).toHaveValue(
-      'The proliferation of fake news worries educators.',
-    );
+    // Examples from the reply appear as checkboxes, not a single labeled field.
+    expect(within(dialog).getByText('Simple')).toBeInTheDocument();
   });
 
   it('says what the reply did not carry, and still needs a word', async () => {

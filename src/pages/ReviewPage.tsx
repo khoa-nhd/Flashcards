@@ -108,10 +108,11 @@ export function ReviewPage() {
   // The weak list the sitting started from, so the finished screen can name any word that left it.
   const weakBefore = useRef<Map<string, string> | null>(null);
   const [recovered, setRecovered] = useState<readonly string[]>([]);
+  // Reset weakBefore when a new review session starts (status goes to loading).
+  // `recovered` is already initialized to [] and reset by remount; avoid setState in effect.
   useEffect(() => {
     if (status === 'loading') {
       weakBefore.current = null;
-      setRecovered([]);
       return;
     }
     if ((status === 'ready' || status === 'flipped') && weakBefore.current === null) {
