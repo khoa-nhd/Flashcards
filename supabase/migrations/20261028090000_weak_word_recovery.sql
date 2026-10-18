@@ -4,7 +4,8 @@
 -- the recovery rule can be worked out from saved answers alone: how many
 -- points that day is worth, how many times it was forgotten, and what the last
 -- answer was. Answers taken back with Undo are left out, as everywhere else.
--- Run once, after version 13.
+-- Run once, after version 13. `create or replace` so that a run the SQL Editor
+-- stopped partway can simply be run again.
 
 create or replace function public.app_schema_version() returns integer
 language sql
@@ -13,7 +14,7 @@ security invoker
 set search_path = ''
 as $$ select 14 $$;
 
-create function public.weak_word_days()
+create or replace function public.weak_word_days()
 returns table (
   vocabulary_id uuid,
   day date,

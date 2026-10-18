@@ -210,6 +210,7 @@ in the Supabase dashboard (SQL Editor → paste the file → Run):
 | `20261025090000_vocabulary_analysis.sql` | 11 | The structured analysis Vocabulary Expert stores for a word. |
 | `20261026090000_ai_message_saved.sql` | 12 | The link from a Vocabulary Expert reply to the word it was added to, so "Added" survives a reload. Changes nothing until a word is added from the chat. |
 | `20261027090000_review_counting.sql` | 13 | Per-account choice of whether a review counts towards mastery. Changes nothing until an account turns it off. |
+| `20261028090000_weak_word_recovery.sql` | 14 | Weak-word recovery: practice counts, a clean slate and overdue forgiveness. |
 
 Each file only adds things; none changes or removes existing data. The app
 checks the database version and keeps working on an older one, with the newer
