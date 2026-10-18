@@ -293,7 +293,7 @@ export function ReviewPage() {
         <ShortcutHelp
           answerKeys={settings.answerKeys}
           undo={state.meta?.capabilities.undo === true}
-          confidence={settings.askConfidence && state.meta?.capabilities.confidence === true && state.meta.writesEnabled}
+          confidence={false}
           onClose={() => setHelpOpen(false)}
         />
       )}

@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { HINT_DURATION_MS } from '../config.js';
 import { useSettings } from '../app-context.js';

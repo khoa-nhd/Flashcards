@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 /**
- * Phase 4 in the browser: narrowing a review, the daily goal, confidence
- * ratings and keyboard shortcuts. None of them may change what is due or what
+ * Phase 4 in the browser: narrowing a review, the daily goal, answer keys
+ * and keyboard shortcuts. None of them may change what is due or what
  * an answer does, so several tests here are about what does NOT happen.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
@@ -58,12 +58,6 @@ type Saves = ReturnType<typeof createFakeApi>['saves'];
 async function save(saves: Saves, at = 0, result = applied) {
   await waitFor(() => expect(saves.length).toBeGreaterThanOrEqual(at + 1));
   await act(async () => saves[at]?.resolve(result));
-}
-
-/** Waits for the outbox to send the answer at `at`, then refuses it. */
-async function refuse(saves: Saves, at = 0, error: unknown) {
-  await waitFor(() => expect(saves.length).toBeGreaterThanOrEqual(at + 1));
-  await act(async () => saves[at]?.reject(error));
 }
 
 describe('choosing what to review', () => {
@@ -366,14 +360,14 @@ describe('the shortcut list', () => {
     expect(list.queryByText(/how sure you are/)).not.toBeInTheDocument();
   });
 
-  it('shows the extra answer keys and the confidence keys when they are in use', async () => {
-    await open('/review', { cards: [card(1)], queue: RATED, settings: { answerKeys: 'fj', askConfidence: true } });
+  it('shows the extra answer keys when they are in use', async () => {
+    await open('/review', { cards: [card(1)], queue: RATED, settings: { answerKeys: 'fj' } });
     await screen.findByTestId('flashcard');
     press('?', { shiftKey: true });
     const list = within(dialog()!);
     expect(list.getByRole('row', { name: /→/ })).toHaveTextContent('→J');
     expect(list.getByRole('row', { name: /←/ })).toHaveTextContent('←F');
-    expect(list.getByRole('row', { name: /^1/ })).toHaveTextContent('how sure you are');
+    expect(list.queryByText(/how sure you are/)).not.toBeInTheDocument();
   });
 
   it('leaves out Undo where an answer cannot be taken back', async () => {
@@ -469,131 +463,6 @@ describe('extra answer keys', () => {
     press('2', { repeat: true });
     await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     expect(api.submitAction).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('rating confidence before the answer', () => {
-  const prompt = () => screen.queryByRole('group', { name: 'How sure are you that you know it?' });
-  const asking = { queue: RATED, settings: { askConfidence: true } };
-
-  it('is not asked unless switched on', async () => {
-    await open('/review', { cards: [card(1)], queue: RATED });
-    await screen.findByTestId('flashcard');
-    expect(prompt()).not.toBeInTheDocument();
-  });
-
-  it('is not asked where the rating would not be stored', async () => {
-    await open('/review', { cards: [card(1)], settings: { askConfidence: true } });
-    await screen.findByTestId('flashcard');
-    expect(prompt()).not.toBeInTheDocument();
-  });
-
-  it('is not asked in a preview that saves nothing', async () => {
-    await open('/review', { cards: [card(1)], queue: { ...RATED, writesEnabled: false }, settings: { askConfidence: true } });
-    await screen.findByTestId('flashcard');
-    expect(prompt()).not.toBeInTheDocument();
-  });
-
-  it('shows the answer when a level is chosen, and sends that level with the answer', async () => {
-    const { api, user } = await open('/review', { cards: [card(1), card(2)], ...asking });
-    await screen.findByTestId('flashcard');
-    expect(isFlipped()).toBe(false);
-    await user.click(within(prompt()!).getByRole('button', { name: /High confidence/ }));
-
-    expect(isFlipped()).toBe(true);
-    expect(prompt()).not.toBeInTheDocument();
-    press('ArrowLeft');
-    // Sure, and wrong: both facts are sent, and neither changes the other.
-    await waitFor(() => expect(lastRequest(api)).toMatchObject({ pageId: card(1).id, action: 'not_remember', confidence: 3 }));
-  });
-
-  it('takes the keys 1, 2 and 3', async () => {
-    const { api } = await open('/review', { cards: [card(1), card(2)], ...asking });
-    await screen.findByTestId('flashcard');
-    press('2');
-    expect(isFlipped()).toBe(true);
-    press('ArrowRight');
-    await waitFor(() => expect(lastRequest(api)).toMatchObject({ action: 'remember', confidence: 2 }));
-  });
-
-  it('can be skipped by flipping the card, and then nothing is sent for it', async () => {
-    const { api } = await open('/review', { cards: [card(1), card(2)], ...asking });
-    await screen.findByTestId('flashcard');
-    press(' ');
-    press('ArrowRight');
-    await waitFor(() => expect(lastRequest(api)).toMatchObject({ action: 'remember' }));
-    expect(lastRequest(api)).not.toHaveProperty('confidence');
-  });
-
-  it('cannot be given once the answer has been seen', async () => {
-    const { api } = await open('/review', { cards: [card(1), card(2)], ...asking });
-    await screen.findByTestId('flashcard');
-    press(' ');
-    press(' ');
-    // Back on the front, but the answer has been on screen: a rating now would be hindsight.
-    expect(isFlipped()).toBe(false);
-    expect(prompt()).not.toBeInTheDocument();
-    press('3');
-    expect(isFlipped()).toBe(false);
-    press(' ');
-    press('ArrowRight');
-    await waitFor(() => expect(lastRequest(api)).toMatchObject({ action: 'remember' }));
-    expect(lastRequest(api)).not.toHaveProperty('confidence');
-  });
-
-  it('is asked afresh for the next card', async () => {
-    const { api, saves } = await open('/review', { cards: [card(1), card(2)], ...asking });
-    await screen.findByTestId('flashcard');
-    press('3');
-    press('ArrowRight');
-    await save(saves, 0);
-
-    expect(prompt()).toBeInTheDocument();
-    press(' ');
-    press('ArrowRight');
-    await waitFor(() => expect(lastRequest(api)).toMatchObject({ pageId: card(2).id }));
-    expect(lastRequest(api)).not.toHaveProperty('confidence');
-  });
-
-  it('repeats the same rating when a refused save is retried', async () => {
-    const { api, saves, user } = await open('/review', { cards: [card(1), card(2)], ...asking });
-    await screen.findByTestId('flashcard');
-    press('1');
-    press('ArrowRight');
-    await refuse(saves, 0, new ApiError('conflict', 'This card was changed after it was loaded.', 409));
-    await user.click(await screen.findByRole('button', { name: 'Retry' }));
-    await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(2));
-    const [first, second] = api.submitAction.mock.calls.map(([request]) => request);
-    expect(second).toEqual(first);
-    expect(second).toMatchObject({ confidence: 1 });
-  });
-
-  it('is not asked again for a card brought back by Undo', async () => {
-    const { saves } = await open('/review', { cards: [card(1), card(2)], ...asking });
-    await screen.findByTestId('flashcard');
-    press('3');
-    press('ArrowRight');
-    await save(saves, 0);
-    await act(async () => {
-      press('u');
-    });
-    expect(await screen.findByText(/Card 1 of 2: word-1\./)).toBeInTheDocument();
-    expect(prompt()).not.toBeInTheDocument();
-  });
-
-  it('gives the number keys to the rating first when they are also answer keys', async () => {
-    const { api } = await open('/review', {
-      cards: [card(1), card(2)],
-      queue: RATED,
-      settings: { askConfidence: true, answerKeys: 'numbers' },
-    });
-    await screen.findByTestId('flashcard');
-    press('1');
-    // That was the rating, which showed the answer; it was not "Not remember".
-    expect(api.submitAction).not.toHaveBeenCalled();
-    expect(isFlipped()).toBe(true);
-    press('2');
-    await waitFor(() => expect(lastRequest(api)).toMatchObject({ action: 'remember', confidence: 1 }));
   });
 });
 
@@ -746,16 +615,14 @@ describe('the daily goal in Settings', () => {
 describe('review preferences in Settings', () => {
   it('are kept in the browser, and switch the review behaviour on', async () => {
     const { store, user } = await open('/settings');
-    await user.click(await screen.findByLabelText(/Ask how sure I am before showing the answer/));
     await user.selectOptions(screen.getByLabelText('Extra answer keys'), 'fj');
-    expect(store.getState()).toMatchObject({ askConfidence: true, answerKeys: 'fj' });
+    expect(store.getState()).toMatchObject({ answerKeys: 'fj' });
   });
 
   it('start switched off', async () => {
     const { store } = await open('/settings');
-    expect(await screen.findByLabelText(/Ask how sure I am/)).not.toBeChecked();
     expect(screen.getByLabelText('Extra answer keys')).toHaveValue('none');
-    expect(store.getState()).toMatchObject({ askConfidence: false, answerKeys: 'none' });
+    expect(store.getState()).toMatchObject({ answerKeys: 'none' });
   });
 
   it('count reviews towards mastery until told otherwise', async () => {
