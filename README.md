@@ -27,7 +27,6 @@ Reference documents:
 - [docs/metrics.md](docs/metrics.md) — the exact definition of every number shown.
 - [docs/supabase-migration.md](docs/supabase-migration.md) — the record of the move from Notion to Supabase.
 - [docs/import-and-export.md](docs/import-and-export.md) — importing a list, the export format, and backup and recovery.
-- [docs/upgrade-plan.md](docs/upgrade-plan.md) — the plan for turning this into a fuller learning system, and how far it has got.
 - [docs/offline-mode-design.md](docs/offline-mode-design.md) — how the app keeps working without a connection: the outbox, what is offline and what is not.
 
 ## Try it with sample data
@@ -601,8 +600,6 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 - Further examples are for reference: the flashcard and fill in the blank use
   the word's own example.
 
-[docs/upgrade-plan.md](docs/upgrade-plan.md) lists what each stage built and
-what it left out.
 
 ## If something goes wrong
 
