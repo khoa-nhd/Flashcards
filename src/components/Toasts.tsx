@@ -17,8 +17,8 @@ export function Toasts() {
       {items.map((toast) => (
         <div
           key={toast.id}
-          className={`pointer-events-auto flex max-w-md items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-lg ${
-            toast.tone === 'error' ? 'border-bad/40 bg-bad-soft text-bad-ink' : 'border-line bg-surface text-ink'
+          className={`pointer-events-auto flex max-w-md items-center gap-3 rounded-xl border px-4 py-3 text-sm shadow-[0_20px_50px_-24px_rgba(0,0,0,0.9)] ${
+            toast.tone === 'error' ? 'border-bad/40 bg-bad-soft text-bad-ink' : 'border-line-strong bg-surface text-ink'
           }`}
         >
           <span className="min-w-0 flex-1">{toast.message}</span>

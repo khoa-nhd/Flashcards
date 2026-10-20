@@ -82,17 +82,17 @@ describe('navigation', () => {
 
   it('loads the vocabulary once, however many tabs are visited', async () => {
     const { api, user } = await open('/');
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     for (const name of ['Vocabulary bank', 'Calendar', 'Insights', 'Settings', 'Add vocabulary', 'Dashboard']) {
       await user.click(nav().getByRole('link', { name: new RegExp(`^${name}`) }));
     }
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     expect(api.fetchVocabulary).toHaveBeenCalledTimes(1);
   });
 
   it('shows how many words are ready to review beside the Review tab', async () => {
     await open('/');
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     expect(nav().getByRole('link', { name: /^Review/ })).toHaveTextContent('3 ready to review');
   });
 
@@ -145,7 +145,7 @@ describe('review within the app', () => {
     expect(screen.getByText(/Card 2 of 3: word-2\./)).toBeInTheDocument();
 
     await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     await user.click(nav().getByRole('link', { name: /^Review/ }));
 
     // Same session, same place: the first card does not come back.
@@ -158,7 +158,7 @@ describe('review within the app', () => {
     await screen.findByTestId('flashcard');
     press(' ');
     await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     press('ArrowRight');
     press('ArrowLeft');
     expect(api.submitAction).not.toHaveBeenCalled();
@@ -166,7 +166,7 @@ describe('review within the app', () => {
 
   it('re-reads the vocabulary after an answer was saved, so the numbers are current', async () => {
     const { api, saves, user } = await open('/', { cards: [card(1)] });
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     expect(api.fetchVocabulary).toHaveBeenCalledTimes(1);
 
     await user.click(nav().getByRole('link', { name: /^Review/ }));
@@ -185,7 +185,7 @@ describe('review within the app', () => {
     press(' ');
     press('ArrowLeft');
     await settle(saves);
-    expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /words?, done\./ })).toBeInTheDocument();
 
     await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
     await user.click(nav().getByRole('link', { name: /^Review/ }));
@@ -196,7 +196,7 @@ describe('review within the app', () => {
 describe('Dashboard', () => {
   it('shows each metric from the real records', async () => {
     await open('/');
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     expect(tileValue('Total vocabulary')).toBe('7');
     expect(tileValue('Mastered')).toBe('2');
     expect(tileValue('Learning')).toBe('5');
@@ -210,7 +210,7 @@ describe('Dashboard', () => {
 
   it('never counts a word in two review states', async () => {
     await open('/');
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     const sum = ['Due today', 'Overdue', 'Upcoming'].reduce((total, label) => total + Number(tileValue(label)), 0);
     expect(sum).toBe(Number(tileValue('Learning')));
     expect(Number(tileValue('Mastered')) + Number(tileValue('Learning'))).toBe(Number(tileValue('Total vocabulary')));
@@ -218,8 +218,8 @@ describe('Dashboard', () => {
 
   it('leads with what is ready to review and how to start', async () => {
     await open('/');
-    const ready = (await screen.findByText('Ready to review')).closest('section')!;
-    expect(ready).toHaveTextContent('3');
+    const ready = await screen.findByRole('region', { name: 'Ready to review' });
+    expect(within(ready).getByRole('heading', { name: '3 words ready to review.' })).toBeInTheDocument();
     expect(ready).toHaveTextContent('1 overdue, 2 due today.');
     expect(within(ready).getByRole('link', { name: /Start review/ })).toHaveAttribute('href', '/review');
     expect(within(ready).getByRole('link', { name: /Add vocabulary/ })).toHaveAttribute('href', '/add');
@@ -273,7 +273,7 @@ describe('Dashboard', () => {
 
   it('links each quick action to a working, filtered destination', async () => {
     const { user } = await open('/');
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     expect(screen.getByRole('link', { name: 'View due today' })).toHaveAttribute('href', '/bank?status=due_today');
     expect(screen.getByRole('link', { name: 'Browse mastered' })).toHaveAttribute('href', '/bank?status=mastered');
 
@@ -285,7 +285,7 @@ describe('Dashboard', () => {
 
   it('handles an empty vocabulary without inventing numbers', async () => {
     await open('/', { entries: [] });
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     expect(tileValue('Total vocabulary')).toBe('0');
     expect(screen.getByText(/of 0 mastered/)).toBeInTheDocument();
     expect(screen.getByText('No words have a Date Added yet.')).toBeInTheDocument();
@@ -293,7 +293,7 @@ describe('Dashboard', () => {
 
   it('refreshes on request', async () => {
     const { api, user } = await open('/');
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     await user.click(screen.getByRole('button', { name: 'Refresh' }));
     await waitFor(() => expect(api.fetchVocabulary).toHaveBeenCalledTimes(2));
   });

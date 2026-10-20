@@ -26,9 +26,10 @@ const COPY: Record<Mode, { title: string; lead: string; submit: string }> = {
   },
 };
 
-const INPUT = 'h-12 rounded-xl border border-line bg-surface px-3 text-base font-normal';
+const INPUT =
+  'h-12 rounded-xl border border-line-strong bg-paper px-3 text-base font-normal transition-colors focus:border-accent';
 const SUBMIT =
-  'flex h-12 cursor-pointer items-center justify-center gap-2 rounded-2xl bg-accent font-semibold text-white disabled:cursor-wait disabled:opacity-70 dark:text-paper';
+  'flex h-12 cursor-pointer items-center justify-center gap-2 rounded-xl bg-accent font-semibold text-on-accent transition hover:bg-accent-hover disabled:cursor-wait disabled:opacity-70 focus-visible:outline-on-accent';
 // Padded so the links are comfortable to tap on a phone.
 const TEXT_BUTTON = 'cursor-pointer rounded-lg px-1 py-2 font-semibold text-accent underline-offset-2 hover:underline';
 
@@ -90,11 +91,15 @@ export function AuthScreen({ auth, notice = null, recovering = false }: AuthScre
   };
 
   return (
-    <form onSubmit={submit} className="mx-auto flex h-full w-full max-w-sm flex-col justify-center gap-4 px-6" noValidate>
+    <form
+      onSubmit={submit}
+      className="flex w-full max-w-sm flex-col gap-5 rounded-2xl border border-line bg-surface p-6 sm:p-7"
+      noValidate
+    >
       <div>
-        <p className="font-serif text-lg font-semibold tracking-tight text-muted">Vocabulary</p>
-        <h1 className="mt-1 font-serif text-3xl font-semibold">{copy.title}</h1>
-        <p className="mt-2 text-muted">{copy.lead}</p>
+        <p className="text-sm font-semibold tracking-[-0.01em] text-faint">Vocabulary</p>
+        <h1 className="mt-2 font-serif text-[2rem] font-semibold leading-tight tracking-[-0.02em]">{copy.title}</h1>
+        <p className="mt-2 text-sm leading-relaxed text-muted">{copy.lead}</p>
       </div>
 
       {notice !== null && info === null && error === null && (

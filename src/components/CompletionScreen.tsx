@@ -60,6 +60,7 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
   const notRemembered = summary?.notRemembered ?? tally.notRemember;
   const reviewed = summary?.reviewed ?? answered;
   const accuracy = reviewed === 0 ? null : Math.round((remembered / reviewed) * 100);
+  const showAccuracy = accuracy !== null && !preview;
 
   // An empty queue has three different causes; say which one this is.
   let emptyTitle = 'Nothing is due right now';
@@ -100,21 +101,12 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
   const lastWord = state.lastSaved === null ? null : (state.cards[state.lastSaved.index]?.word ?? null);
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-md flex-col items-center justify-center gap-6 px-6 text-center">
-      <div
-        aria-hidden="true"
-        className="flex size-16 items-center justify-center rounded-full bg-good-soft text-good-ink"
-      >
-        <svg viewBox="0 0 24 24" className="size-8" fill="none" stroke="currentColor" strokeWidth="2.5">
-          <path d="m5 12.5 4.5 4.5L19 7.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-
-      <div>
-        <h2 className="font-serif text-3xl font-semibold">
-          {total === 0 ? emptyTitle : 'Review complete'}
+    <div className="mx-auto flex min-h-full w-full max-w-lg flex-col items-center justify-center gap-6 px-6 py-10 text-center">
+      <div className="w-full">
+        <h2 className="font-serif text-[2.25rem] font-semibold leading-[1.08] tracking-[-0.025em]">
+          {total === 0 ? emptyTitle : `${total} ${total === 1 ? 'word' : 'words'}, done.`}
         </h2>
-        <p className="mt-2 text-muted">
+        <p className="mx-auto mt-3 max-w-md text-sm leading-relaxed text-muted">
           {total === 0
             ? emptyDetail
             : `You went through ${total} ${total === 1 ? 'card' : 'cards'} in this session.`}
@@ -124,54 +116,55 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
       </div>
 
       {total > 0 && (
-        <dl className="grid w-full grid-cols-2 gap-3" aria-label="Session summary">
-          <div className="rounded-2xl bg-good-soft px-4 py-3 text-good-ink">
-            <dd className="text-2xl font-semibold tabular-nums">{remembered}</dd>
-            <dt className="text-sm">Remembered</dt>
-          </div>
-          <div className="rounded-2xl bg-bad-soft px-4 py-3 text-bad-ink">
-            <dd className="text-2xl font-semibold tabular-nums">{notRemembered}</dd>
-            <dt className="text-sm">Not remembered</dt>
-          </div>
-          {accuracy !== null && !preview && (
-            <div className="rounded-2xl border border-line px-4 py-3">
-              <dd className="text-2xl font-semibold tabular-nums">{accuracy}%</dd>
-              <dt className="text-sm text-muted">
-                Accuracy <span className="whitespace-nowrap">({remembered} of {reviewed})</span>
+        <div className="w-full">
+          <dl
+            className={`grid divide-x divide-line overflow-hidden rounded-2xl border border-line bg-surface text-center ${
+              showAccuracy ? 'grid-cols-3' : 'grid-cols-2'
+            }`}
+            aria-label="Session summary"
+          >
+            <div className="px-3 py-4">
+              <dd className="font-serif text-[1.75rem] font-semibold leading-none tabular-nums text-ink">{remembered}</dd>
+              <dt className="mt-2 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint">Remembered</dt>
+            </div>
+            <div className="px-3 py-4">
+              <dd className="font-serif text-[1.75rem] font-semibold leading-none tabular-nums text-ink">{notRemembered}</dd>
+              <dt className="mt-2 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint">
+                Not remembered
               </dt>
             </div>
-          )}
-          {summary !== null && summary.timedReviews > 0 && (
-            <div className="rounded-2xl border border-line px-4 py-3">
-              <dd className="text-2xl font-semibold tabular-nums">{formatDuration(summary.durationMs)}</dd>
-              <dt className="text-sm text-muted">Time on cards</dt>
-            </div>
-          )}
-          {summary !== null && summary.reviewed > 0 && (
-            <div className="col-span-2 rounded-2xl border border-line px-4 py-3 text-sm text-muted">
-              <dt className="sr-only">New and reviewed before</dt>
-              <dd>
-                <span className="font-semibold text-ink tabular-nums">{summary.firstTime}</span> reviewed for the first
-                time · <span className="font-semibold text-ink tabular-nums">{summary.seenBefore}</span> reviewed before
+            {showAccuracy && (
+              <div className="px-3 py-4">
+                <dd className="font-serif text-[1.75rem] font-semibold leading-none tabular-nums text-ink">{accuracy}%</dd>
+                <dt className="mt-2 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint">Accuracy</dt>
+              </div>
+            )}
+          </dl>
+
+          <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 text-xs text-muted">
+            {summary !== null && summary.timedReviews > 0 && (
+              <span>{formatDuration(summary.durationMs)} on cards</span>
+            )}
+            {summary !== null && summary.reviewed > 0 && (
+              <span>
+                <span className="font-semibold tabular-nums text-ink">{summary.firstTime}</span> first time ·{' '}
+                <span className="font-semibold tabular-nums text-ink">{summary.seenBefore}</span> reviewed before
                 {summary.undone > 0 && (
                   <>
                     {' '}
-                    · <span className="font-semibold text-ink tabular-nums">{summary.undone}</span> undone
+                    · <span className="font-semibold tabular-nums text-ink">{summary.undone}</span> undone
                   </>
                 )}
-              </dd>
-            </div>
-          )}
-          {tally.skipped > 0 && (
-            <div className="col-span-2 rounded-2xl bg-warn-soft px-4 py-3 text-warn-ink">
-              <dd className="text-2xl font-semibold tabular-nums">{tally.skipped}</dd>
-              <dt className="text-sm">Not saved, so left out of the counts</dt>
-            </div>
-          )}
-        </dl>
+              </span>
+            )}
+            {tally.skipped > 0 && (
+              <span className="text-warn-ink">{tally.skipped} not saved, so left out of the counts</span>
+            )}
+          </div>
+        </div>
       )}
 
-      {summary !== null && <p className="-mt-3 text-xs text-muted">These are the answers that were saved.</p>}
+      {summary !== null && <p className="-mt-3 text-xs text-faint">These are the answers that were saved.</p>}
 
       {!counting && reviewed > 0 && (
         <p className="w-full rounded-2xl border border-line px-4 py-3 text-left text-sm text-muted">
@@ -223,7 +216,7 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
           type="button"
           autoFocus
           onClick={onReload}
-          className="h-12 cursor-pointer rounded-2xl bg-accent px-6 font-semibold text-white transition active:scale-[0.98] dark:text-paper"
+          className="h-12 cursor-pointer rounded-xl bg-accent px-6 font-semibold text-on-accent transition hover:bg-accent-hover active:scale-[0.98] focus-visible:outline-on-accent"
         >
           Check for more cards
         </button>
@@ -232,7 +225,7 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
             type="button"
             onClick={onUndo}
             disabled={!canUndo(state)}
-            className="h-11 cursor-pointer rounded-2xl border border-line px-6 text-sm font-semibold transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-60"
+            className="h-11 cursor-pointer rounded-xl border border-line-strong px-6 text-sm font-semibold transition active:scale-[0.98] disabled:cursor-wait disabled:opacity-60"
           >
             {state.undoing ? 'Undoing…' : `Undo the last answer${lastWord === null ? '' : ` (${lastWord})`}`}
           </button>
@@ -240,7 +233,7 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
         {focus !== null && (
           <Link
             to={ROUTES.review}
-            className="flex h-11 items-center justify-center rounded-2xl border border-line px-6 text-sm font-semibold"
+            className="flex h-11 items-center justify-center rounded-xl border border-line-strong px-6 text-sm font-semibold"
           >
             Review everything due
           </Link>

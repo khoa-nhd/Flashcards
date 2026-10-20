@@ -59,10 +59,10 @@ export function ConfirmDialog({
       onClick={(event) => {
         if (event.target === dialog.current && !busy) onCancel();
       }}
-      className="m-auto w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/40"
+      className="m-auto w-[min(26rem,calc(100vw-2rem))] rounded-2xl border border-line-strong bg-surface p-0 text-ink shadow-[0_30px_80px_-40px_rgba(0,0,0,0.95)] backdrop:bg-scrim"
     >
       <div className="p-5">
-        <h2 id="confirm-dialog-title" className="text-lg font-semibold tracking-tight">
+        <h2 id="confirm-dialog-title" className="font-serif text-xl font-semibold tracking-tight">
           {title}
         </h2>
         <div className="mt-2 text-sm text-muted">{children}</div>

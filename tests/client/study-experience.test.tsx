@@ -251,7 +251,7 @@ describe('counting towards mastery', () => {
     await user.click(headerSwitch());
     await answerOne(api, 1);
 
-    expect(await screen.findByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /words?, done\./ })).toBeInTheDocument();
     expect(screen.getByText(/Counting towards mastery was off/)).toBeInTheDocument();
   });
 
@@ -260,7 +260,7 @@ describe('counting towards mastery', () => {
     await screen.findByTestId('flashcard');
     await answerOne(api, 1);
 
-    expect(await screen.findByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: /words?, done\./ })).toBeInTheDocument();
     expect(screen.queryByText(/Counting towards mastery was off/)).not.toBeInTheDocument();
   });
 });
@@ -680,7 +680,7 @@ describe('the daily goal on the Dashboard', () => {
 
   it('is left out where a goal cannot be kept', async () => {
     await open('/', { plan: { available: false } });
-    await screen.findByText('Ready to review');
+    await screen.findByRole('region', { name: 'Ready to review' });
     expect(screen.queryByRole('region', { name: 'Daily goal' })).not.toBeInTheDocument();
   });
 
@@ -689,8 +689,8 @@ describe('the daily goal on the Dashboard', () => {
       plan: { goal: { reviews: 1, minutes: null }, done: { reviews: 9, durationMs: 0 }, due: { total: 2, overdue: 0 } },
     });
     await goalRegion();
-    const ready = screen.getByText('Ready to review').closest('section')!;
-    expect(within(ready).getByText('2')).toBeInTheDocument();
+    const ready = screen.getByRole('region', { name: 'Ready to review' });
+    expect(within(ready).getByRole('heading', { name: '2 words ready to review.' })).toBeInTheDocument();
     expect(within(ready).getByRole('link', { name: /Start review/ })).toHaveAttribute('href', '/review');
   });
 });
@@ -748,7 +748,7 @@ describe('the goal at the end of a session', () => {
     press(' ');
     press('ArrowRight');
     await save(saves, 0);
-    expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /words?, done\./ })).toBeInTheDocument();
     expect(api.fetchPlan).not.toHaveBeenCalled();
     expect(screen.queryByRole('group', { name: 'Daily goal' })).not.toBeInTheDocument();
   });

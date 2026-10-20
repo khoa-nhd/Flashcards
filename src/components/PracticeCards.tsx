@@ -46,7 +46,7 @@ export interface PracticeCardProps {
   speechLang?: string;
 }
 
-const PROMPT = 'rounded-3xl border border-line bg-surface px-6 py-8 text-center shadow-[0_1px_2px_rgb(0_0_0/0.04)]';
+const PROMPT = 'rounded-2xl border border-line bg-surface px-6 py-8 text-center shadow-[0_30px_70px_-45px_rgba(0,0,0,0.9)]';
 const KEY_HINT = 'hidden rounded border border-current/30 px-1.5 text-xs keyboard:inline';
 
 const typing = (target: EventTarget | null) =>

@@ -150,7 +150,7 @@ function AccountApp({
   if (state.status === 'loading') return <Splash />;
   if (state.status === 'signed_out' || state.status === 'recovering') {
     return (
-      <div className="h-dvh">
+      <div className="pool grid h-dvh place-items-center px-4">
         <AuthScreen
           key={state.status}
           auth={auth}

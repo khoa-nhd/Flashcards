@@ -3,40 +3,44 @@
 /* Shown only where a physical keyboard is likely (hover + fine pointer). */
 @custom-variant keyboard (@media (hover: hover) and (pointer: fine));
 
-:root {
-  color-scheme: light dark;
-
-  --paper: #f4f2ec;
-  --surface: #ffffff;
-  --surface-back: #eef1fb;
-  --ink: #1c2029;
-  --muted: #5d6675;
-  --line: #e2dfd5;
-  --accent: #4453c7;
-  --accent-soft: #e4e8fa;
-
-  --good: #17794f;
-  --good-soft: #e1f3ea;
-  --good-ink: #0d5a3a;
-  --bad: #b93a25;
-  --bad-soft: #fbe9e5;
-  --bad-ink: #8c2817;
-  --warn-soft: #fbf1d9;
-  --warn-ink: #73500a;
-}
-
 /*
- * Calendar intensity: one hue, light to dark, each step paired with a text
- * colour that stays readable on it. In dark mode the ramp runs the other way
- * (more is brighter), chosen for the dark surface rather than inverted.
+ * The room is dark and the light is deliberate: a deep navy ground, matte
+ * surfaces, hairlines instead of heavy shadows, and one moonlight accent.
+ * There is no light palette — the app is read at night or in low light.
  */
 :root {
-  --heat-1: #e4e8fa;
-  --heat-2: #c3caf2;
-  --heat-3: #8d97e0;
-  --heat-4: #4453c7;
-  --heat-ink-low: #1c2029;
-  --heat-ink-high: #ffffff;
+  color-scheme: dark;
+
+  --paper: #081020;
+  --surface: #101a2e;
+  --surface-back: #0d1729;
+  --ink: #e9eef7;
+  --muted: #a9b4c7;
+  --faint: #7b87a3;
+  --line: rgb(233 238 247 / 0.1);
+  --line-strong: rgb(233 238 247 / 0.17);
+  --accent: #a5c9ee;
+  --accent-hover: #bcd9f6;
+  --accent-soft: rgb(165 201 238 / 0.12);
+  --on-accent: #081020;
+  --scrim: rgb(3 7 14 / 0.68);
+
+  --good: #7fd0a7;
+  --good-soft: rgb(127 208 167 / 0.12);
+  --good-ink: #a4e3c1;
+  --bad: #e8927c;
+  --bad-soft: rgb(232 146 124 / 0.12);
+  --bad-ink: #f3b6a7;
+  --warn-soft: rgb(236 201 143 / 0.12);
+  --warn-ink: #e8cd9d;
+
+  /* Calendar intensity: one hue, from a faint trace to the moon itself. */
+  --heat-1: rgb(165 201 238 / 0.1);
+  --heat-2: rgb(165 201 238 / 0.32);
+  --heat-3: rgb(165 201 238 / 0.62);
+  --heat-4: #a5c9ee;
+  --heat-ink-low: #c7d2e4;
+  --heat-ink-high: #081020;
 }
 
 .heat-cell {
@@ -56,7 +60,7 @@
 
 .heat-cell[data-level='3'] {
   background: var(--heat-3);
-  color: var(--heat-ink-low);
+  color: var(--heat-ink-high);
 }
 
 .heat-cell[data-level='4'] {
@@ -73,51 +77,23 @@
   transition-duration: 0.01ms !important;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --heat-1: #2b3257;
-    --heat-2: #3a437a;
-    --heat-3: #5560b0;
-    --heat-4: #9aa6f5;
-    --heat-ink-low: #eceef2;
-    --heat-ink-high: #15171c;
-  }
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --paper: #15171c;
-    --surface: #1f232b;
-    --surface-back: #222943;
-    --ink: #eceef2;
-    --muted: #a3abb9;
-    --line: #333945;
-    --accent: #9aa6f5;
-    --accent-soft: #2b3257;
-
-    --good: #45c08a;
-    --good-soft: #17382b;
-    --good-ink: #8fe0b8;
-    --bad: #f0806a;
-    --bad-soft: #43201a;
-    --bad-ink: #f6b0a2;
-    --warn-soft: #3d3215;
-    --warn-ink: #f0d58e;
-  }
-}
-
 @theme inline {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-  --font-serif: 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, ui-serif, serif;
+  --font-sans: 'Public Sans', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-serif: 'Source Serif 4', 'Iowan Old Style', 'Palatino Linotype', Palatino, Georgia, ui-serif, serif;
 
   --color-paper: var(--paper);
   --color-surface: var(--surface);
   --color-surface-back: var(--surface-back);
   --color-ink: var(--ink);
   --color-muted: var(--muted);
+  --color-faint: var(--faint);
   --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
   --color-accent-soft: var(--accent-soft);
+  --color-on-accent: var(--on-accent);
+  --color-scrim: var(--scrim);
   --color-good: var(--good);
   --color-good-soft: var(--good-soft);
   --color-good-ink: var(--good-ink);
@@ -142,9 +118,113 @@ body {
   color: var(--ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   -webkit-tap-highlight-color: transparent;
   /* The review screen is a fixed stage; nothing should rubber-band behind it. */
   overscroll-behavior: none;
+}
+
+::selection {
+  background: rgb(165 201 238 / 0.3);
+  color: var(--ink);
+}
+
+/* Native controls carry the OS accent on Windows; draw them in the room's own hand. */
+input[type='checkbox'],
+input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  display: inline-grid;
+  place-content: center;
+  flex: none;
+  width: 1rem;
+  height: 1rem;
+  margin: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 4px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+input[type='radio'] {
+  border-radius: 999px;
+}
+
+input[type='checkbox']:hover,
+input[type='radio']:hover {
+  border-color: var(--muted);
+}
+
+input[type='checkbox']:checked,
+input[type='radio']:checked {
+  border-color: var(--accent);
+}
+
+input[type='checkbox']:checked {
+  background: var(--accent);
+}
+
+input[type='checkbox']:checked::before {
+  content: '';
+  width: 0.45rem;
+  height: 0.25rem;
+  border-bottom: 2px solid var(--on-accent);
+  border-left: 2px solid var(--on-accent);
+  transform: translateY(-1px) rotate(-45deg);
+}
+
+input[type='radio']:checked::before {
+  content: '';
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 999px;
+  background: var(--accent);
+}
+
+input[type='checkbox']:disabled,
+input[type='radio']:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(233 238 247 / 0.16) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgb(233 238 247 / 0.14);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(233 238 247 / 0.24);
+  background-clip: content-box;
+}
+
+h1,
+h2,
+h3 {
+  text-wrap: balance;
+}
+
+p {
+  text-wrap: pretty;
 }
 
 :focus-visible {
@@ -154,6 +234,26 @@ body {
 
 kbd {
   font-family: inherit;
+}
+
+/*
+ * The pool of light: the one atmospheric gesture. It marks where to look
+ * next — today's review, the open word, the card in hand — and nowhere else.
+ * It fades into the room at its edges, so it never reads as a rectangle.
+ */
+.pool {
+  --pool-x: 50%;
+  --pool-y: 42%;
+  background: radial-gradient(80% 70% at var(--pool-x) var(--pool-y), #1d2b46 0%, #101c31 38%, #081020 64%);
+}
+
+.pool-top {
+  --pool-y: 0%;
+}
+
+/* The open word is an overlay: it stays a panel rather than dissolving into the room. */
+.pool-panel {
+  background: radial-gradient(90% 70% at 50% 0%, #1c2a44 0%, #152136 42%, #101a2e 72%);
 }
 
 /* ---- Flashcard flip ---- */

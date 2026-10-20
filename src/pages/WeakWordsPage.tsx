@@ -25,10 +25,11 @@ interface WeakWordWithTrueMastery extends WeakWordView {
 }
 
 const SEVERITY_TEXT: Record<Severity, string> = { high: 'High', medium: 'Medium', low: 'Low' };
+/* Priority reads as words, not as a traffic light: the label is the signal. */
 const SEVERITY_TONE: Record<Severity, string> = {
-  high: 'bg-bad-soft text-bad-ink',
-  medium: 'bg-warn-soft text-warn-ink',
-  low: 'bg-line/50 text-muted',
+  high: 'border border-line-strong text-ink',
+  medium: 'border border-line-strong text-muted',
+  low: 'border border-line text-faint',
 };
 const SEVERITIES: Severity[] = ['high', 'medium', 'low'];
 
@@ -181,10 +182,10 @@ export function WeakWordsPage() {
                       type="button"
                       aria-pressed={severity === key}
                       onClick={() => setSeverity(key)}
-                      className={`cursor-pointer rounded-full border px-3 py-1.5 text-sm font-medium ${
+                      className={`cursor-pointer rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
                         severity === key
-                          ? 'border-accent bg-accent-soft text-accent'
-                          : 'border-line bg-surface text-muted hover:text-ink'
+                          ? 'border-accent/60 bg-accent-soft text-accent'
+                          : 'border-line-strong bg-transparent text-muted hover:border-muted hover:text-ink'
                       }`}
                     >
                       {key === null ? 'All' : SEVERITY_TEXT[key]} <span className="tabular-nums">({count})</span>
@@ -193,7 +194,7 @@ export function WeakWordsPage() {
                 })}
               </div>
 
-              <p className={HELP}>
+              <p className={`${HELP} max-w-[75ch]`}>
                 {weak.data.total > words.length
                   ? `Showing the ${words.length} weakest of ${weak.data.total} words. `
                   : ''}
@@ -219,7 +220,7 @@ export function WeakWordsPage() {
                           <button
                             type="button"
                             onClick={() => openWord(word.id)}
-                            className="cursor-pointer text-left text-base font-semibold underline-offset-2 hover:underline"
+                            className="cursor-pointer text-left font-serif text-[1.0625rem] font-medium underline-offset-2 hover:underline"
                           >
                             {word.word}
                           </button>
@@ -237,7 +238,7 @@ export function WeakWordsPage() {
                                 Good: 'bg-accent-soft text-accent',
                                 Developing: 'bg-warn-soft text-warn-ink',
                                 Weak: 'bg-bad-soft text-bad-ink',
-                                New: 'bg-line/50 text-muted',
+                                New: 'bg-line-strong/60 text-muted',
                               };
                               return (
                                 <span
@@ -250,7 +251,7 @@ export function WeakWordsPage() {
                             })()}
                           <MasteryPill mastery={word.mastery} />
                           {word.reviewable && (
-                            <span className="inline-flex whitespace-nowrap rounded-full bg-accent-soft px-2 py-0.5 text-xs font-medium text-accent">
+                            <span className="inline-flex whitespace-nowrap rounded-full border border-accent/60 px-2 py-0.5 text-xs font-medium text-accent">
                               Due now
                             </span>
                           )}
@@ -261,7 +262,7 @@ export function WeakWordsPage() {
                         )}
                         <p className="text-xs text-muted">{recentText(word, weak.data.windowDays)}</p>
                         {word.recovery !== undefined && (
-                          <p className="text-xs font-medium text-accent">
+                          <p className="text-xs text-muted">
                             Recovery {word.recovery.points} of {word.recovery.threshold}
                           </p>
                         )}
@@ -270,10 +271,10 @@ export function WeakWordsPage() {
                           {word.action}
                         </p>
                         {tm.recommendedMode && tm.recommendationReason && (
-                          <p className="text-xs text-accent">
-                            <span className="font-medium">Recommended practice: </span>
+                          <p className="text-xs text-muted">
+                            <span className="font-medium text-ink">Recommended practice: </span>
                             {STUDY_MODE_LABELS[tm.recommendedMode as keyof typeof STUDY_MODE_LABELS] ?? tm.recommendedMode}
-                            <span className="text-muted"> — {tm.recommendationReason}</span>
+                            <span> — {tm.recommendationReason}</span>
                           </p>
                         )}
                       </li>

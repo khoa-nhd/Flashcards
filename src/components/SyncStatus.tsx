@@ -45,7 +45,7 @@ export function SyncStatus() {
       <span
         role="status"
         title={`${pending} ${pending === 1 ? 'change is' : 'changes are'} waiting to be sent. They are kept on this device until the server has them.`}
-        className={`${CHIP} bg-line/40 text-muted`}
+        className={`${CHIP} bg-line-strong/50 text-muted`}
       >
         <Spinner className="size-3" />
         Saving{pending > 1 ? ` ${pending}` : ''}…

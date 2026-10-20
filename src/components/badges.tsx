@@ -13,13 +13,14 @@ const STATUS_TEXT: Record<ReviewStatus, string> = {
   invalid: 'Needs a mastery',
 };
 
+/* State reads in stroke and weight; colour is kept for answers, not labels. */
 const STATUS_TONE: Record<ReviewStatus, string> = {
-  mastered: 'bg-good-soft text-good-ink',
-  overdue: 'bg-bad-soft text-bad-ink',
-  due_today: 'bg-accent-soft text-accent',
-  unscheduled: 'bg-accent-soft text-accent',
-  upcoming: 'bg-line/50 text-muted',
-  invalid: 'bg-warn-soft text-warn-ink',
+  mastered: 'border border-line-strong text-muted',
+  overdue: 'border border-line-strong text-ink',
+  due_today: 'border border-accent/50 text-accent',
+  unscheduled: 'border border-line text-faint',
+  upcoming: 'border border-line text-faint',
+  invalid: 'border border-line-strong text-ink',
 };
 
 /** Where a word stands in the review cycle, always as words and never as colour alone. */
@@ -33,7 +34,7 @@ export function StatusBadge({ status }: { status: ReviewStatus }) {
 
 export function MasteryPill({ mastery }: { mastery: number | null }) {
   return (
-    <span className="inline-flex min-w-7 justify-center rounded-full bg-paper px-2 py-0.5 text-xs font-semibold tabular-nums text-ink">
+    <span className="inline-flex min-w-7 justify-center rounded-full border border-line bg-paper px-2 py-0.5 text-xs font-semibold tabular-nums text-ink">
       {mastery === null ? '–' : mastery}
       <span className="sr-only">{mastery === null ? ' no mastery' : ' of 10 mastery'}</span>
     </span>

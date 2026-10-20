@@ -46,7 +46,7 @@ export function RefusedAnswersPanel({ answers, onRetry, onDismiss }: RefusedAnsw
               <button
                 ref={at === 0 ? primary : undefined}
                 type="button"
-                className={`${PANEL_BUTTON} border-bad bg-bad text-white dark:text-paper`}
+                className={`${PANEL_BUTTON} border-bad bg-bad text-on-accent`}
                 onClick={() => onRetry(answer.requestId)}
               >
                 Retry

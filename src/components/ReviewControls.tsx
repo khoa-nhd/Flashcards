@@ -8,6 +8,10 @@ export interface ReviewControlsProps {
   onBlocked: () => void;
 }
 
+/**
+ * Left is “Not remember”, right is “Remember”, matching the arrow keys and
+ * the swipe directions. The same order holds on the phone.
+ */
 const BUTTONS: Array<{
   action: ReviewAction;
   label: string;
@@ -20,18 +24,18 @@ const BUTTONS: Array<{
     label: 'Not remember',
     shortcut: 'ArrowLeft',
     keyLabel: '←',
-    tone: 'border-bad/35 bg-bad-soft text-bad-ink hover:border-bad',
+    tone: 'border-line-strong bg-transparent text-ink hover:border-muted hover:bg-line/25',
   },
   {
     action: 'remember',
     label: 'Remember',
     shortcut: 'ArrowRight',
     keyLabel: '→',
-    tone: 'border-good/35 bg-good-soft text-good-ink hover:border-good',
+    tone: 'border-transparent bg-accent text-on-accent hover:bg-accent-hover focus-visible:outline-on-accent',
   },
 ];
 
-const KEY_HINT = 'hidden rounded border border-current/30 px-1.5 text-sm keyboard:inline';
+const KEY_HINT = 'hidden rounded border border-current/30 px-1.5 py-0.5 text-xs keyboard:inline';
 
 export function ReviewControls({ enabled, onGrade, onBlocked }: ReviewControlsProps) {
   return (
@@ -47,7 +51,7 @@ export function ReviewControls({ enabled, onGrade, onBlocked }: ReviewControlsPr
             if (enabled) onGrade(action);
             else onBlocked();
           }}
-          className={`flex h-14 items-center justify-center gap-2 rounded-2xl border text-base font-semibold transition ${tone} ${
+          className={`flex h-14 items-center justify-center gap-2 rounded-xl border text-[0.9375rem] font-semibold tracking-[-0.01em] transition-[color,background-color,border-color,transform] duration-150 ${tone} ${
             enabled ? 'cursor-pointer active:scale-[0.98]' : 'cursor-not-allowed opacity-45'
           }`}
         >

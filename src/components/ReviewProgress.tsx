@@ -11,7 +11,7 @@ export function ReviewProgress({ done, total }: ReviewProgressProps) {
 
   return (
     <div className="flex items-center gap-3 text-sm">
-      <span className="font-semibold tabular-nums" aria-label={`Card ${position} of ${total}`}>
+      <span className="font-medium tabular-nums text-ink" aria-label={`Card ${position} of ${total}`}>
         {position} / {total}
       </span>
       <div
@@ -20,14 +20,14 @@ export function ReviewProgress({ done, total }: ReviewProgressProps) {
         aria-valuemin={0}
         aria-valuemax={total}
         aria-valuenow={done}
-        className="h-1.5 flex-1 overflow-hidden rounded-full bg-line"
+        className="h-0.5 flex-1 overflow-hidden rounded-full bg-line-strong"
       >
         <div
           className="h-full rounded-full bg-accent transition-[width] duration-300 motion-reduce:transition-none"
           style={{ width: `${percent}%` }}
         />
       </div>
-      <span className="text-muted tabular-nums">{remaining} left</span>
+      <span className="text-faint tabular-nums">{remaining} left</span>
     </div>
   );
 }

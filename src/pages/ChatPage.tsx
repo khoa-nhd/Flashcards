@@ -274,7 +274,7 @@ export function ChatPage() {
               <label
                 key={option}
                 className={`flex cursor-pointer items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition ${
-                  mode === option ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-surface text-ink hover:bg-line/40'
+                  mode === option ? 'border-accent bg-accent-soft text-accent' : 'border-line bg-surface text-ink hover:bg-line-strong/50'
                 }`}
               >
                 <input
@@ -334,7 +334,7 @@ export function ChatPage() {
                     onClick={() => open(conversation.id)}
                     aria-current={conversation.id === conversationId ? 'true' : undefined}
                     className={`flex w-full cursor-pointer items-center gap-2 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${
-                      conversation.id === conversationId ? 'bg-accent-soft text-accent' : 'text-ink hover:bg-line/40'
+                      conversation.id === conversationId ? 'bg-accent-soft text-accent' : 'text-ink hover:bg-line-strong/50'
                     }`}
                   >
                     <span className="min-w-0 flex-1 truncate">{conversation.title || 'Untitled'}</span>
@@ -354,7 +354,7 @@ export function ChatPage() {
               type="button"
               onClick={() => open(null)}
               aria-label="Back to conversations"
-              className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-line/40 md:hidden"
+              className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-line-strong/50 md:hidden"
             >
               <Icon name="left" className="size-5" />
             </button>
@@ -374,7 +374,7 @@ export function ChatPage() {
                   setConfirmDelete(current);
                 }}
                 aria-label="Delete conversation"
-                className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-line/40 hover:text-bad"
+                className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-line-strong/50 hover:text-bad"
               >
                 <Icon name="trash" className="size-4" />
               </button>
@@ -469,9 +469,8 @@ export function ChatPage() {
 function Intro({ mode }: { mode: AiMode }) {
   return (
     <div className="m-auto max-w-sm px-4 py-8 text-center">
-      <Icon name="chat" className="mx-auto mb-3 size-10 text-muted/40" />
-      <p className="font-serif text-lg font-semibold">{MODE_LABEL[mode]}</p>
-      <p className="mt-1 text-sm text-muted">{MODE_HINT[mode]}</p>
+      <p className="font-serif text-xl font-semibold tracking-tight">{MODE_LABEL[mode]}</p>
+      <p className="mt-2 text-sm leading-relaxed text-muted">{MODE_HINT[mode]}</p>
     </div>
   );
 }
@@ -507,7 +506,7 @@ function MessageBubble({
     <button
       type="button"
       onClick={() => void copy()}
-      className="cursor-pointer rounded-lg px-1.5 py-0.5 text-xs text-muted hover:bg-line/40 hover:text-ink"
+      className="cursor-pointer rounded-lg px-1.5 py-0.5 text-xs text-muted hover:bg-line-strong/50 hover:text-ink"
     >
       {copied ? 'Copied' : 'Copy'}
     </button>
@@ -518,7 +517,7 @@ function MessageBubble({
       <div className={`flex min-w-0 max-w-[88%] flex-col gap-1 md:max-w-[75%] ${mine ? 'items-end' : 'items-start'}`}>
         <div
           className={`min-w-0 max-w-full rounded-2xl px-4 py-2.5 text-sm ${
-            mine ? 'whitespace-pre-wrap wrap-anywhere rounded-br-md bg-accent text-white dark:text-paper' : 'rounded-bl-md border border-line bg-surface'
+            mine ? 'whitespace-pre-wrap wrap-anywhere rounded-br-md bg-accent text-on-accent' : 'rounded-bl-md border border-line bg-surface'
           }`}
         >
           {mine ? (

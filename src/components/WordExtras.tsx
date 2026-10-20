@@ -10,7 +10,7 @@ import { BUTTON_SECONDARY, HELP, INPUT, TEXTAREA } from './ui.js';
 
 const HEADING = 'text-xs font-medium uppercase tracking-[0.12em] text-muted';
 const SMALL_BUTTON =
-  'cursor-pointer rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-line/40 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50';
+  'cursor-pointer rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-line-strong/50 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50';
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof ApiError ? error.message : fallback);
 

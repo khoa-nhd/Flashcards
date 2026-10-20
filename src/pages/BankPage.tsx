@@ -48,7 +48,7 @@ function FilterSelect({
   onChange: (value: string) => void;
 }) {
   return (
-    <label className="flex flex-col gap-1 text-xs font-medium text-muted">
+    <label className="flex flex-col gap-1 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-faint">
       {label}
       <select className={INPUT} value={value} onChange={(event) => onChange(event.target.value)}>
         {options.map(([optionValue, optionLabel]) => (
@@ -76,13 +76,14 @@ function BankTable({
   onSort,
   trueMasteryMap,
 }: BankTableProps) {
-  const header = (key: SortKey, className = '') => {
+  const header = (key: SortKey, className = '', title?: string) => {
     const active = query.sort === key;
     return (
       <th
         scope="col"
         aria-sort={active ? (query.direction === 'asc' ? 'ascending' : 'descending') : 'none'}
-        className={`px-3 py-2 font-medium ${className}`}
+        title={title}
+        className={`px-3 py-2.5 font-medium ${className}`}
       >
         <button
           type="button"
@@ -101,21 +102,18 @@ function BankTable({
   return (
     <div className={`${CARD} overflow-x-auto`}>
       <table className="w-full text-sm">
-        <thead className="border-b border-line text-left text-xs text-muted">
+        <thead className="border-b border-line text-left text-[0.6875rem] uppercase tracking-[0.12em] text-faint">
           <tr>
             {header('word')}
-            <th scope="col" className="hidden px-3 py-2 font-medium md:table-cell">
+            <th scope="col" className="hidden px-3 py-2.5 font-medium md:table-cell">
               Meaning
             </th>
             {header('mastery', 'w-24')}
-            <th scope="col" className="w-32 px-3 py-2 font-medium">
-              <span className="flex items-center gap-1">
-                {header('trueMastery', 'w-32')}
-                <span className="text-muted" aria-label="True Mastery is an evidence-based estimate (0–100) of how well you know a word, based on your practice history across modes. It is separate from Review Mastery (which drives the schedule) and Practice Mastery (per-mode progress up to 3).">
-                  <span className="text-[0.7rem]">ⓘ</span>
-                </span>
-              </span>
-            </th>
+            {header(
+              'trueMastery',
+              'w-32',
+              'True Mastery is an evidence-based estimate (0–100) of how well you know a word, from your practice history across modes. It is separate from Review Mastery, which drives the schedule.',
+            )}
             {header('reviewDate', 'w-40')}
             {header('dateAdded', 'hidden w-32 sm:table-cell')}
           </tr>
@@ -127,7 +125,7 @@ function BankTable({
               <tr
                 key={entry.id}
                 onClick={() => openWord(entry.id)}
-                className="cursor-pointer border-t border-line first:border-t-0 hover:bg-line/20"
+                className="cursor-pointer border-t border-line transition-colors first:border-t-0 hover:bg-line-strong/40"
               >
                 <th scope="row" className="max-w-56 px-3 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-2">
@@ -138,7 +136,7 @@ function BankTable({
                         event.stopPropagation();
                         openWord(entry.id);
                       }}
-                      className="cursor-pointer truncate text-left hover:underline"
+                      className="cursor-pointer truncate text-left font-serif text-[1.0625rem] font-medium hover:underline"
                     >
                       {entry.word}
                     </button>
@@ -166,7 +164,7 @@ function BankTable({
                             ? 'bg-warn-soft text-warn-ink'
                             : trueMastery.tier === 'Weak'
                             ? 'bg-bad-soft text-bad-ink'
-                            : 'bg-line/50 text-muted'
+                            : 'bg-line-strong/60 text-muted'
                         }`}
                         title={
                           `True Mastery: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
@@ -228,11 +226,11 @@ function BankList({ entries, today, trueMasteryMap }: BankListProps) {
             <button
               type="button"
               onClick={() => openWord(entry.id)}
-              className="flex w-full cursor-pointer items-center gap-3 px-3 py-2 text-left hover:bg-line/20"
+              className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-line-strong/40"
             >
               <MasteryPill mastery={entry.mastery} />
               <span className="min-w-0 flex-1 truncate">
-                <span className="font-medium">{entry.word}</span>
+                <span className="font-serif text-[1.0625rem] font-medium">{entry.word}</span>
                 {entry.meaning !== null && <span className="text-muted"> — {entry.meaning}</span>}
               </span>
               <QualityFlag entry={entry} />
@@ -250,7 +248,7 @@ function BankList({ entries, today, trueMasteryMap }: BankListProps) {
                         ? 'bg-warn-soft text-warn-ink'
                         : trueMastery.tier === 'Weak'
                         ? 'bg-bad-soft text-bad-ink'
-                        : 'bg-line/50 text-muted'
+                        : 'bg-line-strong/60 text-muted'
                     }`}
                     title={
                       `True Mastery: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
@@ -395,10 +393,10 @@ export function BankPage() {
                   type="button"
                   aria-pressed={preset === item.key}
                   onClick={() => update({ search: '', ...item.filters(today) })}
-                  className={`cursor-pointer rounded-full border px-3 py-1.5 text-sm font-medium transition ${
+                  className={`cursor-pointer rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
                     preset === item.key
-                      ? 'border-accent bg-accent-soft text-accent'
-                      : 'border-line bg-surface text-muted hover:text-ink'
+                      ? 'border-accent/60 bg-accent-soft text-accent'
+                      : 'border-line-strong bg-transparent text-muted hover:border-muted hover:text-ink'
                   }`}
                 >
                   {item.label}
@@ -457,7 +455,7 @@ export function BankPage() {
                     ]}
                   />
                 )}
-                <label className="flex flex-col gap-1 text-xs font-medium text-muted">
+                <label className="flex flex-col gap-1 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-faint">
                   Added from
                   <input
                     type="date"
@@ -467,7 +465,7 @@ export function BankPage() {
                     onChange={(event) => update({ addedFrom: event.target.value === '' ? null : event.target.value })}
                   />
                 </label>
-                <label className="flex flex-col gap-1 text-xs font-medium text-muted">
+                <label className="flex flex-col gap-1 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-faint">
                   Added to
                   <input
                     type="date"
@@ -497,7 +495,7 @@ export function BankPage() {
                 )}
 
                 <div className="ml-auto flex flex-wrap items-center gap-3">
-                  <label className="flex items-center gap-2 text-sm text-muted">
+                  <label className="flex items-center gap-2 whitespace-nowrap text-sm text-muted">
                     Sort by
                     <select
                       className={`${INPUT} w-auto`}
@@ -589,7 +587,7 @@ export function BankPage() {
           )}
 
           {page.pageCount > 1 && (
-            <nav aria-label="Pages" className="flex items-center justify-center gap-3">
+            <nav aria-label="Pages" className="mt-4 flex items-center justify-center gap-3">
               <button
                 type="button"
                 className={BUTTON_GHOST}

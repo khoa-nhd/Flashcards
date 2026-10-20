@@ -91,11 +91,11 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
   const extraKeys = ANSWER_KEY_SETS[answerKeys];
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-xl flex-col gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-2">
+    <div className="mx-auto flex h-full w-full max-w-xl flex-col gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
       <ReviewProgress done={done} total={total} />
 
       <div className="flex min-h-8 items-center justify-between gap-3 text-sm">
-        <p role="status" className="min-w-0 flex-1 truncate text-muted">
+        <p role="status" className="min-w-0 flex-1 truncate text-faint">
           {saving
             ? `Saving ${state.pending.length === 1 ? 'one answer' : `${state.pending.length} answers`}…`
             : hintVisible
@@ -108,7 +108,7 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
             onClick={undo}
             disabled={!canUndo(state)}
             aria-label={`Undo “${ACTION_TEXT[undoable.action]}”${undoWord === null ? '' : ` for ${undoWord}`}`}
-            className="h-8 shrink-0 cursor-pointer rounded-full border border-line px-3 font-medium text-muted transition hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-8 shrink-0 cursor-pointer rounded-full border border-line-strong px-3 font-medium text-muted transition-colors hover:text-ink disabled:cursor-not-allowed disabled:opacity-50"
           >
             {state.undoing ? 'Undoing…' : `Undo${undoWord === null ? '' : `: ${undoWord}`}`}
           </button>
@@ -167,39 +167,39 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
       <div
         role="note"
         aria-label="Keyboard shortcuts"
-        className="hidden items-center justify-center gap-4 text-xs text-muted keyboard:flex"
+        className="hidden items-center justify-center gap-4 text-xs text-faint keyboard:flex"
       >
         <span>
-          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">Space</kbd> flip
+          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-muted">Space</kbd> flip
         </span>
         <span>
-          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">←</kbd>
+          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-muted">←</kbd>
           {extraKeys !== null && (
             <>
               {' '}
-              <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">{extraKeys[0].toUpperCase()}</kbd>
+              <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-muted">{extraKeys[0].toUpperCase()}</kbd>
             </>
           )}{' '}
           not remember
         </span>
         <span>
-          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">→</kbd>
+          <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-muted">→</kbd>
           {extraKeys !== null && (
             <>
               {' '}
-              <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">{extraKeys[1].toUpperCase()}</kbd>
+              <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-muted">{extraKeys[1].toUpperCase()}</kbd>
             </>
           )}{' '}
           remember
         </span>
         {state.meta?.capabilities.undo === true && (
           <span>
-            <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">U</kbd> undo
+            <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-muted">U</kbd> undo
           </span>
         )}
         {onHelp !== undefined && (
           <span>
-            <kbd className="rounded border border-line bg-surface px-1.5 py-0.5">?</kbd> all shortcuts
+            <kbd className="rounded border border-line bg-surface px-1.5 py-0.5 text-muted">?</kbd> all shortcuts
           </span>
         )}
       </div>

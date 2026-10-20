@@ -307,7 +307,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   return (
     <div className="fixed inset-0 z-40 flex justify-end">
       <div
-        className="absolute inset-0 bg-black/30"
+        className="absolute inset-0 bg-scrim"
         aria-hidden="true"
         onClick={() => {
           if (!editing) onClose();
@@ -317,29 +317,33 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
         role="dialog"
         aria-modal="true"
         aria-labelledby="word-panel-title"
-        className="relative flex h-full w-full max-w-md flex-col border-l border-line bg-paper shadow-2xl"
+        className="pool-panel relative flex h-full w-full max-w-md flex-col border-l border-line-strong shadow-[-30px_0_80px_-40px_rgba(0,0,0,0.95)]"
       >
         <div className="flex items-start justify-between gap-3 border-b border-line px-5 pb-3 pt-[max(1rem,env(safe-area-inset-top))]">
           <div className="min-w-0">
-            <p className="text-xs font-medium uppercase tracking-[0.12em] text-muted">
-              {editing ? 'Editing word' : 'Word'}
-            </p>
-            <h2 id="word-panel-title" className="font-serif text-2xl font-semibold tracking-tight wrap-anywhere">
-              {entry?.word ?? 'Word'}
-            </h2>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 id="word-panel-title" className="font-serif text-2xl font-semibold tracking-tight wrap-anywhere">
+                {entry?.word ?? 'Word'}
+              </h2>
+              {editing && (
+                <span className="rounded-full border border-line-strong px-2 py-0.5 text-[0.6875rem] font-medium uppercase tracking-[0.12em] text-faint">
+                  Editing
+                </span>
+              )}
+            </div>
           </div>
           <button
             ref={closeButton}
             type="button"
             aria-label="Close"
             onClick={onClose}
-            className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted hover:bg-line/40 hover:text-ink"
+            className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted transition-colors hover:bg-line-strong/40 hover:text-ink"
           >
             <Icon name="close" />
           </button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {entry === null && checking && !savingNew && (
             <p role="status" className="flex items-center gap-2 text-sm text-muted">
               <Spinner /> Loading the word…
@@ -365,7 +369,7 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                 </span>
               </div>
 
-              <dl className="flex flex-col gap-4">
+              <dl className="flex flex-col gap-5">
                 <DetailRow label="Vietnamese meaning" value={entry.meaning} />
                 <DetailRow label="Definition" value={entry.definition} />
                 <DetailRow label="Example sentences" value={entry.example} />
@@ -608,8 +612,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
 function DetailRow({ label, value }: { label: string; value: string | null }) {
   return (
     <div>
-      <dt className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">{label}</dt>
-      <dd className={`m-0 whitespace-pre-line wrap-anywhere ${value === null ? 'text-muted' : 'text-ink'}`}>
+      <dt className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-faint">{label}</dt>
+      <dd className={`m-0 whitespace-pre-line leading-relaxed wrap-anywhere ${value === null ? 'text-faint' : 'text-ink'}`}>
         {value ?? 'Not set'}
       </dd>
     </div>

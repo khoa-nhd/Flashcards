@@ -19,23 +19,23 @@ export function StatTile({ label, value, hint, to, emphasis = null }: StatTilePr
   const marked = emphasis !== null && typeof value === 'number' && value > 0;
   const body = (
     <>
-      <div className="flex items-center gap-2 text-sm text-muted">
+      <div className="flex items-center gap-2 text-[0.6875rem] font-medium uppercase tracking-[0.14em] text-faint">
         {marked && (
           <span
             aria-hidden="true"
-            className={`size-2 rounded-full ${emphasis === 'bad' ? 'bg-bad' : 'bg-accent'}`}
+            className={`size-1.5 rounded-full ${emphasis === 'bad' ? 'bg-bad' : 'bg-accent'}`}
           />
         )}
         <span>{label}</span>
       </div>
-      <div className="mt-1 text-3xl font-semibold tracking-tight text-ink">
+      <div className="mt-2 font-serif text-[1.875rem] font-semibold leading-none tracking-tight tabular-nums text-ink">
         {typeof value === 'number' ? numberFormat.format(value) : value}
       </div>
-      {hint !== undefined && <div className="mt-1 text-xs text-muted">{hint}</div>}
+      {hint !== undefined && <div className="mt-1.5 text-xs leading-snug text-faint">{hint}</div>}
     </>
   );
 
-  const frame = 'block rounded-2xl border border-line bg-surface p-4';
+  const frame = 'block rounded-2xl border border-line bg-surface p-4 transition-colors hover:border-line-strong';
   return to === undefined ? (
     <div className={frame}>{body}</div>
   ) : (

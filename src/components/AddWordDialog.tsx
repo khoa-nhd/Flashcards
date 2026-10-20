@@ -327,7 +327,7 @@ function Modal({ title, onCancel, children }: { title: string; onCancel: () => v
       onClick={(event) => {
         if (event.target === dialog.current) onCancel();
       }}
-      className="m-auto w-[min(34rem,calc(100vw-2rem))] rounded-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/40"
+      className="m-auto w-[min(34rem,calc(100vw-2rem))] rounded-2xl border border-line-strong bg-surface p-0 text-ink shadow-[0_30px_80px_-40px_rgba(0,0,0,0.95)] backdrop:bg-scrim"
     >
       <div className="max-h-[min(42rem,85vh)] overflow-y-auto p-5">
         <h2 id="add-word-dialog-title" className="text-lg font-semibold tracking-tight">

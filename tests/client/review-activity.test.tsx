@@ -152,7 +152,7 @@ describe('review activity on the dashboard', () => {
     render(<App api={api} settings={createSettingsStore(null)} />);
     const section = await activity();
     expect(await within(section).findByRole('alert')).toHaveTextContent('Could not reach the server.');
-    expect(screen.getByText('Ready to review')).toBeInTheDocument();
+    expect(screen.getByRole('region', { name: 'Ready to review' })).toBeInTheDocument();
 
     await userEvent.setup().click(within(section).getByRole('button', { name: 'Try again' }));
     expect(await within(section).findByText('Reviews today')).toBeInTheDocument();
@@ -460,7 +460,7 @@ describe('reviewing only the weakest words', () => {
     press('ArrowRight');
     await waitFor(() => expect(api.submitAction).toHaveBeenCalledTimes(1));
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
-    expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /words?, done\./ })).toBeInTheDocument();
     expect(screen.getByText(/They were your weakest words\./)).toBeInTheDocument();
     expect(screen.getAllByRole('link', { name: 'Review everything due' })).toHaveLength(1);
   });

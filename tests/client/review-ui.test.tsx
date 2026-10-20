@@ -478,7 +478,7 @@ describe('saving', () => {
     press('ArrowLeft');
     await settle(saves, 1);
 
-    expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /words?, done\./ })).toBeInTheDocument();
     expect(screen.getByText('You went through 2 cards in this session.')).toBeInTheDocument();
     expect(screen.getByText('Remembered').previousSibling).toHaveTextContent('1');
     expect(screen.getByText('Not remembered').previousSibling).toHaveTextContent('1');
@@ -503,7 +503,7 @@ describe('saving', () => {
     press(' ');
     press('ArrowRight');
     await settle(saves, 0);
-    expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: /words?, done\./ })).toBeInTheDocument();
     expect(screen.queryByText(/mastered/i)).not.toBeInTheDocument();
   });
 
@@ -615,7 +615,7 @@ describe('when the server refuses an answer', () => {
     press('ArrowRight');
     await settle(saves, 1);
     expect(api.submitAction).toHaveBeenCalledTimes(2);
-    expect(screen.getByText('Not saved, so left out of the counts').previousSibling).toHaveTextContent('1');
+    expect(screen.getByText('1 not saved, so left out of the counts')).toBeInTheDocument();
   });
 });
 
@@ -775,17 +775,18 @@ describe('the session summary', () => {
 
     const list = screen.getByLabelText('Session summary');
     expect(list).toHaveTextContent('50%');
-    expect(list).toHaveTextContent('Accuracy (1 of 2)');
-    expect(list).toHaveTextContent('1 min 05 s');
-    expect(list).toHaveTextContent('1 reviewed for the first time · 1 reviewed before · 1 undone');
+    expect(list).toHaveTextContent('Accuracy');
+    expect(screen.getByText(/1 min 05 s on cards/)).toBeInTheDocument();
+    expect(screen.getByText(/first time/)).toHaveTextContent('1 first time · 1 reviewed before · 1 undone');
   });
 
   it('falls back to this device’s confirmed count, and says so, when the summary cannot be loaded', async () => {
     await finishTwo((fake) => fake.fetchSessionSummary.mockRejectedValue(new ApiError('network', 'offline')));
     expect(await screen.findByText(/the saved summary could not be loaded/)).toBeInTheDocument();
     const list = screen.getByLabelText('Session summary');
-    expect(list).toHaveTextContent('Accuracy (1 of 2)');
-    expect(list).not.toHaveTextContent('Time on cards');
+    expect(list).toHaveTextContent('50%');
+    expect(list).toHaveTextContent('Accuracy');
+    expect(screen.queryByText(/on cards/)).not.toBeInTheDocument();
   });
 
   it('offers to continue, to undo the last answer, or to finish', async () => {

@@ -63,14 +63,17 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
         key={item.route}
         to={ROUTES[item.route]}
         aria-current={current ? 'page' : undefined}
-        className={`flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition ${
-          current ? 'bg-accent-soft text-accent' : 'text-muted hover:bg-line/40 hover:text-ink'
+        className={`relative flex items-center gap-3 rounded-[10px] px-3 py-2 text-sm font-medium transition-colors ${
+          current ? 'bg-surface text-ink' : 'text-muted hover:bg-surface/60 hover:text-ink'
         }`}
       >
-        <Icon name={item.icon} />
+        {current && (
+          <span aria-hidden="true" className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent" />
+        )}
+        <Icon name={item.icon} className={current ? 'size-5 text-accent' : 'size-5'} />
         <span className="flex-1">{item.label}</span>
         {item.route === 'review' && reviewCount !== null && reviewCount > 0 && (
-          <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-semibold tabular-nums text-white dark:text-paper">
+          <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-semibold tabular-nums text-on-accent">
             {reviewCount}
             <span className="sr-only"> ready to review</span>
           </span>
@@ -81,11 +84,13 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
 
   return (
     <div className="flex h-dvh">
-      <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-surface/50 p-3 md:flex">
-        <div className="flex flex-wrap items-center gap-2 px-3 pb-4 pt-2">
-          <span className="font-serif text-lg font-semibold tracking-tight">Vocabulary</span>
+      <aside className="hidden w-60 shrink-0 flex-col border-r border-line bg-paper p-3 md:flex">
+        <div className="flex flex-wrap items-center gap-2 px-3 pb-5 pt-2">
+          <span className="font-sans text-[1.0625rem] font-semibold tracking-[-0.02em] text-ink">Vocabulary</span>
           {badge !== null && (
-            <span className="rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn-ink">{badge}</span>
+            <span className="rounded-full border border-line-strong px-2 py-0.5 text-[0.6875rem] font-medium text-faint">
+              {badge}
+            </span>
           )}
           <SyncStatus />
         </div>
@@ -95,7 +100,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           {SECONDARY.map(sideLink)}
         </nav>
         {account !== null && (
-          <div className="flex flex-col gap-1 border-t border-line px-3 pt-3 text-xs text-muted">
+          <div className="flex flex-col gap-1 border-t border-line px-3 pt-3 text-xs text-faint">
             <span className="truncate" title={account.email ?? undefined}>
               {account.email ?? 'Signed in'}
             </span>
@@ -107,9 +112,9 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-2 border-b border-line px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:hidden">
           <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-base font-semibold tracking-tight">{title}</h1>
+            <h1 className="truncate text-[0.9375rem] font-semibold tracking-[-0.01em]">{title}</h1>
             {badge !== null && (
-              <span className="shrink-0 rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn-ink">
+              <span className="shrink-0 rounded-full border border-line-strong px-2 py-0.5 text-[0.6875rem] font-medium text-faint">
                 {badge}
               </span>
             )}
@@ -122,7 +127,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
                 to={ROUTES[item.route]}
                 aria-label={item.label}
                 aria-current={item.route === active ? 'page' : undefined}
-                className={`flex size-9 items-center justify-center rounded-xl ${
+                className={`flex size-9 items-center justify-center rounded-[10px] ${
                   item.route === active ? 'bg-accent-soft text-accent' : 'text-muted'
                 }`}
               >
@@ -147,7 +152,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
 
         <nav
           aria-label="Main"
-          className="grid grid-cols-6 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
+          className="grid grid-cols-6 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)] md:hidden"
         >
           {PRIMARY.map((item) => {
             const current = item.route === section;
@@ -166,7 +171,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
                 {item.route === 'review' && reviewCount !== null && reviewCount > 0 && (
                   <span
                     aria-hidden="true"
-                    className="absolute right-[calc(50%-1.4rem)] top-1.5 min-w-4 rounded-full bg-accent px-1 text-center text-[0.625rem] font-semibold leading-4 tabular-nums text-white dark:text-paper"
+                    className="absolute right-[calc(50%-1.4rem)] top-1.5 min-w-4 rounded-full bg-accent px-1 text-center text-[0.625rem] font-semibold leading-4 tabular-nums text-on-accent"
                   >
                     {reviewCount}
                   </span>

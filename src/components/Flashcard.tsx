@@ -38,7 +38,7 @@ function dueLabel(nextReview: IsoDate | null, today: IsoDate | null): string | n
 }
 
 const FACE =
-  'card-face flex min-h-[21rem] flex-col rounded-3xl border px-6 pb-16 pt-5 shadow-[0_1px_2px_rgb(0_0_0/0.04),0_12px_32px_-12px_rgb(0_0_0/0.18)] sm:min-h-[24rem] sm:px-9';
+  'card-face flex min-h-[21rem] flex-col rounded-2xl border px-6 pb-16 pt-5 shadow-[0_30px_80px_-40px_rgba(0,0,0,0.95)] sm:min-h-[25rem] sm:px-8';
 
 export function Flashcard({
   card,
@@ -102,18 +102,18 @@ export function Flashcard({
       <div className="card-scene">
         <div className="card-flipper" data-flipped={flipped}>
           <section aria-hidden={flipped} className={`${FACE} border-line bg-surface`}>
-            <div className="flex items-center justify-between gap-3 text-xs text-muted">
-              <span className="rounded-full bg-paper px-2.5 py-1 font-medium tabular-nums">
+            <div className="flex items-center justify-between gap-3 text-xs text-faint">
+              <span className="text-[0.6875rem] font-medium uppercase tracking-[0.16em] tabular-nums">
                 Mastery {card.mastery}
               </span>
               {due !== null && <span>{due}</span>}
             </div>
             <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6 text-center">
-              <h2 className="font-serif text-4xl font-semibold tracking-tight wrap-anywhere sm:text-5xl">
+              <h2 className="font-serif text-[clamp(2.5rem,8vw,4.5rem)] font-semibold leading-[1.05] tracking-[-0.025em] wrap-anywhere">
                 {card.word}
               </h2>
               {card.front.length > 0 && (
-                <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-base text-muted">
+                <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[0.9375rem] text-muted">
                   {card.front.map((field, index) => (
                     <span key={field.key} className="flex items-center gap-2">
                       {index > 0 && <span aria-hidden="true">·</span>}
@@ -132,29 +132,29 @@ export function Flashcard({
             aria-hidden={!flipped}
             className={`${FACE} card-face-back border-accent/30 bg-surface-back`}
           >
-            <div className="flex items-baseline justify-between gap-3">
-              <span className="text-xs font-semibold uppercase tracking-[0.14em] text-accent">Answer</span>
+            <div className="flex items-baseline justify-between gap-3 border-b border-line pb-3">
+              <span className="text-[0.6875rem] font-semibold uppercase tracking-[0.16em] text-faint">Answer</span>
               <span className="font-serif text-lg font-semibold wrap-anywhere">{card.word}</span>
             </div>
             {revealed && (
               <div className="flex flex-1 flex-col justify-center gap-5 py-5">
                 {card.back.map((field) => (
                   <div key={field.key}>
-                    <div className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted">
+                    <div className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-faint">
                       {field.label}
                     </div>
-                    <p className="whitespace-pre-line text-lg leading-relaxed wrap-anywhere">{field.value}</p>
+                    <p className="whitespace-pre-line font-serif text-[1.125rem] leading-[1.55] wrap-anywhere">{field.value}</p>
                   </div>
                 ))}
                 {card.back.length === 0 && (
-                  <p className="text-center text-muted">
+                  <p className="text-center text-sm leading-relaxed text-muted">
                     {card.detailsHidden
                       ? 'The definition and example are hidden at this mastery level. Recall them from memory.'
                       : 'No definition or example is recorded for this word.'}
                   </p>
                 )}
                 {card.back.length > 0 && card.detailsHidden && (
-                  <p className="text-sm text-muted">Other details are hidden at this mastery level.</p>
+                  <p className="text-xs text-faint">Other details are hidden at this mastery level.</p>
                 )}
               </div>
             )}
@@ -166,18 +166,20 @@ export function Flashcard({
       <div
         aria-hidden="true"
         data-testid="swipe-feedback"
-        className={`pointer-events-none absolute inset-0 flex items-start rounded-3xl p-4 ${
+        className={`pointer-events-none absolute inset-0 flex items-start rounded-2xl p-4 ${
           leaning === 'remember'
-            ? 'justify-start bg-good/10 ring-good'
-            : 'justify-end bg-bad/10 ring-bad'
-        } ${armed || (locked && leaning !== null) ? 'ring-4' : 'ring-2'}`}
+            ? 'justify-start bg-accent-soft ring-accent'
+            : 'justify-end bg-line-strong/50 ring-line-strong'
+        } ${armed || (locked && leaning !== null) ? 'ring-2' : 'ring-1'}`}
         style={{ opacity: tint, transition: swipe.dragging ? 'none' : 'opacity 160ms ease-out' }}
       >
         {leaning !== null && (
           <span
-            className={`rounded-lg px-3 py-1.5 text-sm font-bold uppercase tracking-wide text-white ${
-              leaning === 'remember' ? 'bg-good' : 'bg-bad'
-            } dark:text-paper`}
+            className={`rounded-lg px-3 py-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] ${
+              leaning === 'remember'
+                ? 'bg-accent text-on-accent'
+                : 'border border-line-strong bg-surface text-ink'
+            }`}
           >
             {ACTION_LABEL[leaning]}
           </span>
@@ -189,11 +191,11 @@ export function Flashcard({
         type="button"
         aria-label={flipped ? 'Flip card back to the front' : 'Flip card to show the answer'}
         aria-keyshortcuts="Space"
-        className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 whitespace-nowrap rounded-full border border-line bg-surface/90 px-4 py-1.5 text-sm font-medium text-muted backdrop-blur"
+        className="absolute bottom-4 left-1/2 flex -translate-x-1/2 cursor-pointer items-center gap-2 whitespace-nowrap rounded-full border border-line-strong bg-paper px-4 py-1.5 text-xs font-medium text-muted transition-colors hover:text-ink"
       >
         <span className="keyboard:hidden">Tap to flip</span>
         <span className="hidden keyboard:inline">{flipped ? 'Flip back' : 'Show answer'}</span>
-        <kbd className="hidden rounded border border-line bg-paper px-1.5 py-0.5 text-xs keyboard:inline">
+        <kbd className="hidden rounded border border-line bg-surface px-1.5 py-0.5 text-[0.6875rem] keyboard:inline">
           Space
         </kbd>
       </button>

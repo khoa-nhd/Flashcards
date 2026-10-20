@@ -80,7 +80,7 @@ export function TrueMasteryDetail({
               tier === 'Good' ? 'bg-accent-soft text-accent' :
               tier === 'Developing' ? 'bg-warn-soft text-warn-ink' :
               tier === 'Weak' ? 'bg-bad-soft text-bad-ink' :
-              'bg-line/50 text-muted'
+              'bg-line-strong/60 text-muted'
             }`}
           >
             {tier} ({mastery})
@@ -120,7 +120,7 @@ export function TrueMasteryDetail({
             const confidence = breakdown?.confidence ?? 0;
             const confidencePercent = Math.round(confidence * 100);
             return (
-              <div key={mode} className="rounded-xl border border-line bg-surface/50 p-3">
+              <div key={mode} className="rounded-xl border border-line bg-paper p-3">
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <span className="font-medium text-sm">{getModeLabel(mode)}</span>
                   <span className="text-xs text-muted">{breakdown?.correctAnswers ?? 0}/{breakdown?.totalAnswers ?? 0} correct</span>
@@ -144,7 +144,7 @@ export function TrueMasteryDetail({
 
           // Mode without evidence
           return (
-            <div key={mode} className="col-span-2 rounded-xl border border-line bg-surface/50 p-3 text-center text-xs text-muted">
+            <div key={mode} className="col-span-2 rounded-xl border border-line bg-paper p-3 text-center text-xs text-muted">
               {getModeLabel(mode)}: No practice data yet.
               {mode === 'recall' && <span className="ml-1 text-accent">(self-graded)</span>}
             </div>

@@ -95,27 +95,35 @@ export function DashboardPage() {
         {summary !== null && today !== null && (
           <div className={`flex flex-col gap-6 ${state.refreshing ? 'opacity-70' : ''}`}>
             {/* Headline: what needs doing now, and the way to do it. */}
-            <section className={`${CARD} flex flex-wrap items-center justify-between gap-4 p-5`}>
-              <div>
-                <p className="text-sm text-muted">Ready to review</p>
-                <p className="text-5xl font-semibold tracking-tight">{ready}</p>
-                <p className="mt-1 text-sm text-muted">
-                  {ready === 0
-                    ? 'Nothing is waiting. New words and due reviews will show up here.'
-                    : `${summary.overdue} overdue, ${summary.dueToday} due today${
-                        summary.unscheduled > 0 && ready > summary.overdue + summary.dueToday
-                          ? `, ${summary.unscheduled} new`
-                          : ''
-                      }.`}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
-                  <Icon name="review" className="size-4" /> Start review
-                </Link>
-                <Link to={ROUTES.add} className={BUTTON_SECONDARY}>
-                  <Icon name="add" className="size-4" /> Add vocabulary
-                </Link>
+            <section
+              aria-label="Ready to review"
+              className="pool pool-top overflow-hidden rounded-2xl border border-line px-6 py-7 md:px-9 md:py-9"
+            >
+              <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
+                <div className="max-w-[36rem]">
+                  <h2 className="font-serif text-[2.5rem] font-semibold leading-[1.04] tracking-[-0.025em] text-ink md:text-[3.25rem]">
+                    {ready === 0
+                      ? 'Nothing is due right now.'
+                      : `${ready} ${ready === 1 ? 'word' : 'words'} ready to review.`}
+                  </h2>
+                  <p className="mt-3 text-sm leading-relaxed text-muted">
+                    {ready === 0
+                      ? 'New words and due reviews will show up here.'
+                      : `${summary.overdue} overdue, ${summary.dueToday} due today${
+                          summary.unscheduled > 0 && ready > summary.overdue + summary.dueToday
+                            ? `, ${summary.unscheduled} new`
+                            : ''
+                        }.`}
+                  </p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
+                    <Icon name="review" className="size-4" /> Start review
+                  </Link>
+                  <Link to={ROUTES.add} className={BUTTON_SECONDARY}>
+                    <Icon name="add" className="size-4" /> Add vocabulary
+                  </Link>
+                </div>
               </div>
             </section>
 
@@ -143,14 +151,14 @@ export function DashboardPage() {
                 {/* Due review */}
                 <Link
                   to={buildHref(ROUTES.review)}
-                  className={`flex flex-col gap-2 p-4 rounded-xl border ${
+                  className={`flex flex-col gap-2 rounded-xl border p-4 transition-colors hover:border-muted ${
                     summary.dueToday > 0 || summary.overdue > 0
-                      ? 'border-accent bg-accent-soft'
+                      ? 'border-accent/50 bg-accent-soft'
                       : 'border-line bg-surface'
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <span className="flex size-8 items-center justify-center rounded-lg bg-accent-soft text-accent">
+                    <span className="flex size-8 items-center justify-center rounded-lg border border-accent/40 text-accent">
                       <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 6v6l4 2"/></svg>
                     </span>
                     <span className="font-semibold text-sm">Review now</span>
@@ -167,14 +175,10 @@ export function DashboardPage() {
                 {/* Practice weak words with evidence */}
                 <Link
                   to={buildHref(ROUTES.practice, { source: 'weak' })}
-                  className={`flex flex-col gap-2 p-4 rounded-xl border ${
-                    (trueMasterySummary?.wordsWithEvidence ?? 0) > 0
-                      ? 'border-warn bg-warn-soft'
-                      : 'border-line bg-surface'
-                  }`}
+                  className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-4 transition-colors hover:border-muted"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="flex size-8 items-center justify-center rounded-lg bg-warn-soft text-warn">
+                    <span className="flex size-8 items-center justify-center rounded-lg bg-line-strong/50 text-muted">
                       <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>
                     </span>
                     <span className="font-semibold text-sm">Practice weak words</span>
@@ -189,10 +193,10 @@ export function DashboardPage() {
                 {/* Collect evidence */}
                 <Link
                   to={buildHref(ROUTES.practice, { source: 'all' })}
-                  className="flex flex-col gap-2 p-4 rounded-xl border border-line bg-surface"
+                  className="flex flex-col gap-2 rounded-xl border border-line bg-surface p-4 transition-colors hover:border-muted"
                 >
                   <div className="flex items-center gap-2">
-                    <span className="flex size-8 items-center justify-center rounded-lg bg-line/50 text-muted">
+                    <span className="flex size-8 items-center justify-center rounded-lg bg-line-strong/60 text-muted">
                       <svg viewBox="0 0 24 24" className="size-5" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
                     </span>
                     <span className="font-semibold text-sm">Collect evidence</span>
@@ -416,10 +420,10 @@ export function DashboardPage() {
                       <button
                         type="button"
                         onClick={() => openWord(entry.id)}
-                        className="flex w-full cursor-pointer items-center gap-3 py-2.5 text-left hover:bg-line/20"
+                        className="flex w-full cursor-pointer items-center gap-3 py-2.5 text-left transition-colors hover:bg-line-strong/40"
                       >
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-medium">{entry.word}</span>
+                          <span className="block truncate font-serif text-[1.0625rem] font-medium">{entry.word}</span>
                           <span className="block truncate text-sm text-muted">{entry.meaning ?? entry.definition ?? '—'}</span>
                         </span>
                         <span className="hidden shrink-0 sm:block">

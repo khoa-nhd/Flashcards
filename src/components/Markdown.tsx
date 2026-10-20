@@ -86,7 +86,7 @@ function blocks(markdown: string): ReactNode[] {
       }
       i += 1;
       out.push(
-        <pre key={key} className="my-2 overflow-x-auto rounded-xl bg-line/50 p-3">
+        <pre key={key} className="my-2 overflow-x-auto rounded-xl bg-paper p-3">
           <code className="font-mono text-[0.85em]">{code.join('\n')}</code>
         </pre>,
       );

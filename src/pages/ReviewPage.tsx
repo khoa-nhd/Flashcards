@@ -42,7 +42,7 @@ function CountingSwitch() {
   const { counting: preference } = useApp();
   return (
     <label
-      className="flex h-9 cursor-pointer items-center gap-2 rounded-full border border-line bg-surface px-3 text-sm font-medium text-muted"
+      className="flex h-9 cursor-pointer items-center gap-2 rounded-full border border-line-strong bg-transparent px-3 text-sm font-medium text-muted"
       title="Count this review toward mastery. Off, the answers are still recorded, but every word keeps its mastery and review date."
     >
       <input
@@ -62,7 +62,7 @@ function CountingSwitch() {
 }
 
 const HEADER_BUTTON =
-  'flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-line px-3 text-sm font-medium text-muted transition hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
+  'flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-line-strong px-3 text-sm font-medium text-muted transition-colors hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
 
 /**
  * The flashcard review. The session itself lives for the whole app, so leaving
@@ -158,6 +158,9 @@ export function ReviewPage() {
     ensureReviewSession(selection(ids));
   };
 
+  // A finished sitting is its own screen: the queue controls step aside for the summary.
+  const finishedSession = status === 'completed' && state.cards.length > 0;
+
   let content;
   if (choosing) {
     content = (
@@ -184,7 +187,7 @@ export function ReviewPage() {
         <button
           type="button"
           onClick={reload}
-          className="h-12 cursor-pointer rounded-2xl bg-accent px-6 font-semibold text-white dark:text-paper"
+          className="h-12 cursor-pointer rounded-xl bg-accent px-6 font-semibold text-on-accent transition hover:bg-accent-hover focus-visible:outline-on-accent"
         >
           Try again
         </button>
@@ -220,7 +223,11 @@ export function ReviewPage() {
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mx-auto flex w-full max-w-xl flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pb-1 pt-3">
+      <div
+        className={`mx-auto flex w-full max-w-xl flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pb-1 pt-3 ${
+          finishedSession ? 'hidden' : ''
+        }`}
+      >
         <div className="flex min-w-0 items-center gap-2">
           <h1 className="hidden truncate text-sm font-semibold tracking-tight md:block">Review</h1>
           <ModeBadge meta={state.meta} />
@@ -233,7 +240,7 @@ export function ReviewPage() {
             id="review-focus"
             value={picking ? SELECT_VALUE : askedKey === 'weak' ? 'weak' : ''}
             title="Choose which words to review. The weakest words and your own picks may be taken before they are due."
-            className="h-9 max-w-[11rem] cursor-pointer rounded-full border border-line bg-surface px-3 text-sm font-medium text-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-9 max-w-[11rem] cursor-pointer rounded-full border border-line-strong bg-transparent px-3 text-sm font-medium text-muted disabled:cursor-not-allowed disabled:opacity-50"
             onChange={(event) => {
               const { value } = event.target;
               // Hand the keys back to the card: an arrow key should answer, not change this choice.
@@ -289,7 +296,7 @@ export function ReviewPage() {
           </Link>
         </p>
       )}
-      <div className="min-h-0 flex-1">{content}</div>
+      <div className="pool min-h-0 flex-1">{content}</div>
       {helpOpen && (
         <ShortcutHelp
           answerKeys={settings.answerKeys}

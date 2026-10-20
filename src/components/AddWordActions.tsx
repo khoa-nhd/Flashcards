@@ -351,7 +351,7 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
             <button
               type="button"
               onClick={() => openWord(vocabulary.resolveId(savedId))}
-              className="cursor-pointer rounded-lg px-1.5 py-0.5 text-xs font-semibold text-muted hover:bg-line/40 hover:text-ink"
+              className="cursor-pointer rounded-lg px-1.5 py-0.5 text-xs font-semibold text-muted hover:bg-line-strong/50 hover:text-ink"
             >
               View
             </button>

@@ -19,16 +19,20 @@ export function AddPage() {
   const state = useVocabulary();
   return (
     <div className={PAGE}>
-      <PageHeader
-        title="Add vocabulary"
-        description="Create a new word in your vocabulary."
-        actions={
-          <Link to={ROUTES.import} className={BUTTON_SECONDARY}>
-            Import a list
-          </Link>
-        }
-      />
-      <VocabularyGate state={state}>{state.meta !== null && <AddForm meta={state.meta} entries={state.entries} />}</VocabularyGate>
+      <div className="mx-auto w-full max-w-2xl">
+        <PageHeader
+          title="Add vocabulary"
+          description="Create a new word in your vocabulary."
+          actions={
+            <Link to={ROUTES.import} className={BUTTON_SECONDARY}>
+              Import a list
+            </Link>
+          }
+        />
+        <VocabularyGate state={state}>
+          {state.meta !== null && <AddForm meta={state.meta} entries={state.entries} />}
+        </VocabularyGate>
+      </div>
     </div>
   );
 }
@@ -231,7 +235,7 @@ function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyE
   const disabled = !meta.writesEnabled;
 
   return (
-    <div className="mx-auto flex max-w-2xl flex-col gap-4">
+    <div className="flex flex-col gap-4">
       {savingAttempts.length > 0 && (
         <div
           role="status"

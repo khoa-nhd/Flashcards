@@ -56,7 +56,7 @@ export function ListenPrompt({ text, lang, answered }: ListenPromptProps) {
   }, [begin]);
 
   return (
-    <div className="rounded-3xl border border-line bg-surface px-6 py-8 text-center shadow-[0_1px_2px_rgb(0_0_0/0.04)]">
+    <div className="rounded-2xl border border-line bg-surface px-6 py-8 text-center shadow-[0_30px_70px_-45px_rgba(0,0,0,0.9)]">
       <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted">Listen</p>
       <p className="mt-2 text-sm text-muted" aria-live="polite">
         {playing ? 'Playing…' : answered ? 'Play it again to hear it once more.' : 'Type the word you hear.'}
