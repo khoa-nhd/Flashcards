@@ -1,13 +1,22 @@
 import {
   importItemSchema,
+  MAX_SENSES,
   normalizeId,
   NO_CAPABILITIES,
   type Capabilities,
   type CreateEntryRequest,
   type ImportResponse,
+  type ImportSense,
   type UpdateEntryRequest,
   type VocabularyEntry,
   type VocabularyListResponse,
+  type Sense,
+  type AddSenseRequest,
+  type UpdateSenseRequest,
+  type ReorderSensesRequest,
+  type ArchiveSenseRequest,
+  type RestoreSenseRequest,
+  type AddSenseResponse,
 } from '../shared/api.js';
 import { calendarDateInTimeZone, type IsoDate } from '../shared/dates.js';
 import type { ReviewRules } from '../shared/review-logic.js';
@@ -17,8 +26,9 @@ import { TEXT_FIELD_KEYS, type NewWordDefaults } from '../shared/vocabulary.js';
 import { classifyReviewStatus, isReviewableNow } from '../shared/vocabulary-status.js';
 import { HttpError } from './errors.js';
 import { KeyedMutex } from './keyed-mutex.js';
+import { derivedRequestId } from './request-id.js';
 import { MASTERY_ONLY, type SchedulerStore } from './scheduler-store.js';
-import type { EntryChanges, EntryData, VocabularyCatalog } from './vocabulary-catalog.js';
+import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from './vocabulary-catalog.js';
 
 export interface VocabularyServiceOptions {
   catalog: VocabularyCatalog;
@@ -39,6 +49,10 @@ const RECENT_CREATE_LIMIT = 200;
 
 const emptyToNull = (text: string | undefined): string | null | undefined =>
   text === undefined ? undefined : text === '' ? null : text;
+
+/** A sense field as the row holds it: absent, empty and blank all mean "no value". */
+const senseText = (value: string | null | undefined): string | null =>
+  value == null || value === '' ? null : value;
 
 /**
  * Whole-record operations for the bank, dashboard, calendar and Add form.
@@ -134,7 +148,11 @@ export class VocabularyService {
    * None of this is atomic across server instances, which is why the existing
    * entries are returned for the user to judge.
    */
-  async create(request: CreateEntryRequest): Promise<{ entry: VocabularyEntry; created: boolean }> {
+  async create(
+    request: CreateEntryRequest,
+    /** The word's senses, written with the word itself where the store can. */
+    senses?: NewEntry['senses'],
+  ): Promise<{ entry: VocabularyEntry; created: boolean }> {
     await this.requireWrites();
     const { catalog, defaults } = this.options;
 
@@ -164,6 +182,7 @@ export class VocabularyService {
         mastery: request.mastery ?? defaults.mastery,
         reviewDate:
           request.reviewDate !== undefined ? request.reviewDate : defaults.reviewDate === 'today' ? today : null,
+        senses,
       });
       this.rememberCreate(request.requestId, entry);
       return { entry: this.decorate(entry, today), created };
@@ -178,6 +197,15 @@ export class VocabularyService {
    * only itself. If the store fails part-way, what was done so far is
    * reported with where it stopped; sending the same batch again finishes it
    * without creating anything twice.
+   *
+   * A row may carry the word's senses in order, as the account export lists
+   * them. Those senses are then the word's content — the row's own meaning,
+   * definition and example are not read, so nothing is stored twice — and the
+   * row is refused whole if the store cannot hold senses, rather than
+   * importing a word stripped of them. Where the database writes them, the
+   * word and every sense it names land in one transaction, so a failure
+   * cannot leave a word behind without its senses; the pass afterwards then
+   * archives what the file marks and finishes any earlier interrupted run.
    */
   async importBatch(items: readonly unknown[]): Promise<ImportResponse> {
     await this.requireWrites();
@@ -189,22 +217,101 @@ export class VocabularyService {
         results.push({ outcome: 'invalid', entry: null, message });
         continue;
       }
+      const { senses, ...item } = parsed.data;
+      if (senses !== undefined && senses.length > 0 && !this.capabilities?.senses) {
+        results.push({
+          outcome: 'invalid',
+          entry: null,
+          message: 'This database cannot store multiple senses yet. Settings → Connection shows the update that adds it.',
+        });
+        continue;
+      }
       try {
-        const { entry, created } = await this.create(parsed.data);
-        results.push({ outcome: created ? 'imported' : 'already_imported', entry, message: null });
+        const withSenses = senses !== undefined && senses.length > 0;
+        const { entry, created } = await this.create(
+          // The senses are the word's content: the row's own fields are not read.
+          withSenses ? { ...item, meaning: undefined, definition: undefined, example: undefined } : item,
+          // Carried into the row's own write, so the word and every sense it
+          // names land together where the store can write them together. The
+          // ids match what fillSenses derives, so a repeat lands on the same
+          // senses either way.
+          withSenses
+            ? senses.map((sense, position) => ({
+                meaning: senseText(sense.meaning),
+                definition: senseText(sense.definition),
+                example: senseText(sense.example),
+                requestId: derivedRequestId(item.requestId, `sense:${position}`),
+              }))
+            : undefined,
+        );
+        // Always write the senses again afterwards: on a store that could not
+        // carry them with the word this is what makes them, and on one that
+        // could it is a repeat that lands on the same rows and archives what
+        // the file says to archive — either way the word ends the same.
+        const stored =
+          senses !== undefined && senses.length > 0
+            ? await this.fillSenses(item.requestId, entry, senses)
+            : entry;
+        results.push({ outcome: created ? 'imported' : 'already_imported', entry: stored, message: null });
       } catch (error) {
         if (error instanceof HttpError && error.code === 'duplicate') {
           results.push({ outcome: 'duplicate', entry: null, message: error.message });
         } else if (error instanceof HttpError && error.status === 400) {
           results.push({ outcome: 'invalid', entry: null, message: error.message });
         } else {
-          // Not about this row: the store is in trouble. Stop here and say exactly how far it got.
-          const message = error instanceof HttpError ? error.message : 'The database could not be reached.';
+          // Not about this row: the store is in trouble. Stop here, name the
+          // row it happened on, and say how a retry lands the rest.
+          const detail = error instanceof HttpError ? error.message : 'The database could not be reached.';
+          const message = `"${item.word}" is incomplete: ${detail} Nothing after it was attempted. Send the same file again to finish — what is already imported is not added twice.`;
           return { results, stopped: { index, message } };
         }
       }
     }
     return { results, stopped: null };
+  }
+
+  /**
+   * The senses of one imported word, in the order the file lists them, each
+   * made under a request id derived from the row's own: a repeat of the batch
+   * lands on the senses already made, and a run that stopped between the word
+   * and its senses finishes instead of doubling anything. The entry lock the
+   * sense editor uses is held throughout, and each row is one database call —
+   * the resume call that is the import's authorized exception, allowed to
+   * finish a word that has since been moved to the trash where the ordinary
+   * sense operations refuse it. Nothing stored is changed — a sense is only
+   * added, and only archived when the file says so and it is not archived
+   * already — so an edit made after an interrupted import survives the rest
+   * of it.
+   */
+  private async fillSenses(
+    requestId: string,
+    entry: VocabularyEntry,
+    senses: readonly ImportSense[],
+  ): Promise<VocabularyEntry> {
+    const { catalog } = this.options;
+    const store = catalog.senses;
+    if (store === undefined) return entry;
+    return this.locks.run(`sense:${entry.id}`, async () => {
+      for (const [position, sense] of senses.entries()) {
+        // The one write path allowed to finish senses on a word that has been
+        // moved to the trash: each row lands under its own request id, with
+        // the archive state the file carries in the same call. A sense that
+        // is already there is answered, never rewritten — an edit made after
+        // an interrupted run survives the rest of the import.
+        await store.createSense(
+          entry.id,
+          {
+            meaning: senseText(sense.meaning),
+            definition: senseText(sense.definition),
+            example: senseText(sense.example),
+            requestId: derivedRequestId(requestId, `sense:${position}`),
+          },
+          { resume: true, archived: sense.archived === true },
+        );
+      }
+      const updated = await catalog.getEntry(entry.id);
+      return this.decorate(updated ?? entry, this.today());
+    });
   }
 
   /** Writes only the fields whose value actually differs from what is stored. */
@@ -267,6 +374,11 @@ export class VocabularyService {
       }
       if (Object.keys(changes).length === 0) return this.decorate(current, today);
 
+      // A client that states the senses version it last saw is refused if the
+      // senses have moved on since it read them. The store checks it inside
+      // the same statement that writes the change.
+      if (request.expectSensesVersion !== undefined) changes.expectSensesVersion = request.expectSensesVersion;
+
       if (changes.word !== undefined && request.allowDuplicate !== true) {
         const others = (await catalog.findEntriesByWord(changes.word)).filter((entry) => entry.id !== pageId);
         if (others.length > 0) {
@@ -299,6 +411,125 @@ export class VocabularyService {
     const entry = await this.options.catalog.restoreEntry(normalizeId(id));
     if (entry === null) throw notFound();
     return this.decorate(entry, this.today());
+  }
+
+  // ---- Sense operations (schema version 13) ----
+
+  /** List all senses for a vocabulary entry, archived ones included. */
+  async listSenses(vocabularyId: string): Promise<Sense[]> {
+    if (!this.capabilities?.senses) {
+      throw new HttpError(409, 'not_supported', 'This database cannot keep multiple senses yet. Settings → Connection shows the update that adds it.');
+    }
+    const pageId = normalizeId(vocabularyId);
+    if ((await this.options.catalog.getEntry(pageId)) === null) throw notFound();
+    return this.options.catalog.senses!.listSenses(pageId);
+  }
+
+  /** Get a single sense by ID. */
+  async getSense(senseId: string): Promise<Sense> {
+    if (!this.capabilities?.senses) {
+      throw new HttpError(409, 'not_supported', 'This database cannot keep multiple senses yet. Settings → Connection shows the update that adds it.');
+    }
+    const sense = await this.options.catalog.senses!.getSense(senseId);
+    if (!sense) throw notFound();
+    return sense;
+  }
+
+  /** Add a new sense to a vocabulary entry. A repeated request id lands on the same sense. */
+  async addSense(vocabularyId: string, request: AddSenseRequest): Promise<AddSenseResponse> {
+    await this.requireWrites();
+    if (!this.capabilities?.senses) {
+      throw new HttpError(409, 'not_supported', 'This database cannot keep multiple senses yet. Settings → Connection shows the update that adds it.');
+    }
+    if (request.meaning == null && request.definition == null && request.example == null) {
+      throw new HttpError(400, 'invalid_request', 'A sense needs at least a meaning, a definition or an example.');
+    }
+    const pageId = normalizeId(vocabularyId);
+    return this.locks.run(`sense:${pageId}`, async () => {
+      if ((await this.options.catalog.getEntry(pageId)) === null) throw notFound();
+      const live = (await this.options.catalog.senses!.listSenses(pageId)).filter((sense) => !sense.archived);
+      if (live.length >= MAX_SENSES) {
+        throw new HttpError(400, 'invalid_request', `A word can hold at most ${MAX_SENSES} senses.`);
+      }
+      const { sense, created } = await this.options.catalog.senses!.createSense(pageId, {
+        meaning: request.meaning ?? null,
+        definition: request.definition ?? null,
+        example: request.example ?? null,
+        requestId: request.requestId,
+      });
+      return { sense, created };
+    });
+  }
+
+  /** Update an existing sense. A field left out is left as it is; `null` clears it. */
+  async updateSense(senseId: string, request: UpdateSenseRequest): Promise<Sense> {
+    await this.requireWrites();
+    if (!this.capabilities?.senses) {
+      throw new HttpError(409, 'not_supported', 'This database cannot keep multiple senses yet. Settings → Connection shows the update that adds it.');
+    }
+    return this.locks.run(`sense-op:${normalizeId(senseId)}`, async () => {
+      const result = await this.options.catalog.senses!.updateSense(normalizeId(senseId), {
+        ...(request.meaning !== undefined ? { meaning: request.meaning } : {}),
+        ...(request.definition !== undefined ? { definition: request.definition } : {}),
+        ...(request.example !== undefined ? { example: request.example } : {}),
+        expectedVersion: request.ifMatch,
+      });
+      if (result === 'stale') throw new HttpError(409, 'conflict', 'This sense was modified by another request. Please reload and try again.');
+      if (result === 'not_found') throw notFound();
+      return result;
+    });
+  }
+
+  /** Reorder senses. The order sent must name every live sense exactly once. */
+  async reorderSenses(vocabularyId: string, request: ReorderSensesRequest): Promise<void> {
+    await this.requireWrites();
+    if (!this.capabilities?.senses) {
+      throw new HttpError(409, 'not_supported', 'This database cannot keep multiple senses yet. Settings → Connection shows the update that adds it.');
+    }
+    const pageId = normalizeId(vocabularyId);
+    return this.locks.run(`sense:${pageId}`, async () => {
+      if ((await this.options.catalog.getEntry(pageId)) === null) throw notFound();
+      const liveIds = (await this.options.catalog.senses!.listSenses(pageId))
+        .filter((sense) => !sense.archived)
+        .map((sense) => sense.id);
+      const wanted = request.senseIds;
+      const complete =
+        wanted.length === liveIds.length &&
+        new Set(wanted).size === wanted.length &&
+        wanted.every((id) => liveIds.includes(id));
+      if (!complete) {
+        throw new HttpError(400, 'invalid_request', 'That order does not name every sense of this word exactly once. Reload and try again.');
+      }
+      const result = await this.options.catalog.senses!.reorderSenses(pageId, wanted, request.ifMatch);
+      if (result === 'stale') throw new HttpError(409, 'conflict', 'The sense list was modified by another request. Please reload and try again.');
+      if (result === 'not_found') throw notFound();
+    });
+  }
+
+  /** Archive (soft-delete) a sense. It stays, and can be restored. */
+  async archiveSense(senseId: string, request: ArchiveSenseRequest): Promise<void> {
+    await this.requireWrites();
+    if (!this.capabilities?.senses) {
+      throw new HttpError(409, 'not_supported', 'This database cannot keep multiple senses yet. Settings → Connection shows the update that adds it.');
+    }
+    return this.locks.run(`sense-op:${normalizeId(senseId)}`, async () => {
+      const result = await this.options.catalog.senses!.archiveSense(normalizeId(senseId), request.ifMatch);
+      if (result === 'stale') throw new HttpError(409, 'conflict', 'This sense was modified by another request. Please reload and try again.');
+      if (result === 'not_found') throw notFound();
+    });
+  }
+
+  /** Restore an archived sense. It returns at the end of the order. */
+  async restoreSense(senseId: string, request: RestoreSenseRequest): Promise<void> {
+    await this.requireWrites();
+    if (!this.capabilities?.senses) {
+      throw new HttpError(409, 'not_supported', 'This database cannot keep multiple senses yet. Settings → Connection shows the update that adds it.');
+    }
+    return this.locks.run(`sense-op:${normalizeId(senseId)}`, async () => {
+      const result = await this.options.catalog.senses!.restoreSense(normalizeId(senseId), request.ifMatch);
+      if (result === 'stale') throw new HttpError(409, 'conflict', 'This sense was modified by another request. Please reload and try again.');
+      if (result === 'not_found') throw notFound();
+    });
   }
 
   private recallCreate(requestId: string): EntryData | null {

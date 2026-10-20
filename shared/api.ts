@@ -81,6 +81,8 @@ export const capabilitiesSchema = z.object({
   library: z.boolean().default(false),
   /** A word can point at the root it was formed from, and the family can be suggested. */
   roots: z.boolean().default(false),
+  /** Multiple senses per vocabulary entry are supported. */
+  senses: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -94,6 +96,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   practice: false,
   library: false,
   roots: false,
+  senses: false,
 };
 
 /**
@@ -619,6 +622,20 @@ export const reviewStatusSchema = z.enum([
 /** Limits for what the app will write, matching the checks in the database. Generous for a vocabulary note. */
 export const FIELD_LIMITS = { word: 200, text: 6000 } as const;
 
+/** The most senses one word can hold at once. Archived senses do not count towards it. */
+export const MAX_SENSES = 25;
+
+/** A single sense within a vocabulary entry. */
+export const senseSchema = z.object({
+  id: z.string().min(1),
+  position: z.number().int().nonnegative(),
+  meaning: z.string().nullable(),
+  definition: z.string().nullable(),
+  example: z.string().nullable(),
+  archived: z.boolean(),
+  version: z.number().int().positive(),
+});
+
 /** A full vocabulary record as the bank, dashboard and calendar see it. */
 export const vocabularyEntrySchema = z.object({
   id: z.string().min(1),
@@ -646,6 +663,10 @@ export const vocabularyEntrySchema = z.object({
   /** When the record itself was created and last changed, kept apart from the user-entered Date Added. */
   createdTime: z.string().nullable(),
   lastEditedTime: z.string().nullable(),
+  /** All senses for this vocabulary entry (empty array for legacy databases). */
+  senses: z.array(senseSchema).default([]),
+  /** Sense schema version for optimistic locking. */
+  sensesVersion: z.number().int().nonnegative().default(0),
 });
 
 export const vocabularyListResponseSchema = z.object({
@@ -701,6 +722,17 @@ export const createEntryRequestSchema = z.strictObject({
 /** The most words one import request may carry. A longer list is sent as several requests. */
 export const IMPORT_BATCH_MAX = 50;
 
+/** One sense of a word being imported, in the order it should sit afterwards. */
+export const importSenseSchema = z.strictObject({
+  meaning: textSchema.nullable().optional(),
+  definition: textSchema.nullable().optional(),
+  example: textSchema.nullable().optional(),
+  /** Kept as it was: an archived sense stays archived after a restore. */
+  archived: z.boolean().optional(),
+});
+
+export type ImportSense = z.infer<typeof importSenseSchema>;
+
 /**
  * One word to import: content only. A mastery or a review date is not
  * accepted here, so an imported word always starts as a newly added one does.
@@ -715,6 +747,13 @@ export const importItemSchema = z.strictObject({
   dateAdded: isoDateSchema.optional(),
   /** Set for a row the owner chose to import although the word already exists. */
   allowDuplicate: z.boolean().optional(),
+  /**
+   * Every sense of the word, in order, as the account export lists them.
+   * When given, this is the word's content: the meaning, definition and
+   * example beside it are not read, so nothing is stored twice. Left out for
+   * a file made before senses existed, which imports as one first sense.
+   */
+  senses: z.array(importSenseSchema).max(MAX_SENSES, `A word can hold at most ${MAX_SENSES} senses`).optional(),
 });
 
 /** Rows are checked one by one on the server, so a bad one does not sink the rest. */
@@ -732,7 +771,7 @@ export const importResponseSchema = z.object({
       message: z.string().nullable(),
     }),
   ),
-  /** Set when the store failed part-way: rows from `index` on were not attempted. */
+  /** Set when the store failed part-way: the row at `index` was attempted and failed; the rows after it were not. */
   stopped: z.object({ index: z.number().int(), message: z.string() }).nullable(),
 });
 
@@ -753,11 +792,84 @@ export const updateEntryRequestSchema = z
       .strictObject({ mastery: masterySchema, reviewDate: isoDateSchema.nullable() })
       .optional(),
     allowDuplicate: z.boolean().optional(),
+    /** Expected senses version for optimistic locking (new clients). */
+    expectSensesVersion: z.number().int().nonnegative().optional(),
   })
   .refine(
     (value) => Object.keys(value).some((key) => key !== 'allowDuplicate'),
     'Nothing to change',
   );
+
+/** Input for a single sense in a senses array. */
+export const senseInputSchema = z
+  .strictObject({
+    id: z.string().min(1).optional(),
+    meaning: textSchema.nullable().optional(),
+    definition: textSchema.nullable().optional(),
+    example: textSchema.nullable().optional(),
+  })
+  .refine(
+    (value) => value.meaning !== undefined || value.definition !== undefined || value.example !== undefined,
+    'At least one of meaning, definition, or example must be provided',
+  );
+
+/** Request to add a new sense. */
+export const addSenseRequestSchema = z.strictObject({
+  /** Generated once per user action, so a retry does not create a duplicate. */
+  requestId: z.uuid(),
+  meaning: textSchema.nullable().optional(),
+  definition: textSchema.nullable().optional(),
+  example: textSchema.nullable().optional(),
+});
+
+/** Response for add sense operation. */
+export const addSenseResponseSchema = z.object({
+  sense: senseSchema,
+  created: z.boolean(),
+});
+
+/** Request to update an existing sense. */
+export const updateSenseRequestSchema = z
+  .strictObject({
+    meaning: textSchema.nullable().optional(),
+    definition: textSchema.nullable().optional(),
+    example: textSchema.nullable().optional(),
+    /** Required for optimistic locking: the sense version the client last saw. */
+    ifMatch: z.number().int().positive(),
+  })
+  .refine(
+    (value) => value.meaning !== undefined || value.definition !== undefined || value.example !== undefined,
+    'At least one of meaning, definition, or example must be provided',
+  );
+
+/** Request to reorder senses. */
+export const reorderSensesRequestSchema = z.strictObject({
+  /** The new order of sense IDs. All current non-archived senses must be present. */
+  senseIds: z.array(z.string().min(1)).min(1),
+  /** Required for optimistic locking: the senses_version the client last saw. */
+  ifMatch: z.number().int().nonnegative(),
+});
+
+/** Request to archive (soft-delete) a sense. */
+export const archiveSenseRequestSchema = z.strictObject({
+  /** Required for optimistic locking: the sense version the client last saw. */
+  ifMatch: z.number().int().positive(),
+});
+
+/** Request to restore an archived sense. */
+export const restoreSenseRequestSchema = z.strictObject({
+  /** Required for optimistic locking: the sense version the client last saw. */
+  ifMatch: z.number().int().positive(),
+});
+
+/** One sense of a word, as the rest of the app sees it. */
+export type { Sense } from './vocabulary.js';
+export type AddSenseRequest = z.infer<typeof addSenseRequestSchema>;
+export type AddSenseResponse = z.infer<typeof addSenseResponseSchema>;
+export type UpdateSenseRequest = z.infer<typeof updateSenseRequestSchema>;
+export type ReorderSensesRequest = z.infer<typeof reorderSensesRequestSchema>;
+export type ArchiveSenseRequest = z.infer<typeof archiveSenseRequestSchema>;
+export type RestoreSenseRequest = z.infer<typeof restoreSenseRequestSchema>;
 
 export const deleteEntryResponseSchema = z.object({ id: z.string(), trashed: z.literal(true) });
 

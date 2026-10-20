@@ -54,3 +54,21 @@ export interface CardFieldConfig {
    */
   visibility: 'always' | 'details';
 }
+
+/** A single sense (meaning) within a vocabulary entry. */
+export interface Sense {
+  /** Stable identifier for this sense. */
+  id: string;
+  /** Display order among senses of the same word. */
+  position: number;
+  /** Vietnamese meaning (translation). */
+  meaning: string | null;
+  /** English definition. */
+  definition: string | null;
+  /** Example sentence(s). */
+  example: string | null;
+  /** Whether this sense is archived (soft-deleted). */
+  archived: boolean;
+  /** Version for optimistic locking. */
+  version: number;
+}

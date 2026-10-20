@@ -1,7 +1,7 @@
 # AI assistance: what it is, what it sends, how to turn it off
 
-Five features can ask a language model for a draft. Everything else in the
-app runs without one, and all five keep working — as plain manual entry —
+Eight features can ask a language model for a draft. Everything else in the
+app runs without one, and all eight keep working — as plain manual entry —
 when no model is configured or it does not answer.
 
 | Feature | Where | What leaves this server |
@@ -11,6 +11,9 @@ when no model is configured or it does not answer.
 | **Word family** | A word's panel → Build the word family (AI) | The word from your card and, where set, its meaning and definition. The model replies with the words formed from one root and which end is the base; you untick what does not belong, then it creates the missing words and links them — ordinary writes, reviewed by you. |
 | **Example sentences** | A word's panel → More examples → Suggest example sentences (AI) | The word, its meaning, definition and example, plus the collocations you have saved for it (up to 10). The sentences come back as drafts; you can edit each one, and only the ones you leave ticked are saved as further examples. |
 | **Exam plan** | Exam → Suggest a plan (AI) | The 30 weakest words in the exam pool, each with its meaning and which kinds of question it can take (which this server decides — the model never sees your history or another account's data). It replies with sections, counts, optional clocks and one line of reason; nothing starts until you press *Use this plan*, and every field stays editable by hand. |
+| **Vocabulary maps** | Vocabulary maps → Draft with AI, and one map → Expand with AI | For a draft: the map kind plus your topic and/or the one word or collection you chose (the seed's text). For an expansion: the word labels already on that one map. The model replies with labels and links — seeds land as saved words by their own ids, every other label stays a suggestion, and *Expand with AI* proposes first: nothing is added until you press *Add these to the map*, where your own links are never overwritten. See [Vocabulary maps](vocabulary-maps.md). |
+| **Discovery: Explain** | Discovery → a text or transcript → select a word → Explain this word | The selected word and a window of its own source, taken by this server around the selection — never the whole source. The meaning and definition come back as a draft for the form; nothing is saved until the ordinary *Save to vocabulary* press, which keeps the sentence with the word. See [Discovery & Input](discovery.md). |
+| **Discovery: Draft a reading** | Discovery → Generate → Write a draft | The start you chose — a topic, the words of one saved collection, or a list of words you typed — plus the optional objective and the length. The reply is a draft reading with candidate words marked inside it; nothing is stored until you press *Use this reading*, where the draft becomes a source you can read and each candidate waits as a mark, never as a saved word. See [Discovery & Input](discovery.md). |
 
 Nothing else is ever sent: not your vocabulary, not your history, not your
 settings, and never another account's data — every request carries only what
@@ -24,7 +27,7 @@ key (`tests/frontend-secrets.test.ts` enforces this):
 
 | Variable | Meaning | Default |
 | --- | --- | --- |
-| `AI_API_KEY` | The provider's key. **Without it all five features are off** and say so. | — |
+| `AI_API_KEY` | The provider's key. **Without it all eight features are off** and say so. | — |
 | `AI_BASE_URL` | The provider's OpenAI-compatible endpoint, ending in `/`. | Google Gemini's OpenAI-compatible endpoint |
 | `AI_MODEL` | The model name sent with each request. | `gemini-2.5-flash` |
 | `AI_TIMEOUT_MS` | How long to wait before giving up (1000–28000 ms). | `20000` |
@@ -40,7 +43,11 @@ move.
 - **Per-account request limit** for Smart Reader, the word family, the
   example sentences and the exam plan: a token bucket of 5 each, one earned
   back per minute, checked *before* a request is made
-  (`server/ai/rate-limit.ts`). The coach has its own process-wide bucket of 10.
+  (`server/ai/rate-limit.ts`). The coach has its own process-wide bucket of
+  10, the vocabulary maps (draft and expand together) their own bucket of 5,
+  and Discovery's draft its own bucket of 5. Discovery's *Explain this word*
+  shares the Smart Reader bucket, because it is the same call over the same
+  kind of passage.
 - **Every failure is a named, tested state** (`server/ai/adapter.ts`):
   not configured, timeout, rate-limited, invalid output, unavailable. The
   browser treats them the same way: keep the form, say what happened, carry on
@@ -55,7 +62,10 @@ move.
   change any row by hand, and starting the exam stays your own press. The
   coach's note is stored beside your practice answer only after your answer
   has already been judged and saved — a failing model can never fail an
-  answer.
+  answer. Discovery follows the same rule twice over: an explanation only
+  fills the selection form until you save it, and a draft reading lives on
+  your screen until *Use this reading* stores its text as a source — the
+  candidate words arrive as marks, never as saved words.
 - **The verdict never comes from the model.** Smart Reader's sentence is the
   server's, taken from your text. The Writing Challenge's correct/incorrect
   check is a pure function (`shared/study-modes.ts`), independent of the
@@ -76,4 +86,5 @@ server/ai/writing-coach.ts the Writing Challenge coach (see below)
 server/ai/word-family.ts  the words formed from one root (needs schema 11)
 server/ai/examples.ts     example sentences with the saved collocations
 server/ai/exam-plan.ts    a suggested exam structure over your own words
+server/ai/discovery-writer.ts Discovery's draft reading (needs schema 19)
 ```

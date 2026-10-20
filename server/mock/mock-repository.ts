@@ -1,4 +1,5 @@
 import { normalizeId, type Confidence, type SessionSummary } from '../../shared/api.js';
+import { HttpError } from '../errors.js';
 import type { DailyStat } from '../../shared/analytics.js';
 import { addDays, type IsoDate } from '../../shared/dates.js';
 import type { HistoryEvent } from '../../shared/export-format.js';
@@ -8,7 +9,7 @@ import { normalizeWord } from '../../shared/text.js';
 import { DEFAULT_SCHEDULER, type SchedulerId } from '../../shared/scheduler/active.js';
 import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
 import type { CardFieldConfig, StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
-import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
+import type { EntryChanges, EntryData, NewEntry, SenseOperations, VocabularyCatalog } from '../vocabulary-catalog.js';
 import type {
   ConfidenceStat,
   PracticeDailyStat,
@@ -56,6 +57,8 @@ const SEEDS: Seed[] = [
   ['eloquent', 'adjective', '/ˈel.ə.kwənt/', 10, -10, 60, 'hùng hồn', 'Able to express ideas clearly and persuasively.', 'She gave an eloquent speech at the ceremony.'],
 ];
 
+import type { Sense } from '../../shared/api.js';
+
 interface StoredWord {
   id: string;
   word: string;
@@ -74,6 +77,10 @@ interface StoredWord {
   rootId: string | null;
   /** Kept beside the mastery schedule, as in the real store. */
   fsrs?: StoredFsrs | null;
+  /** Senses for this vocabulary entry (schema 13). */
+  senses?: Sense[];
+  /** Bumped on every sense change, as the real store's senses_version is. */
+  sensesVersion?: number;
 }
 
 interface MockLog {
@@ -112,6 +119,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     practice: true,
     library: true,
     roots: true,
+    senses: true,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
@@ -123,6 +131,8 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
   private readonly practice: Array<PracticeWrite & { at: string; state: ReviewState }> = [];
   private readonly words = new Map<string, StoredWord>();
   private readonly logs: MockLog[] = [];
+  /** Request id → sense id, so retrying an "add sense" lands on the same sense. */
+  private readonly senseRequests = new Map<string, string>();
   private created = 0;
 
   constructor(
@@ -148,6 +158,17 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         createdTime: `${dateAdded}T09:00:00.000Z`,
         lastEditedTime: `${dateAdded}T09:00:00.000Z`,
         rootId: null,
+        senses: [
+          {
+            id: `sense-${id}`,
+            position: 0,
+            meaning,
+            definition,
+            example,
+            archived: false,
+            version: 1,
+          },
+        ],
       });
     });
   }
@@ -532,6 +553,16 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       createdTime: timestamp,
       lastEditedTime: timestamp,
       rootId: null,
+      senses: entry.meaning || entry.definition || entry.example ? [{
+        id: `sense-${id}`,
+        position: 0,
+        meaning: entry.meaning,
+        definition: entry.definition,
+        example: entry.example,
+        archived: false,
+        version: 1,
+      }] : [],
+      sensesVersion: 0,
     };
     this.words.set(id, word);
     return { entry: toEntry(word), created: true };
@@ -540,7 +571,12 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
   async updateEntry(id: string, changes: EntryChanges): Promise<EntryData> {
     const word = this.words.get(normalizeId(id));
     if (!word || word.trashed) throw new Error(`Unknown sample record: ${id}`);
-    Object.assign(word, changes);
+    // The version the caller expected is checked, then left off the stored word.
+    const { expectSensesVersion, ...rest } = changes;
+    if (expectSensesVersion !== undefined && expectSensesVersion !== (word.sensesVersion ?? 0)) {
+      throw new HttpError(409, 'conflict', 'This word changed while you were editing it. Reload and try again.');
+    }
+    Object.assign(word, rest);
     return toEntry(this.touch(word));
   }
 
@@ -557,6 +593,143 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     word.trashed = false;
     return toEntry(word);
   }
+
+  // ---- SenseOperations (schema version 13) ----
+  /** The sense operations, reachable as `catalog.senses`. */
+  get senses(): SenseOperations {
+    return this;
+  }
+
+  private bumpSenses(word: StoredWord) {
+    word.sensesVersion = (word.sensesVersion ?? 0) + 1;
+  }
+
+  async listSenses(vocabularyId: string): Promise<Sense[]> {
+    const word = this.words.get(normalizeId(vocabularyId));
+    if (!word) return [];
+    // Archived senses stay listed, exactly as the real store lists them.
+    return [...(word.senses ?? [])].sort((a, b) => a.position - b.position);
+  }
+
+  async getSense(id: string): Promise<Sense | null> {
+    for (const word of this.words.values()) {
+      const sense = word.senses?.find(s => s.id === id);
+      if (sense) return sense;
+    }
+    return null;
+  }
+
+  async createSense(
+    vocabularyId: string,
+    sense: { meaning: string | null; definition: string | null; example: string | null; requestId: string },
+    options?: { resume?: boolean; archived?: boolean },
+  ): Promise<{ sense: Sense; created: boolean }> {
+    const word = this.words.get(normalizeId(vocabularyId));
+    if (!word) throw new Error(`Unknown sample record: ${vocabularyId}`);
+    // A retry of the same action carries the same request id and lands on the same sense.
+    const seen = this.senseRequests.get(sense.requestId);
+    if (seen !== undefined) {
+      const found = (word.senses ?? []).find((s) => s.id === seen);
+      if (found) {
+        // The import's completion call may still set the archive flag its
+        // file carried; nothing else about a stored sense changes.
+        if (options?.archived === true && !found.archived) {
+          found.archived = true;
+          found.version += 1;
+          this.bumpSenses(word);
+        }
+        return { sense: found, created: false };
+      }
+    }
+    const senses = word.senses ?? [];
+    const position = senses.reduce((highest, s) => Math.max(highest, s.position), -1) + 1;
+    const newSense: Sense = {
+      id: `sense-${crypto.randomUUID()}`,
+      position,
+      meaning: sense.meaning,
+      definition: sense.definition,
+      example: sense.example,
+      archived: options?.archived === true,
+      version: 1,
+    };
+    senses.push(newSense);
+    word.senses = senses;
+    this.senseRequests.set(sense.requestId, newSense.id);
+    this.bumpSenses(word);
+    return { sense: newSense, created: true };
+  }
+
+  async updateSense(id: string, patch: { meaning?: string | null; definition?: string | null; example?: string | null; expectedVersion: number }): Promise<Sense | 'stale' | 'not_found'> {
+    for (const word of this.words.values()) {
+      const sense = word.senses?.find((s) => s.id === id);
+      if (sense) {
+        if (sense.version !== patch.expectedVersion) return 'stale';
+        if (patch.meaning !== undefined) sense.meaning = patch.meaning;
+        if (patch.definition !== undefined) sense.definition = patch.definition;
+        if (patch.example !== undefined) sense.example = patch.example;
+        sense.version += 1;
+        this.bumpSenses(word);
+        return sense;
+      }
+    }
+    return 'not_found';
+  }
+
+  async reorderSenses(vocabularyId: string, senseIds: string[], expectedVersion: number): Promise<'ok' | 'stale' | 'not_found'> {
+    const word = this.words.get(normalizeId(vocabularyId));
+    if (!word) return 'not_found';
+    if ((word.sensesVersion ?? 0) !== expectedVersion) return 'stale';
+    const senses = word.senses ?? [];
+    const live = senses.filter((s) => !s.archived);
+    // The order sent must name every live sense exactly once.
+    if (senseIds.length !== live.length || senseIds.some((id) => !live.some((s) => s.id === id))) {
+      return 'not_found';
+    }
+    const ordered = senseIds.map((id, index) => {
+      const sense = live.find((s) => s.id === id)!;
+      return { ...sense, position: index };
+    });
+    // The archived senses pack in behind, so a restore starts past them.
+    const archived = senses
+      .filter((s) => s.archived)
+      .sort((a, b) => a.position - b.position)
+      .map((sense, index) => ({ ...sense, position: ordered.length + index }));
+    word.senses = [...ordered, ...archived];
+    this.bumpSenses(word);
+    return 'ok';
+  }
+
+  async archiveSense(id: string, expectedVersion: number): Promise<'ok' | 'stale' | 'not_found'> {
+    for (const word of this.words.values()) {
+      const sense = word.senses?.find((s) => s.id === id);
+      if (sense) {
+        if (sense.version !== expectedVersion || sense.archived) return 'stale';
+        sense.archived = true;
+        sense.version += 1;
+        this.bumpSenses(word);
+        return 'ok';
+      }
+    }
+    return 'not_found';
+  }
+
+  async restoreSense(id: string, expectedVersion: number): Promise<'ok' | 'stale' | 'not_found'> {
+    for (const word of this.words.values()) {
+      const sense = word.senses?.find((s) => s.id === id);
+      if (sense) {
+        if (sense.version !== expectedVersion || !sense.archived) return 'stale';
+        // Restored senses go to the end: their old position may have been taken.
+        const senses = word.senses ?? [];
+        sense.position = senses.reduce((highest, s) => Math.max(highest, s.position), -1) + 1;
+        sense.archived = false;
+        sense.version += 1;
+        this.bumpSenses(word);
+        return 'ok';
+      }
+    }
+    return 'not_found';
+  }
+
 }
 
 function toRecord(word: StoredWord): VocabularyRecord {
@@ -590,5 +763,8 @@ function toEntry(word: StoredWord): EntryData {
     createdTime: word.createdTime,
     lastEditedTime: word.lastEditedTime,
     rootId: word.rootId,
+    // Archived senses stay listed, exactly as the real store lists them.
+    senses: [...(word.senses ?? [])].sort((a, b) => a.position - b.position),
+    sensesVersion: word.sensesVersion ?? 0,
   };
 }

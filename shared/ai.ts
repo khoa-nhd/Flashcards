@@ -120,3 +120,79 @@ export const aiExamPlanResponseSchema = z.object({
 });
 
 export type AiExamPlanResponse = z.infer<typeof aiExamPlanResponseSchema>;
+
+// ---------------------------------------------------------------------------
+// A draft map for Vocabulary Maps
+// ---------------------------------------------------------------------------
+
+/**
+ * What the model may propose when a map is generated or expanded. It names
+ * nodes by their label, never by id: the server owns every reference, so a
+ * model cannot point a map at a word the learner never offered.
+ */
+export const aiMapDraftNodeSchema = z.object({
+  label: z.string().min(1).max(200),
+  note: z.string().max(300).nullable().optional(),
+  group: z.string().max(120).nullable().optional(),
+});
+
+export const aiMapDraftEdgeSchema = z.object({
+  fromLabel: z.string().min(1).max(200),
+  toLabel: z.string().min(1).max(200),
+  /** A relationship kind such as "synonym"; the server keeps only those the map's type accepts. */
+  kind: z.string().min(1).max(40),
+  pattern: z.string().max(300).nullable().optional(),
+  note: z.string().max(300).nullable().optional(),
+});
+
+export const aiMapDraftSchema = z.object({
+  nodes: z.array(aiMapDraftNodeSchema).max(12),
+  edges: z.array(aiMapDraftEdgeSchema).max(24),
+});
+
+export type AiMapDraft = z.infer<typeof aiMapDraftSchema>;
+
+// ---------------------------------------------------------------------------
+// A generated reading for Discovery
+// ---------------------------------------------------------------------------
+
+/** What the learner offers to generate from: exactly one of these. */
+export const aiDiscoveryRequestSchema = z
+  .strictObject({
+    /** A topic the learner typed. */
+    topic: z.string().min(1).max(200).optional(),
+    /** A saved collection, read for its words. The collection itself is never changed. */
+    collectionId: z.uuid().optional(),
+    /** A group of words the learner chose. */
+    words: z.array(z.string().min(1).max(200)).min(1).max(30).optional(),
+    /** What the text should help the learner do, if they said. */
+    objective: z.string().max(200).optional(),
+    length: z.enum(['short', 'medium']).optional(),
+    requestId: z.uuid(),
+  })
+  .refine((value) => [value.topic !== undefined, value.collectionId !== undefined, value.words !== undefined].filter(Boolean).length === 1, {
+    message: 'Give a topic, a collection or a list of words — exactly one.',
+  });
+
+export type AiDiscoveryRequest = z.infer<typeof aiDiscoveryRequestSchema>;
+
+/** One word the model points at inside its own text. It can only ever be a word that is there. */
+export const aiDiscoverySuggestionSchema = z.object({
+  word: z.string().min(1).max(200),
+  sentence: z.string().max(1000).nullable().optional(),
+  note: z.string().max(300).nullable().optional(),
+});
+
+/**
+ * What the model may answer: a passage to read, and the words in it worth
+ * stopping on. Every suggestion must be found in `text` as written — the
+ * server checks before the draft is even shown — and nothing is stored
+ * until the learner accepts the preview.
+ */
+export const aiDiscoveryDraftSchema = z.object({
+  title: z.string().min(1).max(200),
+  text: z.string().min(100).max(AI_LIMITS.passage),
+  suggestions: z.array(aiDiscoverySuggestionSchema).max(30).default([]),
+});
+
+export type AiDiscoveryDraft = z.infer<typeof aiDiscoveryDraftSchema>;

@@ -6,15 +6,26 @@
  * owner to check, and the rows they then confirm.
  *
  * Only a word's content is imported: the word, its meaning, definition,
- * example and the date it was added. A mastery level or a review date in the
- * file is deliberately not read. An imported word starts the way a newly
- * added one does, so no review progress is ever made up from a file.
+ * example, the date it was added, and — when the file is this app's own JSON
+ * export — every sense it lists, in order with its archive state. A mastery
+ * level or a review date in the file is deliberately not read. An imported
+ * word starts the way a newly added one does, so no review progress is ever
+ * made up from a file.
  */
 import { isIsoDate } from './dates.js';
+import { MAX_SENSES } from './api.js';
 import { normalizeWord, tidyWord } from './text.js';
 
 /** The same limits the Add form and the database enforce. */
 export const IMPORT_LIMITS = { word: 200, text: 6000, rows: 2000 } as const;
+
+/** One sense as the app's own JSON export lists it. The server checks it fully. */
+export interface ImportedSense {
+  meaning?: string;
+  definition?: string;
+  example?: string;
+  archived?: boolean;
+}
 
 export const IMPORT_FIELDS = ['word', 'meaning', 'definition', 'example', 'dateAdded'] as const;
 export type ImportField = (typeof IMPORT_FIELDS)[number];
@@ -125,6 +136,8 @@ export interface ParsedText {
   rows: string[][];
   /** Column names, when the source names them itself (the app's own JSON export). */
   header: string[] | null;
+  /** The senses each row carries, where the source lists them. Same length as `rows`. */
+  senses?: Array<ImportedSense[] | null>;
 }
 
 const JSON_KEYS: Array<[ImportField, string[]]> = [
@@ -147,6 +160,7 @@ function parseJsonExport(text: string): ParsedText | null {
   const list = Array.isArray(parsed) ? parsed : Array.isArray(holder?.entries) ? holder.entries : holder?.vocabulary;
   if (!Array.isArray(list)) return null;
   const rows: string[][] = [];
+  const senses: Array<ImportedSense[] | null> = [];
   for (const item of list) {
     if (typeof item !== 'object' || item === null) continue;
     const record = item as Record<string, unknown>;
@@ -156,9 +170,34 @@ function parseJsonExport(text: string): ParsedText | null {
         return typeof value === 'string' ? value : '';
       }),
     );
+    // The senses travel as they are written, with the record's own ids and
+    // versions — which belong to the source account, not to the restore —
+    // left out. Everything else is kept as written, so the server can judge
+    // each sense and refuse the row if it is not something this app stores.
+    senses.push(
+      Array.isArray(record['senses'])
+        ? ((record['senses'] as unknown[]).map((sense) =>
+            typeof sense === 'object' && sense !== null && !Array.isArray(sense) ? keepSenseFields(sense) : sense,
+          ) as ImportedSense[])
+        : null,
+    );
   }
-  return { format: 'json', delimiter: null, rows, header: JSON_KEYS.map(([field]) => IMPORT_FIELD_LABELS[field]) };
+  return {
+    format: 'json',
+    delimiter: null,
+    rows,
+    header: JSON_KEYS.map(([field]) => IMPORT_FIELD_LABELS[field]),
+    senses,
+  };
 }
+
+/** The four fields a sense is restored by; a record's id, position and version are not carried across. */
+const SENSE_KEYS = ['meaning', 'definition', 'example', 'archived'] as const;
+
+const keepSenseFields = (sense: object): unknown =>
+  Object.fromEntries(
+    SENSE_KEYS.filter((key) => key in sense).map((key) => [key, (sense as Record<string, unknown>)[key]]),
+  );
 
 /**
  * Reads pasted or uploaded text as rows of cells: this app's own JSON export,
@@ -274,6 +313,8 @@ export interface ImportRow {
   definition: string | null;
   example: string | null;
   dateAdded: string | null;
+  /** The senses the source lists for this word, where it lists them at all. */
+  senses?: ImportedSense[];
 }
 
 export type RowStatus =
@@ -302,13 +343,19 @@ const optional = (text: string | undefined): string | null => {
 };
 
 /** The rows the mapping picks out of the source, as words. Rows with no word and nothing else are dropped. */
-export function toImportRows(rows: readonly string[][], mapping: ColumnMapping, hasHeader: boolean): ImportRow[] {
+export function toImportRows(
+  rows: readonly string[][],
+  mapping: ColumnMapping,
+  hasHeader: boolean,
+  senses?: readonly (ImportedSense[] | null)[],
+): ImportRow[] {
   const column = (field: ImportField) => mapping.indexOf(field);
   const indexes = Object.fromEntries(IMPORT_FIELDS.map((field) => [field, column(field)])) as Record<ImportField, number>;
   const result: ImportRow[] = [];
   rows.forEach((cells, position) => {
     if (hasHeader && position === 0) return;
     const pick = (field: ImportField) => (indexes[field] === -1 ? undefined : cells[indexes[field]]);
+    const rowSenses = senses?.[position] ?? null;
     const row: ImportRow = {
       line: position + 1,
       word: tidyWord(pick('word') ?? ''),
@@ -316,6 +363,7 @@ export function toImportRows(rows: readonly string[][], mapping: ColumnMapping, 
       definition: optional(pick('definition')),
       example: optional(pick('example')),
       dateAdded: optional(pick('dateAdded')),
+      ...(rowSenses === null ? {} : { senses: rowSenses }),
     };
     const empty = row.word === '' && row.meaning === null && row.definition === null && row.example === null;
     if (!empty) result.push(row);
@@ -334,6 +382,17 @@ export function rowProblem(row: ImportRow): string | null {
   }
   if (row.dateAdded !== null && !isIsoDate(row.dateAdded)) {
     return `“${row.dateAdded}” is not a date written as YYYY-MM-DD.`;
+  }
+  if (row.senses !== undefined) {
+    if (row.senses.length > MAX_SENSES) return `A word can hold at most ${MAX_SENSES} senses.`;
+    for (const sense of row.senses) {
+      for (const field of ['meaning', 'definition', 'example'] as const) {
+        const value = sense?.[field];
+        if (typeof value === 'string' && value.length > IMPORT_LIMITS.text) {
+          return `A sense ${field} is longer than ${IMPORT_LIMITS.text} characters.`;
+        }
+      }
+    }
   }
   return null;
 }
@@ -377,6 +436,8 @@ export interface ImportItem {
   dateAdded?: string;
   /** Set only for a row the owner chose to import although it is a duplicate. */
   allowDuplicate?: boolean;
+  /** The word's senses in order, where the source listed them. */
+  senses?: ImportedSense[];
 }
 
 /**

@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { FIELD_LIMITS, type UpdateEntryInput, type VocabularyEntry } from '../../shared/api.js';
 import { isIsoDate } from '../../shared/dates.js';
+import type { DiscoverySourceKind } from '../../shared/discovery.js';
 import { useApp, useSettings, useVocabulary } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { MISSING_LABELS, missingFields } from '../lib/bank-query.js';
 import { MasteryPill, StatusBadge, formatDate, relativeDay } from './badges.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { openHref } from './discovery/labels.js';
 import { Field, describedBy } from './Field.js';
 import { Icon } from './Icon.js';
+import { Link } from './Link.js';
 import { SpeakButton } from './SpeakButton.js';
 import { Spinner } from './Spinner.js';
 import { WordExtras } from './WordExtras.js';
@@ -16,6 +19,13 @@ import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT, TEXTAREA } from 
 export interface WordDetailPanelProps {
   entryId: string;
   onClose: () => void;
+}
+
+interface SenseDraft {
+  id?: string;
+  meaning: string;
+  definition: string;
+  example: string;
 }
 
 interface Draft {
@@ -30,6 +40,7 @@ interface Draft {
 
 const toDraft = (entry: VocabularyEntry): Draft => ({
   word: entry.word,
+  // The shown text: the first sense that is not archived, as the store reports it.
   meaning: entry.meaning ?? '',
   definition: entry.definition ?? '',
   example: entry.example ?? '',
@@ -74,6 +85,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const [entry, setEntry] = useState<VocabularyEntry | null>(cached);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [checking, setChecking] = useState(true);
+  // Where a word was found, when it came from a source: the way back to it.
+  const [fromSource, setFromSource] = useState<{ id: string; title: string; kind: DiscoverySourceKind } | null>(null);
 
   const [draft, setDraft] = useState<Draft | null>(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -111,6 +124,23 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
     };
   }, [api, entryId, vocabulary]);
 
+  // A word saved from a source remembers where it was found; one typed in
+  // by hand has nothing to show, and that is not an error.
+  useEffect(() => {
+    let current = true;
+    api
+      .findWordContext(entryId)
+      .then((found) => {
+        if (current) setFromSource({ id: found.source.id, title: found.source.title, kind: found.source.kind });
+      })
+      .catch(() => {
+        // Most words have no source; nothing to add.
+      });
+    return () => {
+      current = false;
+    };
+  }, [api, entryId]);
+
   // Keep keyboard focus inside the panel when it opens, and give it back afterwards.
   useEffect(() => {
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -134,11 +164,182 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
     setErrors({});
     setSaveError(null);
     setDuplicateOf(null);
+    // One editor at a time: the sense form and the word form do not mix.
+    setSenseEditing(false);
+    setSenseDraft(null);
+    setSenseError(null);
   };
 
   const change = (key: keyof Draft, value: string) => {
     setDraft((current) => (current === null ? current : { ...current, [key]: value }));
     setDuplicateOf(null);
+  };
+
+  // Sense-related state
+  const [senseDraft, setSenseDraft] = useState<SenseDraft | null>(null);
+  const [senseEditing, setSenseEditing] = useState(false);
+  const [senseSaving, setSenseSaving] = useState(false);
+  const [senseError, setSenseError] = useState<string | null>(null);
+  const [reordering, setReordering] = useState(false);
+
+  const validateSense = (sense: SenseDraft): Partial<Record<keyof SenseDraft, string>> => {
+    const errors: Partial<Record<keyof SenseDraft, string>> = {};
+    for (const key of ['meaning', 'definition', 'example'] as const) {
+      if (sense[key].trim().length > FIELD_LIMITS.text) errors[key] = `Keep this under ${FIELD_LIMITS.text} characters.`;
+    }
+    if (sense.meaning.trim() === '' && sense.definition.trim() === '' && sense.example.trim() === '') {
+      errors.meaning = 'At least one of meaning, definition, or example is required.';
+    }
+    return errors;
+  };
+
+  const startSenseEditing = (index: number) => {
+    if (!entry || !entry.senses || entry.senses.length === 0) return;
+    const nonArchived = entry.senses.filter(s => !s.archived);
+    const sense = nonArchived[index];
+    if (!sense) return;
+    setSenseDraft({
+      id: sense.id,
+      meaning: sense.meaning ?? '',
+      definition: sense.definition ?? '',
+      example: sense.example ?? '',
+    });
+    setSenseEditing(true);
+    setSenseError(null);
+  };
+
+  const cancelSenseEditing = () => {
+    setSenseEditing(false);
+    setSenseDraft(null);
+    setSenseError(null);
+  };
+
+  const saveSense = async () => {
+    if (!entry || !senseDraft || senseSaving) return;
+    const errors = validateSense(senseDraft);
+    if (Object.keys(errors).length > 0) {
+      setSenseError('Please fix the errors above.');
+      return;
+    }
+
+    setSenseSaving(true);
+    setSenseError(null);
+    try {
+      if (senseDraft.id) {
+        // Update existing sense
+        const sense = entry.senses!.find(s => s.id === senseDraft.id);
+        if (!sense) throw new Error('Sense not found');
+        await api.updateEntrySense(sense.id, {
+          meaning: senseDraft.meaning || null,
+          definition: senseDraft.definition || null,
+          example: senseDraft.example || null,
+          ifMatch: sense.version,
+        });
+      } else {
+        // Add new sense
+        await api.addSense(entry.id, {
+          requestId: crypto.randomUUID(),
+          meaning: senseDraft.meaning || null,
+          definition: senseDraft.definition || null,
+          example: senseDraft.example || null,
+        });
+      }
+      // Refresh entry
+      const updated = await api.fetchEntry(entry.id);
+      setEntry(updated);
+      vocabulary.upsert(updated);
+      toasts.show({ message: senseDraft.id ? `Updated sense.` : `Added sense.` });
+      cancelSenseEditing();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'conflict') {
+        setSenseError('This sense was modified elsewhere. Please reload and try again.');
+      } else {
+        setSenseError(error instanceof ApiError ? error.message : 'Could not save the sense.');
+      }
+    } finally {
+      setSenseSaving(false);
+    }
+  };
+
+  const archiveSense = async (senseId: string, version: number) => {
+    if (!entry || senseSaving) return;
+    setSenseSaving(true);
+    try {
+      await api.archiveSense(senseId, { ifMatch: version });
+      const updated = await api.fetchEntry(entry.id);
+      setEntry(updated);
+      vocabulary.upsert(updated);
+      toasts.show({ message: 'Sense archived.' });
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'conflict') {
+        setSenseError('This sense was modified elsewhere. Please reload and try again.');
+      } else {
+        setSenseError(error instanceof ApiError ? error.message : 'Could not archive the sense.');
+      }
+    } finally {
+      setSenseSaving(false);
+    }
+  };
+
+  const restoreSense = async (senseId: string, version: number) => {
+    if (!entry || senseSaving) return;
+    setSenseSaving(true);
+    try {
+      await api.restoreSense(senseId, { ifMatch: version });
+      const updated = await api.fetchEntry(entry.id);
+      setEntry(updated);
+      vocabulary.upsert(updated);
+      toasts.show({ message: 'Sense restored.' });
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'conflict') {
+        setSenseError('This sense was modified elsewhere. Please reload and try again.');
+      } else {
+        setSenseError(error instanceof ApiError ? error.message : 'Could not restore the sense.');
+      }
+    } finally {
+      setSenseSaving(false);
+    }
+  };
+
+  const reorderSenses = async (newOrder: string[]) => {
+    if (!entry || reordering) return;
+    setReordering(true);
+    try {
+      await api.reorderSenses(entry.id, { senseIds: newOrder, ifMatch: entry.sensesVersion });
+      const updated = await api.fetchEntry(entry.id);
+      setEntry(updated);
+      vocabulary.upsert(updated);
+      toasts.show({ message: 'Senses reordered.' });
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'conflict') {
+        setSenseError('The sense list was modified elsewhere. Please reload and try again.');
+      } else {
+        setSenseError(error instanceof ApiError ? error.message : 'Could not reorder senses.');
+      }
+    } finally {
+      setReordering(false);
+    }
+  };
+
+  const addSense = () => {
+    setSenseDraft({ meaning: '', definition: '', example: '' });
+    setSenseEditing(true);
+    setSenseError(null);
+  };
+
+  /** Move one sense up or down the order, swapping it with its neighbour. */
+  const moveSense = async (index: number, direction: -1 | 1) => {
+    if (!entry) return;
+    const live = (entry.senses ?? []).filter((sense) => !sense.archived);
+    const target = index + direction;
+    if (target < 0 || target >= live.length) return;
+    const ids = live.map((sense) => sense.id);
+    const swapped = ids[index];
+    const other = ids[target];
+    if (swapped === undefined || other === undefined) return;
+    ids[index] = other;
+    ids[target] = swapped;
+    await reorderSenses(ids);
   };
 
   const save = async (allowDuplicate: boolean) => {
@@ -226,6 +427,8 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   };
 
   const missing = entry === null ? [] : missingFields(entry);
+  const liveSenses = entry === null ? [] : (entry.senses ?? []).filter((sense) => !sense.archived);
+  const archivedSenses = entry === null ? [] : (entry.senses ?? []).filter((sense) => sense.archived);
   const today = meta?.today ?? null;
 
   return (
@@ -295,22 +498,166 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                 </span>
               </div>
 
-              <dl className="flex flex-col gap-4">
-                <DetailRow label="Vietnamese meaning" value={entry.meaning} />
-                <DetailRow label="Definition" value={entry.definition} />
-                <DetailRow label="Example sentences" value={entry.example} />
-                <div className="grid grid-cols-2 gap-4">
-                  <DetailRow label="Date added" value={entry.dateAdded === null ? null : formatDate(entry.dateAdded)} />
-                  <DetailRow
-                    label={entry.scheduledBy === 'fsrs' ? 'Review date (set by FSRS)' : 'Review date'}
-                    value={
-                      entry.reviewDate === null
-                        ? null
-                        : `${formatDate(entry.reviewDate)}${relativeDay(entry.reviewDate, today) ? ` (${relativeDay(entry.reviewDate, today)})` : ''}`
-                    }
-                  />
+              {fromSource !== null && (
+                <p className="text-sm text-muted">
+                  Found in{' '}
+                  <Link
+                    to={openHref(fromSource.id, fromSource.kind)}
+                    className="font-semibold text-accent underline-offset-2 hover:underline"
+                  >
+                    {fromSource.title}
+                  </Link>
+                  — back to the source.
+                </p>
+              )}
+
+              {/* Senses display */}
+              {entry.senses && entry.senses.length > 0 && (
+                <div className="flex flex-col gap-4">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-semibold">Senses ({liveSenses.length})</h3>
+                    {canWrite && !senseEditing && (
+                      <button type="button" className={BUTTON_SECONDARY} onClick={addSense} disabled={saving || senseSaving || reordering}>
+                        <Icon name="add" className="size-4" /> Add Sense
+                      </button>
+                    )}
+                  </div>
+                  <div className="flex flex-col gap-3">
+                    {liveSenses.map((sense, index) => (
+                      <div key={sense.id} className="relative rounded-xl border border-line p-4">
+                        <div className="flex items-start justify-between gap-2">
+                          <span className="flex items-center gap-2 text-sm text-muted">
+                            <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-line text-ink">
+                              {index + 1}
+                            </span>
+                            <span className="font-medium">Sense {index + 1}</span>
+                            {sense.archived && <span className="text-xs text-muted">(archived)</span>}
+                          </span>
+                          {canWrite && !senseEditing && (
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                className={BUTTON_GHOST}
+                                onClick={() => startSenseEditing(index)}
+                                disabled={saving || senseSaving || reordering}
+                                aria-label={`Edit sense ${index + 1}`}
+                              >
+                                <Icon name="edit" className="size-4" />
+                              </button>
+                              <button
+                                type="button"
+                                className={BUTTON_GHOST}
+                                onClick={() => void moveSense(index, -1)}
+                                disabled={saving || senseSaving || reordering || index === 0}
+                                aria-label={`Move sense ${index + 1} up`}
+                              >
+                                <Icon name="left" className="size-4 -rotate-90" />
+                              </button>
+                              <button
+                                type="button"
+                                className={BUTTON_GHOST}
+                                onClick={() => void moveSense(index, 1)}
+                                disabled={saving || senseSaving || reordering || index === liveSenses.length - 1}
+                                aria-label={`Move sense ${index + 1} down`}
+                              >
+                                <Icon name="left" className="size-4 rotate-90" />
+                              </button>
+                              <button
+                                type="button"
+                                className={BUTTON_GHOST}
+                                onClick={() => archiveSense(sense.id, sense.version)}
+                                disabled={saving || senseSaving || reordering}
+                                aria-label={`Archive sense ${index + 1}`}
+                              >
+                                <Icon name="trash" className="size-4" />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                        <dl className="mt-3 flex flex-col gap-3">
+                          <DetailRow label="Vietnamese meaning" value={sense.meaning} />
+                          <DetailRow label="Definition" value={sense.definition} />
+                          <DetailRow label="Example sentences" value={sense.example} />
+                        </dl>
+                      </div>
+                    ))}
+                  </div>
+                  {archivedSenses.length > 0 && (
+                    <details className="rounded-xl border border-line">
+                      <summary className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-muted cursor-pointer">
+                        <Icon name="trash" className="size-4" />
+                        Archived senses ({archivedSenses.length})
+                      </summary>
+                      <div className="flex flex-col gap-3 p-4 border-t border-line">
+                        {archivedSenses.map((sense) => (
+                          <div key={sense.id} className="rounded-xl border border-line/50 p-3 bg-muted/20">
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="flex items-center gap-2 text-sm text-muted">
+                                <span className="font-medium">Archived sense</span>
+                              </span>
+                              {canWrite && !senseEditing && (
+                                <button
+                                  type="button"
+                                  className={BUTTON_GHOST}
+                                  onClick={() => restoreSense(sense.id, sense.version)}
+                                  disabled={saving || senseSaving || reordering}
+                                  aria-label="Restore sense"
+                                >
+                                  <Icon name="refresh" className="size-4" /> Restore
+                                </button>
+                              )}
+                            </div>
+                            <dl className="mt-2 flex flex-col gap-2 text-sm">
+                              <div>
+                                <dt className="text-muted">Vietnamese meaning</dt>
+                                <dd className="m-0 whitespace-pre-line">{sense.meaning ?? 'Not set'}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-muted">Definition</dt>
+                                <dd className="m-0 whitespace-pre-line">{sense.definition ?? 'Not set'}</dd>
+                              </div>
+                              <div>
+                                <dt className="text-muted">Example</dt>
+                                <dd className="m-0 whitespace-pre-line">{sense.example ?? 'Not set'}</dd>
+                              </div>
+                            </dl>
+                          </div>
+                        ))}
+                      </div>
+                    </details>
+                  )}
                 </div>
-              </dl>
+              )}
+
+              {/* Minimal profile indicator */}
+              {(!entry.senses || entry.senses.filter(s => !s.archived).length === 0) && (
+                <p className="flex items-start gap-2 rounded-xl bg-warn-soft px-3 py-2 text-sm text-warn-ink">
+                  <Icon name="warning" className="mt-0.5 size-4 shrink-0" />
+                  <span>
+                    This word has no senses yet. Add a meaning to make it reviewable.
+                  </span>
+                </p>
+              )}
+
+              {/* Legacy fields display for compatibility */}
+              {(!entry.senses || entry.senses.length === 0) && (
+                <dl className="flex flex-col gap-4">
+                  <DetailRow label="Vietnamese meaning" value={entry.meaning} />
+                  <DetailRow label="Definition" value={entry.definition} />
+                  <DetailRow label="Example sentences" value={entry.example} />
+                  <div className="grid grid-cols-2 gap-4">
+                    <DetailRow label="Date added" value={entry.dateAdded === null ? null : formatDate(entry.dateAdded)} />
+                    <DetailRow
+                      label={entry.scheduledBy === 'fsrs' ? 'Review date (set by FSRS)' : 'Review date'}
+                      value={
+                        entry.reviewDate === null
+                          ? null
+                          : `${formatDate(entry.reviewDate)}${relativeDay(entry.reviewDate, today) ? ` (${relativeDay(entry.reviewDate, today)})` : ''}`
+                      }
+                    />
+                  </div>
+                </dl>
+              )}
 
               {missing.length > 0 && (
                 <p className="flex items-start gap-2 rounded-xl bg-warn-soft px-3 py-2 text-sm text-warn-ink">
@@ -462,7 +809,63 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                   {saveError} Your changes are still here.
                 </p>
               )}
+
             </form>
+          )}
+
+          {/* The sense editor belongs to the word view, not to the word form:
+              the sense buttons are only reachable while the word is not being edited. */}
+          {entry !== null && senseEditing && senseDraft !== null && (
+            <div className="mt-4 rounded-xl border border-accent/30 bg-accent-soft p-4">
+              <div className="flex items-center justify-between gap-2 mb-3">
+                <h4 className="font-semibold">{senseDraft.id ? 'Edit Sense' : 'Add Sense'}</h4>
+                <button type="button" className={BUTTON_GHOST} onClick={cancelSenseEditing} disabled={senseSaving} aria-label="Cancel">
+                  <Icon name="close" className="size-4" />
+                </button>
+              </div>
+              {senseError && (
+                <p role="alert" className="rounded-xl bg-bad-soft px-3 py-2 text-sm text-bad-ink mb-3">
+                  {senseError}
+                </p>
+              )}
+              <Field id="sense-meaning" label="Vietnamese meaning" error={senseError?.includes('meaning') ? 'Required' : undefined}>
+                <textarea
+                  id="sense-meaning"
+                  rows={2}
+                  className={TEXTAREA}
+                  value={senseDraft.meaning}
+                  onChange={(event) => setSenseDraft(d => d ? { ...d, meaning: event.target.value } : null)}
+                  aria-describedby={describedBy('sense-meaning', null, senseError?.includes('meaning') ? 'Required' : undefined)}
+                />
+              </Field>
+              <Field id="sense-definition" label="Definition">
+                <textarea
+                  id="sense-definition"
+                  rows={3}
+                  className={TEXTAREA}
+                  value={senseDraft.definition}
+                  onChange={(event) => setSenseDraft(d => d ? { ...d, definition: event.target.value } : null)}
+                />
+              </Field>
+              <Field id="sense-example" label="Example sentences">
+                <textarea
+                  id="sense-example"
+                  rows={3}
+                  className={TEXTAREA}
+                  value={senseDraft.example}
+                  onChange={(event) => setSenseDraft(d => d ? { ...d, example: event.target.value } : null)}
+                />
+              </Field>
+              <div className="flex flex-wrap gap-2 mt-3">
+                <button type="button" className={BUTTON_PRIMARY} onClick={saveSense} disabled={senseSaving}>
+                  {senseSaving && <Spinner />}
+                  {senseSaving ? 'Saving…' : senseDraft.id ? 'Update Sense' : 'Add Sense'}
+                </button>
+                <button type="button" className={BUTTON_GHOST} onClick={cancelSenseEditing} disabled={senseSaving}>
+                  Cancel
+                </button>
+              </div>
+            </div>
           )}
         </div>
 

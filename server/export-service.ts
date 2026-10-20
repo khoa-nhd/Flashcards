@@ -46,6 +46,7 @@ export class ExportService {
       reviewDate: entry.reviewDate,
       fsrs: fsrs.get(entry.id) ?? null,
       inTrash,
+      senses: entry.senses ?? [],
     });
 
     const current = settings();

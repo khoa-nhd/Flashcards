@@ -23,6 +23,8 @@ export interface Database {
           created_at: string;
           updated_at: string;
           deleted_at: string | null;
+          /** From schema version 13. Bumped on every sense change, for optimistic locking. */
+          senses_version: number;
         };
         Insert: {
           id?: string;
@@ -38,6 +40,7 @@ export interface Database {
           request_id?: string | null;
           created_at?: string;
           deleted_at?: string | null;
+          senses_version?: number;
         };
         Update: {
           word?: string;
@@ -47,6 +50,7 @@ export interface Database {
           example?: string | null;
           date_added?: string | null;
           deleted_at?: string | null;
+          senses_version?: number;
         };
         Relationships: [];
       };
@@ -140,6 +144,89 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      /** From schema version 19. One piece of content: pasted text, a reading, a listening source, an import, a fetched page, a generated passage. */
+      discovery_sources: {
+        Row: {
+          id: string;
+          user_id: string;
+          kind: string;
+          title: string;
+          origin: string;
+          content: string;
+          content_kind: string;
+          position: { offset?: number; seconds?: number };
+          revision: number;
+          request_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          kind: string;
+          title: string;
+          origin?: string;
+          content?: string;
+          content_kind?: string;
+          position?: { offset?: number; seconds?: number };
+          revision?: number;
+          request_id?: string | null;
+        };
+        Update: {
+          kind?: string;
+          title?: string;
+          origin?: string;
+          content?: string;
+          content_kind?: string;
+          position?: { offset?: number; seconds?: number };
+          revision?: number;
+        };
+        Relationships: [];
+      };
+      /** From schema version 19. One selection of a source: still marked for later, or — by an explicit save — the word it became. */
+      discovery_marks: {
+        Row: {
+          id: string;
+          user_id: string;
+          source_id: string;
+          label: string;
+          context: string;
+          char_offset: number | null;
+          cue_start: number | null;
+          cue_end: number | null;
+          note: string;
+          vocabulary_id: string | null;
+          saved_at: string | null;
+          request_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          source_id: string;
+          label: string;
+          context?: string;
+          char_offset?: number | null;
+          cue_start?: number | null;
+          cue_end?: number | null;
+          note?: string;
+          vocabulary_id?: string | null;
+          saved_at?: string | null;
+          request_id?: string | null;
+        };
+        Update: {
+          source_id?: string;
+          label?: string;
+          context?: string;
+          char_offset?: number | null;
+          cue_start?: number | null;
+          cue_end?: number | null;
+          note?: string;
+          vocabulary_id?: string | null;
+          saved_at?: string | null;
+        };
+        Relationships: [];
+      };
       vocabulary_examples: {
         Row: {
           id: string;
@@ -159,6 +246,143 @@ export interface Database {
         Row: { id: string; user_id: string; low_id: string; high_id: string; kind: string; created_at: string };
         Insert: { id?: string; user_id?: string; low_id: string; high_id: string; kind: string };
         Update: Record<string, never>;
+        Relationships: [];
+      };
+      /** From schema version 13. One meaning of a word; a word holds many. */
+      vocabulary_senses: {
+        Row: {
+          id: string;
+          user_id: string;
+          vocabulary_id: string;
+          position: number;
+          meaning: string | null;
+          definition: string | null;
+          example: string | null;
+          /** When the sense was archived. Archived senses are kept, never deleted. */
+          archived_at: string | null;
+          version: number;
+          /** Identifies the submission that created the sense, so a retry lands once. */
+          request_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          vocabulary_id: string;
+          position: number;
+          meaning?: string | null;
+          definition?: string | null;
+          example?: string | null;
+          archived_at?: string | null;
+          version?: number;
+          request_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          position?: number;
+          meaning?: string | null;
+          definition?: string | null;
+          example?: string | null;
+          archived_at?: string | null;
+          version?: number;
+        };
+        Relationships: [];
+      };
+      /** From schema version 18. One diagram a learner draws with their words. */
+      vocabulary_maps: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: string;
+          title: string;
+          description: string;
+          revision: number;
+          request_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          type: string;
+          title: string;
+          description?: string;
+          revision?: number;
+          request_id?: string | null;
+        };
+        Update: { title?: string; description?: string; revision?: number };
+        Relationships: [];
+      };
+      /** From schema version 18. A saved word (or one sense of it), or an unsaved candidate by label. */
+      vocabulary_map_nodes: {
+        Row: {
+          id: string;
+          user_id: string;
+          map_id: string;
+          kind: string;
+          vocabulary_id: string | null;
+          sense_id: string | null;
+          label: string | null;
+          note: string;
+          group_key: string | null;
+          step: number | null;
+          x: number | null;
+          y: number | null;
+          request_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          map_id: string;
+          kind: string;
+          vocabulary_id?: string | null;
+          sense_id?: string | null;
+          label?: string | null;
+          note?: string;
+          group_key?: string | null;
+          step?: number | null;
+          x?: number | null;
+          y?: number | null;
+          request_id?: string | null;
+        };
+        Update: {
+          kind?: string;
+          vocabulary_id?: string | null;
+          label?: string | null;
+          note?: string;
+          group_key?: string | null;
+          step?: number | null;
+          x?: number | null;
+          y?: number | null;
+        };
+        Relationships: [];
+      };
+      /** From schema version 18. A typed relationship between two nodes of one map. */
+      vocabulary_map_edges: {
+        Row: {
+          id: string;
+          user_id: string;
+          map_id: string;
+          from_node_id: string;
+          to_node_id: string;
+          kind: string;
+          pattern: string;
+          note: string;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id?: string;
+          map_id: string;
+          from_node_id: string;
+          to_node_id: string;
+          kind: string;
+          pattern?: string;
+          note?: string;
+        };
+        Update: { pattern?: string; note?: string };
         Relationships: [];
       };
     };
@@ -189,6 +413,17 @@ export interface Database {
           fsrs_scheduled_days: number | null;
           fsrs_learning_steps: number | null;
           fsrs_version: string | null;
+          /** From schema version 13. The word's senses, archived ones included. */
+          senses_version: number;
+          senses: Array<{
+            id: string;
+            position: number;
+            meaning: string | null;
+            definition: string | null;
+            example: string | null;
+            archived: boolean;
+            version: number;
+          }>;
         };
         Relationships: [];
       };
@@ -210,6 +445,101 @@ export interface Database {
           p_created_at?: string | null;
         };
         Returns: Array<{ id: string; created: boolean }>;
+      };
+      create_vocabulary_with_senses: {
+        Args: {
+          p_word: string;
+          p_word_key: string;
+          p_mastery: number;
+          p_meaning?: string | null;
+          p_definition?: string | null;
+          p_example?: string | null;
+          p_date_added?: string | null;
+          p_review_date?: string | null;
+          p_request_id?: string | null;
+          p_external_source?: string | null;
+          p_external_id?: string | null;
+          p_created_at?: string | null;
+          p_senses?: Record<string, string | null>[];
+        };
+        Returns: Array<{ id: string; created: boolean }>;
+      };
+      add_vocabulary_sense: {
+        Args: {
+          p_vocabulary_id: string;
+          p_meaning?: string | null;
+          p_definition?: string | null;
+          p_example?: string | null;
+          p_request_id?: string | null;
+        };
+        Returns: Array<{ id: string; created: boolean }>;
+      };
+      restore_vocabulary_sense: {
+        Args: { p_sense_id: string; p_expected_version: number };
+        Returns: undefined;
+      };
+      /** From schema version 15: the sense edit that ran as a bare table update before it. */
+      update_vocabulary_sense: {
+        Args: { p_sense_id: string; p_expected_version: number; p_changes: Record<string, string | null> };
+        Returns: undefined;
+      };
+      /** From schema version 15: the archive that ran as a bare table update before it. */
+      archive_vocabulary_sense: {
+        Args: { p_sense_id: string; p_expected_version: number };
+        Returns: undefined;
+      };
+      /**
+       * From schema version 15: the import's completion call — adds the sense
+       * a request id has not landed yet and sets the file's archive flag,
+       * even on a word that has since been moved to the trash.
+       */
+      resume_vocabulary_sense: {
+        Args: {
+          p_vocabulary_id: string;
+          p_meaning?: string | null;
+          p_definition?: string | null;
+          p_example?: string | null;
+          p_request_id?: string | null;
+          p_archived?: boolean;
+        };
+        Returns: Array<{ id: string; created: boolean }>;
+      };
+      /** From schema version 18: one map's edit count moved on by one, in one statement. */
+      bump_vocabulary_map_revision: {
+        Args: { p_map_id: string };
+        Returns: {
+          id: string;
+          user_id: string;
+          type: string;
+          title: string;
+          description: string;
+          revision: number;
+          request_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+      };
+      /** From schema version 19: one source's edit count moved on by one, in one statement. */
+      bump_discovery_source_revision: {
+        Args: { p_source_id: string };
+        Returns: {
+          id: string;
+          user_id: string;
+          kind: string;
+          title: string;
+          origin: string;
+          content: string;
+          content_kind: string;
+          position: { offset?: number; seconds?: number };
+          revision: number;
+          request_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+      };
+      reorder_vocabulary_senses: {
+        Args: { p_vocabulary_id: string; p_sense_ids: string[]; p_expected_version: number };
+        Returns: undefined;
       };
       update_vocabulary: {
         Args: { p_id: string; p_patch: Record<string, string | number | null> };

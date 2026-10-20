@@ -11,6 +11,7 @@ import type { Collection, ExtraExample, Relation } from './library.js';
 import type { SchedulerId } from './scheduler/active.js';
 import type { FsrsState } from './scheduler/fsrs.js';
 import type { DailyGoal } from './session-planner.js';
+import type { Sense } from './api.js';
 
 export const EXPORT_FORMAT = 'vocabulary-flashcards-export';
 /** Raised whenever a field is renamed or removed, so a reader can tell what it holds. */
@@ -63,6 +64,8 @@ export interface ExportedWord {
   fsrs: FsrsState | null;
   /** True for a word in the trash. Its collections, examples and links are not listed until it is restored. */
   inTrash: boolean;
+  /** All senses for this vocabulary entry (empty array for legacy exports). */
+  senses: Sense[];
 }
 
 export interface AccountExport {

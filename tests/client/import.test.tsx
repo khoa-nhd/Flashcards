@@ -356,3 +356,50 @@ describe('exporting everything', () => {
     expect(blobs).toEqual([]);
   });
 });
+
+describe('a multi-sense word round the export and back through import', () => {
+  it('sends every sense home again: export, preview, confirm, send', async () => {
+    const withSenses = entry(1, {
+      word: 'bank',
+      meaning: 'bờ sông',
+      senses: [
+        { id: 'sense-1', position: 0, meaning: 'ngân hàng', definition: 'Keeps money safe.', example: null, archived: true, version: 2 },
+        { id: 'sense-2', position: 1, meaning: 'bờ sông', definition: null, example: null, archived: false, version: 1 },
+      ],
+      sensesVersion: 3,
+    });
+
+    // The owner exports the account, as from Settings.
+    const blobs: Blob[] = [];
+    vi.stubGlobal('URL', Object.assign(URL, { createObjectURL: (blob: Blob) => (blobs.push(blob), 'blob:test'), revokeObjectURL: () => undefined }));
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined);
+    const exporting = await open('/settings', { entries: [withSenses] });
+    await exporting.user.click(await main().findByRole('button', { name: 'Export everything (JSON)' }));
+    await waitFor(() => expect(blobs).toHaveLength(1));
+    const file = await blobs[0]!.text();
+    exporting.unmount();
+    click.mockRestore();
+
+    // In an account that has none of it, the file is pasted in and previewed.
+    const importing = await open('/import', { entries: [] });
+    await preview(importing.user, file);
+    expect(within(main().getByRole('table')).getByRole('rowheader', { name: /bank/ })).toHaveTextContent(/2 senses/);
+    expect(importing.api.importWords).not.toHaveBeenCalled();
+
+    // Confirmed: the senses travel with the word, in order, with their archive
+    // state, and the source record's own ids and versions stay at the source.
+    await importing.user.click(main().getByRole('button', { name: 'Import 1 word' }));
+    await waitFor(() => expect(importing.api.importWords).toHaveBeenCalledTimes(1));
+    const sent = importing.api.importWords.mock.calls[0]![0];
+    expect(sent).toHaveLength(1);
+    expect(sent[0]).toMatchObject({
+      word: 'bank',
+      meaning: 'bờ sông',
+      senses: [
+        { meaning: 'ngân hàng', definition: 'Keeps money safe.', archived: true },
+        { meaning: 'bờ sông', definition: null, archived: false },
+      ],
+    });
+    expect(JSON.stringify(sent)).not.toMatch(/sense-1|"version"|"position"/);
+  });
+});

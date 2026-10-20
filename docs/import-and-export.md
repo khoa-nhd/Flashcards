@@ -122,7 +122,7 @@ of the app, so the database refuses anything that is not yours.
 
 | Section | One entry per | Fields |
 | --- | --- | --- |
-| `vocabulary` | word, the trash included | `id`, `word`, `meaning`, `definition`, `example`, `dateAdded`, `createdAt`, `updatedAt`, `mastery`, `reviewDate` (the mastery schedule, as stored), `fsrs` (the FSRS state kept beside it, or `null` for a word not answered since FSRS started being calculated), `inTrash` |
+| `vocabulary` | word, the trash included | `id`, `word`, `meaning`, `definition`, `example`, `dateAdded`, `createdAt`, `updatedAt`, `mastery`, `reviewDate` (the mastery schedule, as stored), `fsrs` (the FSRS state kept beside it, or `null` for a word not answered since FSRS started being calculated), `inTrash`, `senses` (every sense: its `id`, `position`, `meaning`, `definition`, `example`, `archived` flag and `version`; an empty array for an export made before this field existed) |
 | `collections` | collection | `id`, `name`, `wordIds` |
 | `examples` | further example | `id`, `vocabularyId`, `sentence`, `source`, `preferred` |
 | `relations` | link between two words | `id`, `kind`, `a`, `b` (order carries no meaning) |
@@ -154,6 +154,28 @@ The words arrive with their content; **mastery, review dates and history stay
 behind**, and the app has no way to load them from a file. This is deliberate:
 a review history that was typed in from a file would not be a record of
 reviews.
+
+A word that carries several senses arrives **with all of them**: the import
+reads the `senses` field of this app's own JSON export and rebuilds every
+sense in order, keeping each archive state, so the profile looks the way it
+did at the source. When `senses` is present it is the word's content — the
+file's meaning, definition and example beside it are not stored on top, so
+nothing is written twice. Two rules hold throughout: a row whose senses
+cannot be stored (the database has not had the newest migration, or the file
+is malformed) is refused whole rather than imported stripped of them, and
+nothing that already exists is changed — sending the same file twice lands
+on the same words and senses instead of making them again.
+
+A CSV file, or a JSON export made before senses existed, carries only the
+word's shown meaning: one sense comes back, built from the file's meaning,
+definition and example. The full JSON export lists every sense, so that is
+the file to use for a restore.
+
+This is a **vocabulary-content restore**, not a full-account recovery: words
+and their senses come back, starting at the mastery of a newly added word.
+Schedules, review history, collections, the goal and every other setting stay
+behind — see "Backup and recovery" below for what covers those, which is a
+database backup of the whole project, not this file.
 
 ## Backup and recovery
 

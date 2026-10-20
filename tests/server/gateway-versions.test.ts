@@ -147,6 +147,18 @@ const REQUESTS: Array<[label: string, path: string, method?: 'POST' | 'PUT', bod
   ['creating a collection', '/api/collections', 'POST', { name: 'Travel' }],
   ['adding an example', `/api/vocabulary/${WORD}/examples`, 'POST', { sentence: 'A candid answer.' }],
   ['linking two words', '/api/relations', 'POST', { fromId: WORD, toId: '00000000-0000-4000-8000-000000000002', kind: 'synonym' }],
+  // Schema 18: at earlier versions these answer "the newest database update
+  // is missing" and ask for nothing; at 18 they ask for the map tables, which
+  // the catalogue for that version must really hold.
+  ['the list of maps', '/api/maps'],
+  ['the personal map', '/api/maps/personal'],
+  // Schema 19: the same rule for discovery content — before it exists these
+  // answer "the newest database update is missing" and ask for nothing.
+  ['the list of sources', '/api/discovery'],
+  ['the marked-for-later list', '/api/discovery/marks'],
+  ['where a word was found', `/api/discovery/context?vocabularyId=${newId()}`],
+  ['bringing in a source', '/api/discovery', 'POST', { kind: 'text', title: 'A reading', content: 'Words worth finding.', requestId: newId() }],
+  ['saving a selection', '/api/discovery/save', 'POST', { word: 'candid', sourceId: newId(), requestId: newId() }],
 ];
 
 /** Runs the whole application at one schema version and returns everything it asked the database for. */
@@ -288,6 +300,8 @@ describe('the recording itself', () => {
       'practice_daily_stats',
       'record_practice',
       'create_vocabulary',
+      'discovery_sources',
+      'discovery_marks',
     ]) {
       expect(names, expected).toContain(expected);
     }

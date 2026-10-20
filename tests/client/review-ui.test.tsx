@@ -277,17 +277,22 @@ describe('answering with the keyboard', () => {
     const keydownCalls = (spy: typeof added | typeof removed) =>
       spy.mock.calls.filter(([type]) => type === 'keydown').length;
 
+    // The app shell's quick-capture shortcut (Alt+K) and the review panel
+    // each attach exactly one key listener — two in all.
+    const shell = keydownCalls(added);
     const { api, saves, unmount } = await renderApp();
+    expect(keydownCalls(added) - shell).toBe(2);
     // Several re-renders and a card change must not stack up listeners.
     press(' ');
     press('ArrowRight');
     await settle(saves[0]);
     press(' ');
-    expect(keydownCalls(added)).toBe(1);
+    expect(keydownCalls(added) - shell).toBe(2);
     expect(keydownCalls(removed)).toBe(0);
 
     unmount();
-    expect(keydownCalls(removed)).toBe(1);
+    // The panel's listener and the shell's shortcut both come off again.
+    expect(keydownCalls(removed)).toBe(2);
     expect(press('ArrowRight')).toBe(true);
     expect(api.submitAction).toHaveBeenCalledTimes(1);
   });

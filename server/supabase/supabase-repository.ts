@@ -1,4 +1,4 @@
-import type { Capabilities, Confidence, SessionSummary, SkippedRecord, VocabularyStatus } from '../../shared/api.js';
+import type { Capabilities, Confidence, SessionSummary, SkippedRecord, VocabularyStatus, Sense } from '../../shared/api.js';
 import type { DailyStat } from '../../shared/analytics.js';
 import type { IsoDate } from '../../shared/dates.js';
 import type { HistoryEvent } from '../../shared/export-format.js';
@@ -8,7 +8,7 @@ import { normalizeWord } from '../../shared/text.js';
 import { DEFAULT_SCHEDULER, isSchedulerId } from '../../shared/scheduler/active.js';
 import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
 import type { StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
-import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
+import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog, SenseOperations } from '../vocabulary-catalog.js';
 import type {
   ConfidenceStat,
   PracticeDailyStat,
@@ -26,6 +26,7 @@ import {
   fsrsStateToRow,
   type CardPatch,
   type CardRow,
+  type SenseRow,
   type VocabularyDatabase,
 } from './supabase-database.js';
 
@@ -43,6 +44,20 @@ function toEntry(row: CardRow): EntryData {
     createdTime: row.created_at,
     lastEditedTime: row.updated_at,
     rootId: row.root_id ?? null,
+    senses: row.senses ?? [],
+    sensesVersion: row.senses_version ?? 0,
+  };
+}
+
+function toSense(row: SenseRow): Sense {
+  return {
+    id: row.id,
+    position: row.position,
+    meaning: row.meaning,
+    definition: row.definition,
+    example: row.example,
+    archived: row.archived_at !== null,
+    version: row.version,
   };
 }
 
@@ -75,6 +90,10 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     practice: schemaVersion >= 6,
     library: schemaVersion >= 7,
     roots: schemaVersion >= 11,
+    // The sense operations write the word's stored content in step with the
+    // senses from version 14, and the atomic add/reorder/restore calls live
+    // there; until then the gateway would drift, so senses stay off.
+    senses: schemaVersion >= 14,
   };
 }
 
@@ -341,6 +360,9 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
       dateAdded: entry.dateAdded,
       reviewDate: entry.reviewDate,
       requestId: entry.requestId ?? null,
+      // Where the database can, the senses are written with the word, in the
+      // same transaction; a store that cannot simply never sees the field.
+      senses: entry.senses,
     });
     // Read back what was stored rather than echoing the request.
     const row = await this.database.getCard(id);
@@ -361,6 +383,7 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     if (changes.mastery !== undefined) patch.mastery = changes.mastery;
     if (changes.reviewDate !== undefined) patch.review_date = changes.reviewDate;
     if (changes.rootId !== undefined) patch.root_id = changes.rootId;
+    if (changes.expectSensesVersion !== undefined) patch.expectSensesVersion = changes.expectSensesVersion;
 
     const updated = await this.database.updateCard(id, patch);
     const row = updated ? await this.database.getCard(id) : null;
@@ -379,6 +402,55 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     await this.database.setCardTrashed(id, false);
     const row = await this.database.getCard(id);
     return row === null || row.deleted_at !== null ? null : toEntry(row);
+  }
+
+  // ---- SenseOperations (schema version 13) ----
+  /** The sense operations, reachable as `catalog.senses` where the database has them. */
+  get senses(): SenseOperations {
+    return this;
+  }
+
+  async listSenses(vocabularyId: string): Promise<Sense[]> {
+    if (!this.capabilities.senses) throw new Error('Senses not supported by this database version');
+    return (await this.database.listSenses(vocabularyId)).map(toSense);
+  }
+
+  async getSense(id: string): Promise<Sense | null> {
+    if (!this.capabilities.senses) throw new Error('Senses not supported by this database version');
+    const row = await this.database.getSense(id);
+    return row === null ? null : toSense(row);
+  }
+
+  async createSense(
+    vocabularyId: string,
+    sense: { meaning: string | null; definition: string | null; example: string | null; requestId: string },
+    options?: { resume?: boolean; archived?: boolean },
+  ): Promise<{ sense: Sense; created: boolean }> {
+    if (!this.capabilities.senses) throw new Error('Senses not supported by this database version');
+    const { sense: row, created } = await this.database.createSense(vocabularyId, sense, options);
+    return { sense: toSense(row), created };
+  }
+
+  async updateSense(id: string, patch: { meaning?: string | null; definition?: string | null; example?: string | null; expectedVersion: number }): Promise<Sense | 'stale' | 'not_found'> {
+    if (!this.capabilities.senses) throw new Error('Senses not supported by this database version');
+    const result = await this.database.updateSense(id, patch);
+    if (result === 'stale' || result === 'not_found') return result;
+    return toSense(result);
+  }
+
+  async reorderSenses(vocabularyId: string, senseIds: string[], expectedVersion: number): Promise<'ok' | 'stale' | 'not_found'> {
+    if (!this.capabilities.senses) throw new Error('Senses not supported by this database version');
+    return this.database.reorderSenses(vocabularyId, senseIds, expectedVersion);
+  }
+
+  async archiveSense(id: string, expectedVersion: number): Promise<'ok' | 'stale' | 'not_found'> {
+    if (!this.capabilities.senses) throw new Error('Senses not supported by this database version');
+    return this.database.archiveSense(id, expectedVersion);
+  }
+
+  async restoreSense(id: string, expectedVersion: number): Promise<'ok' | 'stale' | 'not_found'> {
+    if (!this.capabilities.senses) throw new Error('Senses not supported by this database version');
+    return this.database.restoreSense(id, expectedVersion);
   }
 
 }

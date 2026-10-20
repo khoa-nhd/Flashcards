@@ -1,7 +1,9 @@
 import type { AnalyticsService } from './analytics-service.js';
+import type { DiscoveryService } from './discovery-service.js';
 import type { ExportService } from './export-service.js';
 import type { LibraryService } from './library-service.js';
 import type { ReviewService } from './review-service.js';
+import type { VocabMapsService } from './vocab-maps-service.js';
 import type { VocabularyService } from './vocabulary-service.js';
 
 export interface Account {
@@ -23,6 +25,10 @@ export interface AccountSession {
   vocabulary: VocabularyService;
   analytics: AnalyticsService;
   library: LibraryService;
+  /** Vocabulary maps; `null` while the database is behind (schema version 18 holds them). */
+  maps: VocabMapsService | null;
+  /** Discovery sources and selections; `null` while the database is behind (schema version 19 holds them). */
+  discovery: DiscoveryService | null;
   exporter: ExportService;
   saveTimeZone(timeZone: string): Promise<string>;
 }

@@ -130,7 +130,7 @@ function AddForm({
   /** A draft handed over from the Smart Reader, or null for an empty form. */
   prefill: Draft | null;
 }) {
-  const { api, vocabulary } = useApp();
+  const { api, vocabulary, toasts } = useApp();
   const [values, setValues] = useState<FormValues>(() => blankForm(meta));
   const [errors, setErrors] = useState<FormErrors>({});
   const [quick, setQuick] = useState(false);
@@ -479,6 +479,27 @@ function AddForm({
                 {saving && <Spinner />}
                 Add it anyway
               </button>
+              {duplicates.map((entry) => (
+                <button
+                  key={entry.id}
+                  type="button"
+                  className={BUTTON_GHOST}
+                  onClick={async () => {
+                    setDuplicates(null);
+                    await api.addSense(entry.id, {
+                      requestId: crypto.randomUUID(),
+                      meaning: values.meaning || null,
+                      definition: quick ? undefined : values.definition || null,
+                      example: quick ? undefined : values.example || null,
+                    });
+                    wordInput.current?.focus();
+                    toasts.show({ message: `Added sense to “${entry.word}”.` });
+                  }}
+                  disabled={disabled || saving}
+                >
+                  Add as sense to “{entry.word}”
+                </button>
+              ))}
               <button
                 type="button"
                 className={BUTTON_GHOST}

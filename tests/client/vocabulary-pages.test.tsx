@@ -495,6 +495,28 @@ describe('Word details', () => {
     expect(api.updateEntry).toHaveBeenLastCalledWith(pageId(1), { word: 'candid', allowDuplicate: true });
   });
 
+  it('shows what the server said when a save arrives after a newer change elsewhere, and writes nothing', async () => {
+    const { api, user, panel } = await openWord();
+    api.updateEntry.mockRejectedValueOnce(
+      new ApiError('conflict', 'The sense list was modified by another request. Please reload and try again.', 409),
+    );
+    await user.click(within(panel).getByRole('button', { name: /Edit/ }));
+    await user.clear(within(panel).getByLabelText(/^Word/));
+    await user.type(within(panel).getByLabelText(/^Word/), 'serendipity amended');
+    await user.click(within(panel).getByRole('button', { name: 'Save changes' }));
+
+    // A clear message, one attempt, and the form still holds what was typed.
+    const alert = await within(panel).findByRole('alert');
+    expect(alert).toHaveTextContent('The sense list was modified by another request. Please reload and try again.');
+    expect(api.updateEntry).toHaveBeenCalledTimes(1);
+    expect(within(panel).getByLabelText(/^Word/)).toHaveValue('serendipity amended');
+
+    // Closing the form leaves the stored word untouched.
+    await user.click(within(panel).getByRole('button', { name: 'Cancel' }));
+    expect(rowWords()).toContain('serendipity');
+    expect(rowWords()).not.toContain('serendipity amended');
+  });
+
   it('asks before deleting, naming the word, and deletes nothing on cancel', async () => {
     const { api, user, panel } = await openWord();
     await user.click(within(panel).getByRole('button', { name: /Delete/ }));

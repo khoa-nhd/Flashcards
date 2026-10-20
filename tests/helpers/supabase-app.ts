@@ -9,6 +9,7 @@ import { createApp } from '../../server/create-app.js';
 import { loadConfig } from '../../server/env.js';
 import { createSupabaseAccounts, type TokenVerifier } from '../../server/supabase/supabase-accounts.js';
 import type { VocabularyDatabase } from '../../server/supabase/supabase-database.js';
+import type { WebImporter } from '../../server/web-importer.js';
 import { NOW } from './fixtures.js';
 import { createPgVocabularyDatabase } from './pg-vocabulary-database.js';
 import type { TestDatabase } from './test-database.js';
@@ -37,6 +38,8 @@ export interface SupabaseAppOptions {
   verifier?: TokenVerifier;
   /** Lets a test make the database misbehave. */
   wrap?: (database: VocabularyDatabase) => VocabularyDatabase;
+  /** Stands in for the one outbound web fetch, so no test ever reaches the network. */
+  webImporter?: WebImporter;
 }
 
 export function createSupabaseTestApp(db: TestDatabase, users: TestUser[], options: SupabaseAppOptions = {}) {
@@ -70,7 +73,7 @@ export function createSupabaseTestApp(db: TestDatabase, users: TestUser[], optio
     now,
   });
 
-  return createApp({ config, service: null, accounts });
+  return createApp({ config, service: null, accounts, webImporter: options.webImporter ?? null });
 }
 
 export type TestApp = ReturnType<typeof createSupabaseTestApp>;

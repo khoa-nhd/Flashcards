@@ -3,6 +3,7 @@ import {
   accountSettingsSchema,
   analyticsResponseSchema,
   apiErrorSchema,
+  addSenseResponseSchema,
   collectionSchema,
   dayPlanSchema,
   deletedResponseSchema,
@@ -18,6 +19,7 @@ import {
   reviewDaysResponseSchema,
   reviewUndoResponseSchema,
   schedulerReportSchema,
+  senseSchema,
   sessionSummarySchema,
   simulationResponseSchema,
   trashResponseSchema,
@@ -25,34 +27,69 @@ import {
   weakWordsResponseSchema,
   type AccountSettings,
   type AnalyticsResponse,
+  type AddSenseRequest,
   type DayPlanResponse,
   type ImportResponse,
   type LibraryResponse,
   type PracticeRequest,
   type PracticeResponse,
+  type ReorderSensesRequest,
   type ReviewFocus,
   type AppConfigResponse,
+  type ArchiveSenseRequest,
   type CreateEntryInput,
   type QueueResponse,
+  type RestoreSenseRequest,
   type ReviewActionRequest,
   type ReviewActionResponse,
   type ReviewDaysResponse,
   type ReviewUndoRequest,
   type ReviewUndoResponse,
   type SchedulerReport,
+  type Sense,
   type SessionSummary,
   type SimulationResponse,
   type UpdateEntryInput,
+  type UpdateSenseRequest,
   type VocabularyEntry,
   type VocabularyListResponse,
   type WeakWordsResponse,
 } from '../../shared/api.js';
 import type { IsoDate } from '../../shared/dates.js';
 import {
+  expandMapResponseSchema,
+  mapDeletedResponseSchema,
+  mapEdgeResponseSchema,
+  mapNodeResponseSchema,
+  mapResponseSchema,
+  mapsListResponseSchema,
+  mapSummaryResponseSchema,
+  personalMapResponseSchema,
+  saveCandidateResponseSchema,
+  type AddMapEdgeRequest,
+  type AddMapNodeRequest,
+  type CreateMapRequest,
+  type ExpandMapRequest,
+  type GenerateMapRequest,
+  type PersonalMapResponse,
+  type SaveCandidateRequest,
+  type SaveMapLayoutRequest,
+  type UpdateMapEdgeRequest,
+  type UpdateMapNodeRequest,
+  type UpdateMapRequest,
+  type VocabMapDocument,
+  type VocabMapEdge,
+  type VocabMapNode,
+  type VocabMapSummary,
+} from '../../shared/vocab-map.js';
+import {
+  aiDiscoveryDraftSchema,
   aiExtractResponseSchema,
   aiWordFamilyResponseSchema,
   aiExamplesResponseSchema,
   aiExamPlanResponseSchema,
+  type AiDiscoveryDraft,
+  type AiDiscoveryRequest,
   type AiExtractRequest,
   type AiExtractResponse,
   type AiWordFamilyRequest,
@@ -62,6 +99,26 @@ import {
   type AiExamPlanRequest,
   type AiExamPlanResponse,
 } from '../../shared/ai.js';
+import {
+  discoveryContextResponseSchema,
+  discoveryListResponseSchema,
+  discoveryMarkResponseSchema,
+  discoveryMarksResponseSchema,
+  discoverySaveResponseSchema,
+  discoverySourceResponseSchema,
+  discoverySourceSummaryResponseSchema,
+  fetchUrlResponseSchema,
+  type CreateDiscoverySourceRequest,
+  type DiscoveryMark,
+  type DiscoveryMarkView,
+  type DiscoverySource,
+  type DiscoverySourceDocument,
+  type FetchUrlResponse,
+  type MarkSelectionRequest,
+  type SaveMarkRequest,
+  type SaveSelectionRequest,
+  type UpdateDiscoverySourceRequest,
+} from '../../shared/discovery.js';
 import { EXPORT_FORMAT, type AccountExport } from '../../shared/export-format.js';
 import type { ImportItem } from '../../shared/import.js';
 import type { Collection, ExtraExample, Relation, RelationKind } from '../../shared/library.js';
@@ -103,6 +160,20 @@ export interface VocabularyApi {
   restoreEntry(id: string): Promise<VocabularyEntry>;
   /** Deleted words that can still be restored. */
   fetchTrash(): Promise<VocabularyEntry[]>;
+  /** List every sense of a vocabulary entry, archived ones included. */
+  listSenses(vocabularyId: string): Promise<Sense[]>;
+  /** One sense of a word. */
+  getSense(vocabularyId: string, senseId: string): Promise<Sense>;
+  /** Add a new sense to a vocabulary entry. A repeated request id lands on the same sense. */
+  addSense(vocabularyId: string, input: AddSenseRequest): Promise<Sense>;
+  /** Update an existing sense. */
+  updateEntrySense(senseId: string, input: UpdateSenseRequest): Promise<Sense>;
+  /** Reorder senses. */
+  reorderSenses(vocabularyId: string, input: ReorderSensesRequest): Promise<void>;
+  /** Archive (soft-delete) a sense. */
+  archiveSense(senseId: string, input: ArchiveSenseRequest): Promise<void>;
+  /** Restore an archived sense. */
+  restoreSense(senseId: string, input: RestoreSenseRequest): Promise<void>;
 }
 
 export interface AccountApi {
@@ -142,6 +213,37 @@ export interface LibraryApi {
   deleteExample(id: string): Promise<void>;
   addRelation(fromId: string, toId: string, kind: RelationKind): Promise<Relation>;
   deleteRelation(id: string): Promise<void>;
+}
+
+/**
+ * Vocabulary Maps: the learner's own diagrams. None of these calls changes a
+ * word's content or schedule; saving a map saves no vocabulary, and the one
+ * call that turns a suggestion into a word says so in its name.
+ */
+export interface VocabularyMapsApi {
+  fetchMaps(): Promise<VocabMapSummary[]>;
+  createMap(request: CreateMapRequest): Promise<VocabMapSummary>;
+  fetchMap(id: string): Promise<VocabMapDocument>;
+  updateMap(id: string, request: UpdateMapRequest): Promise<VocabMapSummary>;
+  /** Removes the map, its nodes and its edges. The words it referenced stay. */
+  deleteMap(id: string): Promise<void>;
+  addNode(mapId: string, request: AddMapNodeRequest): Promise<VocabMapNode>;
+  updateNode(mapId: string, nodeId: string, request: UpdateMapNodeRequest): Promise<VocabMapNode>;
+  /** Removes the node and every edge touching it. A saved node's word stays. */
+  removeNode(mapId: string, nodeId: string): Promise<void>;
+  /** The one call that can create vocabulary: a suggestion saved on purpose, as one word. */
+  saveCandidate(mapId: string, nodeId: string, request: SaveCandidateRequest): Promise<{ node: VocabMapNode; entryId: string }>;
+  addEdge(mapId: string, request: AddMapEdgeRequest): Promise<VocabMapEdge>;
+  updateEdge(mapId: string, edgeId: string, request: UpdateMapEdgeRequest): Promise<VocabMapEdge>;
+  removeEdge(mapId: string, edgeId: string): Promise<void>;
+  /** Where the learner has left the nodes. */
+  saveLayout(mapId: string, request: SaveMapLayoutRequest): Promise<VocabMapSummary>;
+  /** An AI draft map: seed words saved by their ids, every other label a candidate. */
+  generateMap(request: GenerateMapRequest): Promise<VocabMapDocument>;
+  /** An AI expansion; only with `apply` are the suggestions stored, and then as candidates. */
+  expandMap(mapId: string, request: ExpandMapRequest): Promise<{ suggestions: { nodes: Array<{ label: string; note: string; group: string | null }>; edges: Array<{ fromLabel: string; toLabel: string; kind: VocabMapEdge['kind']; pattern: string; note: string }> }; applied: boolean }>;
+  /** The personal map: the account's words and saved connections, drawn live from the library. */
+  fetchPersonalMap(): Promise<PersonalMapResponse>;
 }
 
 export interface TransferApi {
@@ -195,7 +297,60 @@ export interface AiApi {
   examPlan(request: AiExamPlanRequest): Promise<AiExamPlanResponse>;
 }
 
-export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi & AiApi;
+export interface DiscoveryApi {
+  /** Every source the learner has brought in, newest first, with its waiting and saved counts. */
+  listSources(): Promise<DiscoverySource[]>;
+
+  /** One new source — pasted, imported, generated-then-accepted, or a standing capture home. */
+  createSource(request: CreateDiscoverySourceRequest): Promise<DiscoverySource>;
+
+  /** A source with its content and every mark on it. */
+  fetchSource(id: string): Promise<DiscoverySourceDocument>;
+
+  /** A title edit (checked against `ifMatch`) or a reading/listening position. */
+  updateSource(id: string, request: UpdateDiscoverySourceRequest): Promise<DiscoverySource>;
+
+  /** Takes the source and its marks; every word they became stays. */
+  deleteSource(id: string): Promise<void>;
+
+  /** Every selection still waiting for later, with where each one came from. */
+  listMarks(): Promise<DiscoveryMarkView[]>;
+
+  /** Mark for Later: the selection kept as text, referencing no vocabulary at all. */
+  markSelection(sourceId: string, request: MarkSelectionRequest): Promise<DiscoveryMark>;
+
+  /** Dismiss a waiting selection. A saved one is refused by the server as a conflict. */
+  dismissMark(markId: string): Promise<void>;
+
+  /**
+   * Save Now: the word through the ordinary creation path, with the selection's
+   * context kept beside it. A duplicate answers ApiError `duplicates`, like Add.
+   */
+  saveSelection(request: SaveSelectionRequest): Promise<{ entry: VocabularyEntry; mark: DiscoveryMark }>;
+
+  /** Processing a marked item later: the mark's own selection becomes the word. */
+  saveMark(markId: string, request: SaveMarkRequest): Promise<{ entry: VocabularyEntry; mark: DiscoveryMark }>;
+
+  /** Where a saved word was found — the link back from the Word Profile. */
+  findWordContext(vocabularyId: string): Promise<{ source: DiscoverySource; mark: DiscoveryMark }>;
+
+  /** A draft reading from a topic, a collection or a few words. Stored nowhere until accepted. */
+  generateDraft(request: AiDiscoveryRequest): Promise<{ draft: AiDiscoveryDraft }>;
+
+  /** Brings a page back as plain text for the preview. Nothing is stored by asking. */
+  fetchUrl(url: string): Promise<FetchUrlResponse>;
+}
+
+export type AppApi = ReviewApi &
+  VocabularyApi &
+  AccountApi &
+  AnalyticsApi &
+  PracticeApi &
+  LibraryApi &
+  VocabularyMapsApi &
+  DiscoveryApi &
+  TransferApi &
+  AiApi;
 
 /** How requests prove who is asking, where the app has accounts. */
 export interface ApiAuth {
@@ -395,6 +550,61 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         timeoutMessage: 'Loading deleted words took too long.',
       }).then((response) => response.entries),
 
+    // Sense operations (schema version 13)
+    listSenses: (vocabularyId) =>
+      call(`/api/vocabulary/${vocabularyId}/senses`, z.object({ senses: z.array(senseSchema) }), {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.quickMs,
+        timeoutMessage: 'Loading senses took too long.',
+      }).then((response) => response.senses),
+
+    getSense: (vocabularyId, senseId) =>
+      call(`/api/vocabulary/${vocabularyId}/senses/${senseId}`, z.object({ sense: senseSchema }), {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.quickMs,
+        timeoutMessage: 'Loading the sense took too long.',
+      }).then((response) => response.sense),
+
+    addSense: (vocabularyId, input) =>
+      call(`/api/vocabulary/${vocabularyId}/senses`, addSenseResponseSchema, {
+        method: 'POST',
+        body: input,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((response) => response.sense),
+
+    updateEntrySense: (senseId, input) =>
+      call(`/api/vocabulary/${senseId}`, z.object({ sense: senseSchema }), {
+        method: 'PATCH',
+        body: input,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((response) => response.sense),
+
+    reorderSenses: (vocabularyId, input) =>
+      call(`/api/vocabulary/${vocabularyId}/senses/order`, z.void(), {
+        method: 'PATCH',
+        body: input,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    archiveSense: (senseId, input) =>
+      call(`/api/vocabulary/${senseId}/archive`, z.void(), {
+        method: 'POST',
+        body: input,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    restoreSense: (senseId, input) =>
+      call(`/api/vocabulary/${senseId}/restore`, z.void(), {
+        method: 'POST',
+        body: input,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
     fetchSettings: () =>
       call('/api/settings', accountSettingsSchema, {
         method: 'GET',
@@ -463,12 +673,227 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
       change('/api/relations', 'POST', { fromId, toId, kind }, relationReply).then((reply) => reply.relation),
     deleteRelation: (id) => change(`/api/relations/${id}`, 'DELETE', undefined, deletedResponseSchema).then(() => undefined),
 
+    fetchMaps: () =>
+      call('/api/maps', mapsListResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your maps took too long.',
+      }).then((reply) => reply.maps),
+
+    createMap: (body) =>
+      call('/api/maps', mapSummaryResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.map),
+
+    fetchMap: (id) =>
+      call(`/api/maps/${id}`, mapResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading that map took too long.',
+      }).then((reply) => reply.map),
+
+    updateMap: (id, body) =>
+      call(`/api/maps/${id}`, mapSummaryResponseSchema, {
+        method: 'PATCH',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.map),
+
+    deleteMap: (id) => change(`/api/maps/${id}`, 'DELETE', undefined, mapDeletedResponseSchema).then(() => undefined),
+
+    addNode: (mapId, body) =>
+      call(`/api/maps/${mapId}/nodes`, mapNodeResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.node),
+
+    updateNode: (mapId, nodeId, body) =>
+      call(`/api/maps/${mapId}/nodes/${nodeId}`, mapNodeResponseSchema, {
+        method: 'PATCH',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.node),
+
+    removeNode: (mapId, nodeId) =>
+      change(`/api/maps/${mapId}/nodes/${nodeId}`, 'DELETE', undefined, mapDeletedResponseSchema).then(() => undefined),
+
+    saveCandidate: (mapId, nodeId, body) =>
+      call(`/api/maps/${mapId}/nodes/${nodeId}/save`, saveCandidateResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Saving that word took too long. Nothing was changed.',
+      }),
+
+    addEdge: (mapId, body) =>
+      call(`/api/maps/${mapId}/edges`, mapEdgeResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.edge),
+
+    updateEdge: (mapId, edgeId, body) =>
+      call(`/api/maps/${mapId}/edges/${edgeId}`, mapEdgeResponseSchema, {
+        method: 'PATCH',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.edge),
+
+    removeEdge: (mapId, edgeId) =>
+      change(`/api/maps/${mapId}/edges/${edgeId}`, 'DELETE', undefined, mapDeletedResponseSchema).then(() => undefined),
+
+    saveLayout: (mapId, body) =>
+      call(`/api/maps/${mapId}/layout`, mapSummaryResponseSchema, {
+        method: 'PUT',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.map),
+
+    generateMap: (body) =>
+      call('/api/maps/generate', mapResponseSchema, {
+        method: 'POST',
+        body,
+        // The server asks the model within this budget; waiting longer only
+        // delays falling back to building the map by hand.
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'The AI suggestion took too long. Build the map by hand.',
+      }).then((reply) => reply.map),
+
+    expandMap: (mapId, body) =>
+      call(`/api/maps/${mapId}/expand`, expandMapResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'The AI suggestion took too long. Add the words by hand.',
+      }),
+
+    fetchPersonalMap: () =>
+      call('/api/maps/personal', personalMapResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Drawing your vocabulary at a glance took too long.',
+      }),
+
     submitPractice: (body) =>
       call('/api/practice', practiceResponseSchema, {
         method: 'POST',
         body,
         timeoutMs: TIMEOUTS.actionMs,
         timeoutMessage: 'Checking that answer took too long.',
+      }),
+
+    // ---- Discovery & Input: sources, selections, and the one explicit save ----
+    listSources: () =>
+      call('/api/discovery', discoveryListResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your sources took too long.',
+      }).then((reply) => reply.sources),
+
+    createSource: (body) =>
+      call('/api/discovery', discoverySourceSummaryResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.source),
+
+    fetchSource: (id) =>
+      call(`/api/discovery/${id}`, discoverySourceResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading that source took too long.',
+      }).then((reply) => reply.source),
+
+    updateSource: (id, body) =>
+      call(`/api/discovery/${id}`, discoverySourceSummaryResponseSchema, {
+        method: 'PATCH',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }).then((reply) => reply.source),
+
+    deleteSource: (id) =>
+      call<void>(`/api/discovery/${id}`, null, {
+        method: 'DELETE',
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    listMarks: () =>
+      call('/api/discovery/marks', discoveryMarksResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your marked words took too long.',
+      }).then((reply) => reply.marks),
+
+    markSelection: (sourceId, body) =>
+      call(`/api/discovery/${sourceId}/marks`, discoveryMarkResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Marking that selection took too long. It was not kept.',
+      }).then((reply) => reply.mark),
+
+    dismissMark: (markId) =>
+      call<void>(`/api/discovery/marks/${markId}`, null, {
+        method: 'DELETE',
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    saveSelection: (body) =>
+      call('/api/discovery/save', discoverySaveResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        // The server checks before writing, so pressing Save again is safe.
+        timeoutMessage: 'Saving that word took too long. Nothing was changed — press Save again.',
+      }),
+
+    saveMark: (markId, body) =>
+      call(`/api/discovery/marks/${markId}/save`, discoverySaveResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Saving that word took too long. Nothing was changed — press Save again.',
+      }),
+
+    findWordContext: (vocabularyId) =>
+      call(`/api/discovery/context?vocabularyId=${encodeURIComponent(vocabularyId)}`, discoveryContextResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.quickMs,
+        timeoutMessage: 'Looking up where that word was found took too long.',
+      }),
+
+    generateDraft: (body) =>
+      call('/api/discovery/generate', z.object({ draft: aiDiscoveryDraftSchema }), {
+        method: 'POST',
+        body,
+        // The server gives the model its own budget; waiting past it only
+        // delays the honest fallback of writing the reading by hand.
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'The draft took too long to write. Write the reading by hand.',
+      }),
+
+    fetchUrl: (url) =>
+      call('/api/discovery/fetch-url', fetchUrlResponseSchema, {
+        method: 'POST',
+        body: { url },
+        // Longer than the server's own 5-second deadline, so the server
+        // answers first whenever it can.
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'That address did not answer in time. Paste the text instead.',
       }),
 
     extractSense: (body) =>

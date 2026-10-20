@@ -11,13 +11,22 @@
 import { z } from 'zod';
 import {
   DatabaseError,
+  DISCOVERY_MARK_COLUMNS,
+  DISCOVERY_SOURCE_COLUMNS,
   EXAMPLE_COLUMNS,
   FOREIGN_KEY_VIOLATION,
   LATEST_SCHEMA_VERSION,
+  MAP_COLUMNS,
+  MAP_EDGE_COLUMNS,
+  MAP_NODE_COLUMNS,
+  NOT_FOUND_IN_DB,
   RELATION_COLUMNS,
+  STALE_VERSION_IN_DB,
   UNIQUE_VIOLATION,
   collectionItemRowSchema,
   collectionRowSchema,
+  discoveryMarkRowSchema,
+  discoverySourceRowSchema,
   exampleRowSchema,
   relationRowSchema,
   reviewLogColumns,
@@ -31,11 +40,15 @@ import {
   practiceOutcomeSchema,
   practiceStatRowSchema,
   reviewWriteResultSchema,
+  senseRowSchema,
   sessionSummaryRowSchema,
   settingsColumns,
   settingsFromRow,
   toDatabaseError,
   undoResultSchema,
+  vocabMapEdgeRowSchema,
+  vocabMapNodeRowSchema,
+  vocabMapRowSchema,
   type CardRow,
   type SettingsRow,
   type VocabularyDatabase,
@@ -46,6 +59,12 @@ import type { Row, Session, TestDatabase } from './test-database.js';
 /** Rows are read as JSON, which gives dates and timestamps the same text form the hosted API returns. */
 const cardsQuery = (columns: string, where: string, order: string) =>
   `select to_jsonb(c) as card from (select ${columns} from public.vocabulary_cards where ${where} order by ${order}) c`;
+
+/** The map tables are read as plain columns, so their dates arrive as Dates; the hosted API sends the same moments as text. */
+const textDates = <T>(row: T): T =>
+  Object.fromEntries(
+    Object.entries(row as Record<string, unknown>).map(([key, value]) => [key, value instanceof Date ? value.toISOString() : value]),
+  ) as T;
 
 export function createPgVocabularyDatabase(
   db: TestDatabase,
@@ -70,6 +89,25 @@ export function createPgVocabularyDatabase(
     } catch (error) {
       const failure = error as { code?: string };
       if (failure.code === code) return null;
+      throw error instanceof DatabaseError ? error : toDatabaseError({ code: failure.code });
+    }
+  };
+
+  /**
+   * Runs an insert into the map tables. A refused second copy answers
+   * 'duplicate' — every unique index there means "the one that exists is the
+   * answer". A foreign key naming something outside this account's own rows
+   * is an invalid request, the same refusal the hosted gateway gives.
+   */
+  const insertInto = async (work: (session: Session) => Promise<Row[]>): Promise<Row[] | 'duplicate'> => {
+    try {
+      return await db.as(userId, work);
+    } catch (error) {
+      const failure = error as { code?: string };
+      if (failure.code === UNIQUE_VIOLATION) return 'duplicate';
+      if (failure.code === FOREIGN_KEY_VIOLATION) {
+        throw new DatabaseError('invalid', 'That reference does not belong to this account.');
+      }
       throw error instanceof DatabaseError ? error : toDatabaseError({ code: failure.code });
     }
   };
@@ -126,27 +164,62 @@ export function createPgVocabularyDatabase(
     },
 
     async createCard(card) {
+      // A row that carries its senses writes them with the word, in one
+      // transaction: no failure between them can leave a word without them.
+      const withSenses = card.senses !== undefined && card.senses.length > 0;
+      if (withSenses && schemaVersion < 14) {
+        throw new DatabaseError('schema_missing', 'Senses on creation need schema version 14. Apply the newest migration.');
+      }
       const rows = await run((session) =>
-        session.query<{ id: string; created: boolean }>(
-          `select * from public.create_vocabulary(
-             p_word => $1, p_word_key => $2, p_mastery => $3::smallint, p_meaning => $4, p_definition => $5,
-             p_example => $6, p_date_added => $7::date, p_review_date => $8::date, p_request_id => $9::uuid,
-             p_external_source => $10, p_external_id => $11, p_created_at => $12::timestamptz)`,
-          [
-            card.word,
-            card.wordKey,
-            card.mastery,
-            card.meaning,
-            card.definition,
-            card.example,
-            card.dateAdded,
-            card.reviewDate,
-            card.requestId,
-            card.external?.source ?? null,
-            card.external?.id ?? null,
-            card.external?.createdAt ?? null,
-          ],
-        ),
+        withSenses
+          ? session.query<{ id: string; created: boolean }>(
+              `select * from public.create_vocabulary_with_senses(
+                 p_word => $1, p_word_key => $2, p_mastery => $3::smallint, p_meaning => $4, p_definition => $5,
+                 p_example => $6, p_date_added => $7::date, p_review_date => $8::date, p_request_id => $9::uuid,
+                 p_external_source => $10, p_external_id => $11, p_created_at => $12::timestamptz, p_senses => $13::jsonb)`,
+              [
+                card.word,
+                card.wordKey,
+                card.mastery,
+                card.meaning,
+                card.definition,
+                card.example,
+                card.dateAdded,
+                card.reviewDate,
+                card.requestId,
+                card.external?.source ?? null,
+                card.external?.id ?? null,
+                card.external?.createdAt ?? null,
+                JSON.stringify(
+                  (card.senses ?? []).map((sense) => ({
+                    meaning: sense.meaning,
+                    definition: sense.definition,
+                    example: sense.example,
+                    request_id: sense.requestId,
+                  })),
+                ),
+              ],
+            )
+          : session.query<{ id: string; created: boolean }>(
+              `select * from public.create_vocabulary(
+                 p_word => $1, p_word_key => $2, p_mastery => $3::smallint, p_meaning => $4, p_definition => $5,
+                 p_example => $6, p_date_added => $7::date, p_review_date => $8::date, p_request_id => $9::uuid,
+                 p_external_source => $10, p_external_id => $11, p_created_at => $12::timestamptz)`,
+              [
+                card.word,
+                card.wordKey,
+                card.mastery,
+                card.meaning,
+                card.definition,
+                card.example,
+                card.dateAdded,
+                card.reviewDate,
+                card.requestId,
+                card.external?.source ?? null,
+                card.external?.id ?? null,
+                card.external?.createdAt ?? null,
+              ],
+            ),
       );
       if (rows[0] === undefined) throw new DatabaseError('unavailable', 'The database did not confirm the new word.');
       return rows[0];
@@ -540,6 +613,655 @@ export function createPgVocabularyDatabase(
         ),
       );
       return rows[0]?.time_zone ?? timeZone;
+    },
+
+    // ---- Senses (schema version 13) ----
+    async listSenses(vocabularyId) {
+      if (schemaVersion < 13) return [];
+      const rows = await run((session) =>
+        session.query<{ sense: unknown }>(
+          `select to_jsonb(s) as sense from public.vocabulary_senses s
+            where s.vocabulary_id = $1::uuid order by s.position`,
+          [vocabularyId],
+        ),
+      );
+      return z.array(senseRowSchema).parse(rows.map((row) => row.sense));
+    },
+
+    async getSense(id) {
+      if (schemaVersion < 13) return null;
+      const rows = await run((session) =>
+        session.query<{ sense: unknown }>('select to_jsonb(s) as sense from public.vocabulary_senses s where s.id = $1::uuid', [id]),
+      );
+      return rows[0] === undefined ? null : senseRowSchema.parse(rows[0].sense);
+    },
+
+    async createSense(vocabularyId, sense, options) {
+      if (schemaVersion < 14) {
+        throw new DatabaseError('schema_missing', 'Adding a sense needs schema version 14. Apply the newest migration.');
+      }
+      // One call: the word is claimed, the position is chosen and the sense
+      // is written while the claim is held, so two adds cannot take one
+      // position. A retry of the same action carries the same request id and
+      // lands on the same sense.
+      if (options?.resume === true && schemaVersion >= 15) {
+        // The import's completion call: may land a sense on a word in the
+        // trash — the case the ordinary add refuses — and sets the file's
+        // archive flag in the same statement. Content already stored is
+        // never rewritten.
+        try {
+          const rows = await db.as(userId, (session) =>
+            session.query<{ id: string; created: boolean }>(
+              'select * from public.resume_vocabulary_sense($1::uuid, $2::text, $3::text, $4::text, $5::uuid, $6::boolean)',
+              [vocabularyId, sense.meaning, sense.definition, sense.example, sense.requestId, options.archived === true],
+            ),
+          );
+          const made = rows[0];
+          if (made === undefined) throw new DatabaseError('unavailable', 'The database did not confirm the new sense.');
+          const stored = await database.getSense(made.id);
+          if (stored === null) throw new DatabaseError('unavailable', 'The new sense could not be read back.');
+          return { sense: stored, created: made.created };
+        } catch (error) {
+          if (error instanceof DatabaseError) throw error;
+          const code = (error as { code?: string }).code;
+          if (code === NOT_FOUND_IN_DB) {
+            throw new DatabaseError('invalid', 'That word is not in this vocabulary.', code);
+          }
+          throw toDatabaseError({ code });
+        }
+      }
+      try {
+        const rows = await db.as(userId, (session) =>
+          session.query<{ id: string; created: boolean }>(
+            'select * from public.add_vocabulary_sense($1::uuid, $2::text, $3::text, $4::text, $5::uuid)',
+            [vocabularyId, sense.meaning, sense.definition, sense.example, sense.requestId],
+          ),
+        );
+        const made = rows[0];
+        if (made === undefined) throw new DatabaseError('unavailable', 'The database did not confirm the new sense.');
+        const stored = await database.getSense(made.id);
+        if (stored === null) throw new DatabaseError('unavailable', 'The new sense could not be read back.');
+        if (options?.resume === true && options.archived === true && stored.archived_at === null) {
+          // Schema 14's pair of statements: the flag lands as its own update,
+          // which the version guards against a second writer.
+          const flagged = await run((session) =>
+            session.query<Row>(
+              `update public.vocabulary_senses set archived_at = now(), version = version + 1
+                where id = $1::uuid and version = $2::int and archived_at is null
+                returning id`,
+              [stored.id, stored.version],
+            ),
+          );
+          if (flagged.length === 0) {
+            const recheck = await database.getSense(stored.id);
+            if (recheck === null || recheck.archived_at === null) {
+              throw new DatabaseError('conflict', 'The archive flag for this imported sense could not be applied.');
+            }
+          }
+        }
+        return { sense: stored, created: made.created };
+      } catch (error) {
+        if (error instanceof DatabaseError) throw error;
+        const code = (error as { code?: string }).code;
+        if (code === NOT_FOUND_IN_DB) {
+          throw new DatabaseError('invalid', 'That word is not in this vocabulary.', code);
+        }
+        throw toDatabaseError({ code });
+      }
+    },
+
+    async updateSense(id, patch) {
+      if (schemaVersion < 13) {
+        throw new DatabaseError('schema_missing', 'Senses need schema version 13. Apply the newest migration.');
+      }
+      if (schemaVersion >= 15) {
+        // One call, one transaction: the word is claimed and must be live,
+        // and the version sits in the same statement that writes the change.
+        // A trashed word's senses are refused here, not only in the service.
+        try {
+          await db.as(userId, (session) =>
+            session.query('select public.update_vocabulary_sense($1::uuid, $2::int, $3::jsonb)', [
+              id,
+              patch.expectedVersion,
+              JSON.stringify({
+                ...(patch.meaning !== undefined ? { meaning: patch.meaning } : {}),
+                ...(patch.definition !== undefined ? { definition: patch.definition } : {}),
+                ...(patch.example !== undefined ? { example: patch.example } : {}),
+              }),
+            ]),
+          );
+        } catch (error) {
+          if (error instanceof DatabaseError) throw error;
+          const code = (error as { code?: string }).code;
+          if (code === NOT_FOUND_IN_DB) return 'not_found';
+          if (code === STALE_VERSION_IN_DB) return 'stale';
+          throw toDatabaseError({ code });
+        }
+        const written = await database.getSense(id);
+        if (written === null) throw new DatabaseError('unavailable', 'The updated sense could not be read back.');
+        return written;
+      }
+      // One statement with the version in its condition: a second change in
+      // between matches no row, and nothing is overwritten.
+      const rows = await run((session) =>
+        session.query<{ sense: unknown }>(
+          `update public.vocabulary_senses as t
+              set meaning = case when $2::boolean then $3::text else t.meaning end,
+                  definition = case when $4::boolean then $5::text else t.definition end,
+                  example = case when $6::boolean then $7::text else t.example end,
+                  version = t.version + 1
+            where t.id = $1::uuid and t.version = $8::int and t.archived_at is null
+            returning to_jsonb(t) as sense`,
+          [
+            id,
+            patch.meaning !== undefined,
+            patch.meaning ?? null,
+            patch.definition !== undefined,
+            patch.definition ?? null,
+            patch.example !== undefined,
+            patch.example ?? null,
+            patch.expectedVersion,
+          ],
+        ),
+      );
+      if (rows[0] !== undefined) return senseRowSchema.parse(rows[0].sense);
+      const current = await database.getSense(id);
+      return current === null ? 'not_found' : 'stale';
+    },
+
+    async reorderSenses(vocabularyId, senseIds, expectedVersion) {
+      if (schemaVersion < 14) {
+        throw new DatabaseError('schema_missing', 'Reordering senses needs schema version 14. Apply the newest migration.');
+      }
+      // One call, one transaction: the word is claimed, the version checked,
+      // the order checked against the senses stored, and only then are the
+      // rows moved. Everything succeeds or nothing does.
+      try {
+        await db.as(userId, (session) =>
+          session.query('select public.reorder_vocabulary_senses($1::uuid, $2::jsonb, $3::int)', [
+            vocabularyId,
+            JSON.stringify(senseIds),
+            expectedVersion,
+          ]),
+        );
+        return 'ok';
+      } catch (error) {
+        if (error instanceof DatabaseError) throw error;
+        const code = (error as { code?: string }).code;
+        if (code === NOT_FOUND_IN_DB) return 'not_found';
+        if (code === STALE_VERSION_IN_DB) return 'stale';
+        throw toDatabaseError({ code });
+      }
+    },
+
+    async archiveSense(id, expectedVersion) {
+      if (schemaVersion < 13) {
+        throw new DatabaseError('schema_missing', 'Senses need schema version 13. Apply the newest migration.');
+      }
+      if (schemaVersion >= 15) {
+        // One call, one transaction: the word is claimed and must be live,
+        // and only the flag and the version move. A trashed word's senses
+        // are refused here, not only in the service.
+        try {
+          await db.as(userId, (session) =>
+            session.query('select public.archive_vocabulary_sense($1::uuid, $2::int)', [id, expectedVersion]),
+          );
+          return 'ok';
+        } catch (error) {
+          if (error instanceof DatabaseError) throw error;
+          const code = (error as { code?: string }).code;
+          if (code === NOT_FOUND_IN_DB) return 'not_found';
+          if (code === STALE_VERSION_IN_DB) return 'stale';
+          throw toDatabaseError({ code });
+        }
+      }
+      const rows = await run((session) =>
+        session.query<Row>(
+          `update public.vocabulary_senses set archived_at = now(), version = version + 1
+            where id = $1::uuid and version = $2::int and archived_at is null
+            returning id`,
+          [id, expectedVersion],
+        ),
+      );
+      if (rows.length > 0) return 'ok';
+      const current = await database.getSense(id);
+      return current === null ? 'not_found' : 'stale';
+    },
+
+    async restoreSense(id, expectedVersion) {
+      if (schemaVersion < 14) {
+        throw new DatabaseError('schema_missing', 'Restoring a sense needs schema version 14. Apply the newest migration.');
+      }
+      // One call, one transaction: the word is claimed before the sense is
+      // placed at the end, so a reorder in flight finishes first.
+      try {
+        await db.as(userId, (session) =>
+          session.query('select public.restore_vocabulary_sense($1::uuid, $2::int)', [id, expectedVersion]),
+        );
+        return 'ok';
+      } catch (error) {
+        if (error instanceof DatabaseError) throw error;
+        const code = (error as { code?: string }).code;
+        if (code === NOT_FOUND_IN_DB) return 'not_found';
+        if (code === STALE_VERSION_IN_DB) return 'stale';
+        throw toDatabaseError({ code });
+      }
+    },
+
+    // ---- Vocabulary maps (schema version 18) ----
+    async listVocabMaps() {
+      const rows = await run((session) =>
+        session.query(`select ${MAP_COLUMNS} from public.vocabulary_maps order by updated_at desc, id`),
+      );
+      return z.array(vocabMapRowSchema).parse(rows.map(textDates));
+    },
+
+    async getVocabMap(id) {
+      const rows = await run((session) =>
+        session.query(`select ${MAP_COLUMNS} from public.vocabulary_maps where id = $1::uuid`, [id]),
+      );
+      return rows[0] === undefined ? null : vocabMapRowSchema.parse(textDates(rows[0]));
+    },
+
+    async findVocabMapByRequestId(requestId) {
+      const rows = await run((session) =>
+        session.query(`select ${MAP_COLUMNS} from public.vocabulary_maps where request_id = $1::uuid`, [requestId]),
+      );
+      return rows[0] === undefined ? null : vocabMapRowSchema.parse(textDates(rows[0]));
+    },
+
+    async insertVocabMap(input) {
+      const rows = await insertInto((session) =>
+        session.query(
+          `insert into public.vocabulary_maps (type, title, description, request_id)
+           values ($1, $2, $3, $4::uuid) returning ${MAP_COLUMNS}`,
+          [input.type, input.title, input.description, input.requestId],
+        ),
+      );
+      return rows === 'duplicate' ? 'duplicate' : vocabMapRowSchema.parse(textDates(rows[0]));
+    },
+
+    async updateVocabMap(id, patch) {
+      const rows = await run((session) =>
+        session.query(
+          `update public.vocabulary_maps
+              set title = case when $2::boolean then $3 else title end,
+                  description = case when $4::boolean then $5 else description end
+            where id = $1::uuid
+            returning ${MAP_COLUMNS}`,
+          [id, patch.title !== undefined, patch.title ?? null, patch.description !== undefined, patch.description ?? null],
+        ),
+      );
+      return rows[0] === undefined ? null : vocabMapRowSchema.parse(textDates(rows[0]));
+    },
+
+    async bumpVocabMap(id) {
+      // The same call the hosted gateway makes: one statement, one transaction.
+      // A map the caller cannot reach updates nothing, and a composite
+      // function still answers with one row of nulls — read as "nothing moved",
+      // exactly as the hosted gateway's own parse reads it.
+      const rows = await run((session) =>
+        session.query<{ map: unknown }>('select to_jsonb(m) as map from public.bump_vocabulary_map_revision($1::uuid) m', [id]),
+      );
+      const parsed = vocabMapRowSchema.safeParse(textDates(rows[0]?.map));
+      return parsed.success ? parsed.data : null;
+    },
+
+    async deleteVocabMap(id) {
+      const rows = await run((session) =>
+        session.query('delete from public.vocabulary_maps where id = $1::uuid returning id', [id]),
+      );
+      return rows.length > 0;
+    },
+
+    async listVocabMapNodes(mapId) {
+      const rows = await run((session) =>
+        session.query(`select ${MAP_NODE_COLUMNS} from public.vocabulary_map_nodes where map_id = $1::uuid order by created_at, id`, [
+          mapId,
+        ]),
+      );
+      return z.array(vocabMapNodeRowSchema).parse(rows.map(textDates));
+    },
+
+    async insertVocabMapNode(node) {
+      const rows = await insertInto((session) =>
+        session.query(
+          `insert into public.vocabulary_map_nodes
+             (map_id, kind, vocabulary_id, sense_id, label, note, group_key, step, x, y, request_id)
+           values ($1::uuid, $2, $3::uuid, $4::uuid, $5, $6, $7, $8::int, $9::int, $10::int, $11::uuid)
+           returning ${MAP_NODE_COLUMNS}`,
+          [
+            node.mapId,
+            node.kind,
+            node.vocabularyId,
+            node.senseId,
+            node.label,
+            node.note,
+            node.group,
+            node.step,
+            node.x,
+            node.y,
+            node.requestId,
+          ],
+        ),
+      );
+      return rows === 'duplicate' ? 'duplicate' : vocabMapNodeRowSchema.parse(textDates(rows[0]));
+    },
+
+    async findVocabMapNodeByRequestId(mapId, requestId) {
+      const rows = await run((session) =>
+        session.query(`select ${MAP_NODE_COLUMNS} from public.vocabulary_map_nodes where map_id = $1::uuid and request_id = $2::uuid`, [
+          mapId,
+          requestId,
+        ]),
+      );
+      return rows[0] === undefined ? null : vocabMapNodeRowSchema.parse(textDates(rows[0]));
+    },
+
+    async findVocabMapNodeByLabel(mapId, label) {
+      const rows = await run((session) =>
+        session.query(
+          `select ${MAP_NODE_COLUMNS} from public.vocabulary_map_nodes
+            where map_id = $1::uuid and label = $2 and kind = 'candidate'`,
+          [mapId, label],
+        ),
+      );
+      return rows[0] === undefined ? null : vocabMapNodeRowSchema.parse(textDates(rows[0]));
+    },
+
+    async patchVocabMapNode(mapId, id, patch) {
+      try {
+        const rows = await run((session) =>
+          session.query(
+            `update public.vocabulary_map_nodes
+                set label = case when $3::boolean then $4 else label end,
+                    note = case when $5::boolean then $6 else note end,
+                    group_key = case when $7::boolean then $8::text else group_key end,
+                    step = case when $9::boolean then $10::int else step end,
+                    x = case when $11::boolean then $12::int else x end,
+                    y = case when $13::boolean then $14::int else y end
+              where map_id = $1::uuid and id = $2::uuid
+              returning ${MAP_NODE_COLUMNS}`,
+            [
+              mapId,
+              id,
+              patch.label !== undefined,
+              patch.label ?? null,
+              patch.note !== undefined,
+              patch.note ?? null,
+              patch.group !== undefined,
+              patch.group ?? null,
+              patch.step !== undefined,
+              patch.step ?? null,
+              patch.x !== undefined,
+              patch.x ?? null,
+              patch.y !== undefined,
+              patch.y ?? null,
+            ],
+          ),
+        );
+        return rows[0] === undefined ? null : vocabMapNodeRowSchema.parse(textDates(rows[0]));
+      } catch (error) {
+        // Setting a label or step that would repeat what the map already holds.
+        if ((error as { code?: string }).code === UNIQUE_VIOLATION) {
+          throw new DatabaseError('conflict', 'That would put the same thing on this map twice.');
+        }
+        throw error;
+      }
+    },
+
+    async promoteVocabMapNode(mapId, id, vocabularyId) {
+      try {
+        const rows = await run((session) =>
+          session.query(
+            `update public.vocabulary_map_nodes
+                set kind = 'saved', vocabulary_id = $3::uuid, label = null
+              where map_id = $1::uuid and id = $2::uuid
+              returning ${MAP_NODE_COLUMNS}`,
+            [mapId, id, vocabularyId],
+          ),
+        );
+        return rows[0] === undefined ? null : vocabMapNodeRowSchema.parse(textDates(rows[0]));
+      } catch (error) {
+        const code = (error as { code?: string }).code;
+        if (code === FOREIGN_KEY_VIOLATION) {
+          throw new DatabaseError('invalid', 'That word is not one this account can put on a map.');
+        }
+        throw error;
+      }
+    },
+
+    async deleteVocabMapNode(mapId, id) {
+      const rows = await run((session) =>
+        session.query('delete from public.vocabulary_map_nodes where map_id = $1::uuid and id = $2::uuid returning id', [mapId, id]),
+      );
+      return rows.length > 0;
+    },
+
+    async listVocabMapEdges(mapId) {
+      const rows = await run((session) =>
+        session.query(`select ${MAP_EDGE_COLUMNS} from public.vocabulary_map_edges where map_id = $1::uuid order by created_at, id`, [
+          mapId,
+        ]),
+      );
+      return z.array(vocabMapEdgeRowSchema).parse(rows.map(textDates));
+    },
+
+    async insertVocabMapEdge(edge) {
+      try {
+        const rows = await insertInto((session) =>
+          session.query(
+            `insert into public.vocabulary_map_edges (map_id, from_node_id, to_node_id, kind, pattern, note)
+             values ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6) returning ${MAP_EDGE_COLUMNS}`,
+            [edge.mapId, edge.fromNodeId, edge.toNodeId, edge.kind, edge.pattern, edge.note],
+          ),
+        );
+        if (rows === 'duplicate') return 'duplicate';
+        return vocabMapEdgeRowSchema.parse(textDates(rows[0]));
+      } catch (error) {
+        if (error instanceof DatabaseError && error.failure === 'invalid') {
+          throw new DatabaseError('invalid', 'Both ends of a relationship must be nodes of this map.');
+        }
+        throw error;
+      }
+    },
+
+    async patchVocabMapEdge(mapId, id, patch) {
+      const rows = await run((session) =>
+        session.query(
+          `update public.vocabulary_map_edges
+              set pattern = case when $3::boolean then $4 else pattern end,
+                  note = case when $5::boolean then $6 else note end
+            where map_id = $1::uuid and id = $2::uuid
+            returning ${MAP_EDGE_COLUMNS}`,
+          [mapId, id, patch.pattern !== undefined, patch.pattern ?? null, patch.note !== undefined, patch.note ?? null],
+        ),
+      );
+      return rows[0] === undefined ? null : vocabMapEdgeRowSchema.parse(textDates(rows[0]));
+    },
+
+    async deleteVocabMapEdge(mapId, id) {
+      const rows = await run((session) =>
+        session.query('delete from public.vocabulary_map_edges where map_id = $1::uuid and id = $2::uuid returning id', [mapId, id]),
+      );
+      return rows.length > 0;
+    },
+
+    async countSenses() {
+      const rows = await run((session) => session.query<{ count: number }>('select count(*)::int as count from public.vocabulary_senses'));
+      return rows[0]?.count ?? 0;
+    },
+
+    // ---- Discovery (schema version 19) ----
+    async listDiscoverySources() {
+      const rows = await run((session) =>
+        session.query(`select ${DISCOVERY_SOURCE_COLUMNS} from public.discovery_sources order by updated_at desc, id`),
+      );
+      return z.array(discoverySourceRowSchema).parse(rows.map(textDates));
+    },
+
+    async getDiscoverySource(id) {
+      const rows = await run((session) =>
+        session.query(`select ${DISCOVERY_SOURCE_COLUMNS} from public.discovery_sources where id = $1::uuid`, [id]),
+      );
+      return rows[0] === undefined ? null : discoverySourceRowSchema.parse(textDates(rows[0]));
+    },
+
+    async findDiscoverySourceByRequestId(requestId) {
+      const rows = await run((session) =>
+        session.query(`select ${DISCOVERY_SOURCE_COLUMNS} from public.discovery_sources where request_id = $1::uuid`, [requestId]),
+      );
+      return rows[0] === undefined ? null : discoverySourceRowSchema.parse(textDates(rows[0]));
+    },
+
+    async insertDiscoverySource(input) {
+      const rows = await insertInto((session) =>
+        session.query(
+          `insert into public.discovery_sources (kind, title, origin, content, content_kind, position, request_id)
+           values ($1, $2, $3, $4, $5, $6::jsonb, $7::uuid) returning ${DISCOVERY_SOURCE_COLUMNS}`,
+          [input.kind, input.title, input.origin, input.content, input.contentKind, JSON.stringify(input.position), input.requestId],
+        ),
+      );
+      return rows === 'duplicate' ? 'duplicate' : discoverySourceRowSchema.parse(textDates(rows[0]));
+    },
+
+    async updateDiscoverySource(id, patch) {
+      const rows = await run((session) =>
+        session.query(
+          `update public.discovery_sources
+              set title = case when $2::boolean then $3 else title end
+            where id = $1::uuid
+            returning ${DISCOVERY_SOURCE_COLUMNS}`,
+          [id, patch.title !== undefined, patch.title ?? null],
+        ),
+      );
+      return rows[0] === undefined ? null : discoverySourceRowSchema.parse(textDates(rows[0]));
+    },
+
+    async updateDiscoveryPosition(id, position) {
+      const rows = await run((session) =>
+        session.query(
+          `update public.discovery_sources set position = $2::jsonb where id = $1::uuid returning ${DISCOVERY_SOURCE_COLUMNS}`,
+          [id, JSON.stringify(position)],
+        ),
+      );
+      return rows[0] === undefined ? null : discoverySourceRowSchema.parse(textDates(rows[0]));
+    },
+
+    async bumpDiscoverySource(id) {
+      // The same call the hosted gateway makes: one statement, one transaction.
+      // A source the caller cannot reach updates nothing, and the function
+      // still answers with one row of nulls — read as "nothing moved".
+      const rows = await run((session) =>
+        session.query<{ moved: unknown }>('select to_jsonb(m) as moved from public.bump_discovery_source_revision($1::uuid) m', [id]),
+      );
+      const parsed = discoverySourceRowSchema.safeParse(textDates(rows[0]?.moved));
+      return parsed.success ? parsed.data : null;
+    },
+
+    async deleteDiscoverySource(id) {
+      const rows = await run((session) =>
+        session.query('delete from public.discovery_sources where id = $1::uuid returning id', [id]),
+      );
+      return rows.length > 0;
+    },
+
+    async listDiscoveryMarks(sourceId) {
+      const rows = await run((session) =>
+        sourceId === undefined
+          ? session.query(`select ${DISCOVERY_MARK_COLUMNS} from public.discovery_marks order by created_at, id`)
+          : session.query(`select ${DISCOVERY_MARK_COLUMNS} from public.discovery_marks where source_id = $1::uuid order by created_at, id`, [
+              sourceId,
+            ]),
+      );
+      return z.array(discoveryMarkRowSchema).parse(rows.map(textDates));
+    },
+
+    async getDiscoveryMark(id) {
+      const rows = await run((session) =>
+        session.query(`select ${DISCOVERY_MARK_COLUMNS} from public.discovery_marks where id = $1::uuid`, [id]),
+      );
+      return rows[0] === undefined ? null : discoveryMarkRowSchema.parse(textDates(rows[0]));
+    },
+
+    async insertDiscoveryMark(input) {
+      const rows = await insertInto((session) =>
+        session.query(
+          `insert into public.discovery_marks
+             (source_id, label, context, char_offset, cue_start, cue_end, note, vocabulary_id, saved_at, request_id)
+           values ($1::uuid, $2, $3, $4, $5, $6, $7, $8::uuid, $9::timestamptz, $10::uuid)
+           returning ${DISCOVERY_MARK_COLUMNS}`,
+          [
+            input.sourceId,
+            input.label,
+            input.context,
+            input.offset,
+            input.cueStart,
+            input.cueEnd,
+            input.note,
+            input.vocabularyId,
+            input.savedAt,
+            input.requestId,
+          ],
+        ),
+      );
+      return rows === 'duplicate' ? 'duplicate' : discoveryMarkRowSchema.parse(textDates(rows[0]));
+    },
+
+    async findDiscoveryMarkByRequestId(requestId) {
+      const rows = await run((session) =>
+        session.query(`select ${DISCOVERY_MARK_COLUMNS} from public.discovery_marks where request_id = $1::uuid`, [requestId]),
+      );
+      return rows[0] === undefined ? null : discoveryMarkRowSchema.parse(textDates(rows[0]));
+    },
+
+    async findDiscoveryMarkByLabel(sourceId, label) {
+      const rows = await run((session) =>
+        session.query(`select ${DISCOVERY_MARK_COLUMNS} from public.discovery_marks where source_id = $1::uuid and label = $2`, [
+          sourceId,
+          label,
+        ]),
+      );
+      return rows[0] === undefined ? null : discoveryMarkRowSchema.parse(textDates(rows[0]));
+    },
+
+    async findDiscoveryMarkByVocabulary(vocabularyId) {
+      const rows = await run((session) =>
+        session.query(
+          `select ${DISCOVERY_MARK_COLUMNS} from public.discovery_marks where vocabulary_id = $1::uuid
+           order by created_at desc, id desc limit 1`,
+          [vocabularyId],
+        ),
+      );
+      return rows[0] === undefined ? null : discoveryMarkRowSchema.parse(textDates(rows[0]));
+    },
+
+    async patchDiscoveryMark(id, patch) {
+      const rows = await run((session) =>
+        session.query(
+          `update public.discovery_marks
+              set note = case when $2::boolean then $3 else note end,
+                  vocabulary_id = case when $4::boolean then $5::uuid else vocabulary_id end,
+                  saved_at = case when $6::boolean then $7::timestamptz else saved_at end
+            where id = $1::uuid
+            returning ${DISCOVERY_MARK_COLUMNS}`,
+          [
+            id,
+            patch.note !== undefined,
+            patch.note ?? null,
+            patch.vocabularyId !== undefined,
+            patch.vocabularyId ?? null,
+            patch.savedAt !== undefined,
+            patch.savedAt ?? null,
+          ],
+        ),
+      );
+      return rows[0] === undefined ? null : discoveryMarkRowSchema.parse(textDates(rows[0]));
+    },
+
+    async deleteDiscoveryMark(id) {
+      const rows = await run((session) => session.query('delete from public.discovery_marks where id = $1::uuid returning id', [id]));
+      return rows.length > 0;
     },
   };
 

@@ -23,10 +23,36 @@ import {
   updateEntryRequestSchema,
   updateExampleRequestSchema,
   updateSettingsRequestSchema,
+  addSenseRequestSchema,
+  updateSenseRequestSchema,
+  reorderSensesRequestSchema,
+  archiveSenseRequestSchema,
+  restoreSenseRequestSchema,
   type AccountSettings,
   type ApiErrorBody,
   type AppConfigResponse,
 } from '../shared/api.js';
+import {
+  addMapEdgeRequestSchema,
+  addMapNodeRequestSchema,
+  createMapRequestSchema,
+  expandMapRequestSchema,
+  generateMapRequestSchema,
+  saveCandidateRequestSchema,
+  saveMapLayoutRequestSchema,
+  updateMapEdgeRequestSchema,
+  updateMapNodeRequestSchema,
+  updateMapRequestSchema,
+} from '../shared/vocab-map.js';
+import {
+  createDiscoverySourceRequestSchema,
+  fetchUrlRequestSchema,
+  markSelectionRequestSchema,
+  saveMarkRequestSchema,
+  saveSelectionRequestSchema,
+  updateDiscoverySourceRequestSchema,
+} from '../shared/discovery.js';
+import { aiDiscoveryRequestSchema } from '../shared/ai.js';
 import { bearerToken, type AccountGateway, type AccountSession } from './accounts.js';
 import { createAiAdapter, AiError } from './ai/adapter.js';
 import { createTokenBucket } from './ai/rate-limit.js';
@@ -34,14 +60,19 @@ import { AI_RATE, SmartReader, aiErrorToHttp } from './ai/smart-reader.js';
 import { WORD_FAMILY_RATE, WordFamily } from './ai/word-family.js';
 import { EXAMPLES_RATE, Examples } from './ai/examples.js';
 import { EXAM_PLAN_RATE, ExamPlan } from './ai/exam-plan.js';
+import { MAPS_AI_RATE, MapBuilder } from './ai/map-builder.js';
+import { DISCOVERY_AI_RATE, DiscoveryWriter } from './ai/discovery-writer.js';
 import type { AnalyticsService } from './analytics-service.js';
-import { aiExtractRequestSchema, aiWordFamilyRequestSchema, aiExamplesRequestSchema, aiExamPlanRequestSchema } from '../shared/ai.js';
+import { aiExtractRequestSchema, aiWordFamilyRequestSchema, aiExamplesRequestSchema, aiExamPlanRequestSchema, type AiMapDraft } from '../shared/ai.js';
+import type { DiscoveryService } from './discovery-service.js';
+import { createWebImporter, WebImportError, type WebImporter } from './web-importer.js';
 import type { AppConfig } from './env.js';
 import { HttpError } from './errors.js';
 import type { ExportService } from './export-service.js';
 import type { LibraryService } from './library-service.js';
 import type { ReviewService } from './review-service.js';
 import { DatabaseError } from './supabase/supabase-database.js';
+import type { VocabMapsService } from './vocab-maps-service.js';
 import type { VocabularyService } from './vocabulary-service.js';
 
 export interface AppDependencies {
@@ -56,8 +87,14 @@ export interface AppDependencies {
   analytics?: AnalyticsService | null;
   /** Collections, further examples and relationships; `null` under the same conditions as `service`. */
   library?: LibraryService | null;
+  /** Vocabulary maps; `null` under the same conditions as `service`, or where the database has no room for them. */
+  maps?: VocabMapsService | null;
+  /** Discovery sources and selections; `null` under the same conditions as `service`, or where the database has no room for them. */
+  discovery?: DiscoveryService | null;
   /** The account's own export; `null` under the same conditions as `service`. */
   exporter?: ExportService | null;
+  /** How this server fetches a web page for import; a stub in tests, the guarded one in production. */
+  webImporter?: WebImporter | null;
 }
 
 /** What the current request may use. With accounts, all of it belongs to one signed-in user. */
@@ -66,6 +103,8 @@ interface Scope {
   vocabulary: VocabularyService | null;
   analytics: AnalyticsService | null;
   library: LibraryService | null;
+  maps: VocabMapsService | null;
+  discovery: DiscoveryService | null;
   exporter: ExportService | null;
   session: AccountSession | null;
 }
@@ -92,8 +131,29 @@ function databaseErrorToHttp(error: DatabaseError): HttpError {
       return new HttpError(503, 'setup_incomplete', error.message);
     case 'invalid':
       return new HttpError(400, 'invalid_request', error.message);
+    case 'conflict':
+      return new HttpError(409, 'conflict', error.message);
     case 'unavailable':
       return new HttpError(503, 'database_unavailable', `${error.message} Nothing was changed; try again shortly.`);
+  }
+}
+
+/** A refused web fetch as the browser should hear about it: the reason, without any internals. */
+function webErrorToHttp(error: WebImportError): HttpError {
+  switch (error.failure) {
+    case 'invalid_url':
+    case 'empty':
+      return new HttpError(400, 'invalid_request', error.message);
+    case 'blocked':
+      return new HttpError(403, 'url_blocked', error.message);
+    case 'too_large':
+      return new HttpError(413, 'content_too_large', error.message);
+    case 'unsupported_type':
+      return new HttpError(415, 'unsupported_media_type', error.message);
+    case 'timeout':
+      return new HttpError(504, 'upstream_timeout', error.message);
+    case 'unreachable':
+      return new HttpError(502, 'upstream_unreachable', error.message);
   }
 }
 
@@ -114,6 +174,19 @@ async function parseBody<T>(c: Context, schema: ZodType<T>): Promise<T> {
   return parsed.data;
 }
 
+/** A model's failure — down, slow, rate-limiting, rambling — is told apart from a server's before it reaches the client. */
+async function withAiErrors<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof AiError) {
+      const http = aiErrorToHttp(error);
+      throw new HttpError(http.status, http.code, http.message);
+    }
+    throw error;
+  }
+}
+
 export function createApp({
   config,
   service,
@@ -121,7 +194,10 @@ export function createApp({
   accounts = null,
   analytics = null,
   library = null,
+  maps = null,
+  discovery = null,
   exporter = null,
+  webImporter = null,
 }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
@@ -138,6 +214,10 @@ export function createApp({
   const familyBuilder = new WordFamily({ adapter: aiAdapter, limiter: createTokenBucket(WORD_FAMILY_RATE) });
   const exampleSuggester = new Examples({ adapter: aiAdapter, limiter: createTokenBucket(EXAMPLES_RATE) });
   const examPlanner = new ExamPlan({ adapter: aiAdapter, limiter: createTokenBucket(EXAM_PLAN_RATE) });
+  const mapBuilder = new MapBuilder({ adapter: aiAdapter, limiter: createTokenBucket(MAPS_AI_RATE) });
+  const discoveryWriter = new DiscoveryWriter({ adapter: aiAdapter, limiter: createTokenBucket(DISCOVERY_AI_RATE) });
+  // The one outbound fetch this server makes, with its guards. Tests pass a stub instead.
+  const pageFetcher: WebImporter = webImporter ?? createWebImporter();
 
   const requireService = (c: Context<AppEnv>): ReviewService => {
     const { review } = c.get('scope');
@@ -188,16 +268,20 @@ export function createApp({
     await next();
   });
 
-  app.use(
-    '/api/*',
-    bodyLimit({
-      // Three free-text fields of up to 6,000 characters each, in UTF-8.
-      maxSize: 96 * 1024,
+  app.use('/api/*', async (c, next) => {
+    // Three free-text fields of up to 6,000 characters each, in UTF-8 — except
+    // discovery, which stores a source's content in the request itself, so its
+    // cap matches the source cap (120,000 characters, worst case UTF-8) plus
+    // room for the envelope. Everything else stays exactly as it was.
+    const path = c.req.path;
+    const maxSize = path === '/api/discovery' || path.startsWith('/api/discovery/') ? 400 * 1024 : 96 * 1024;
+    return bodyLimit({
+      maxSize,
       onError: () => {
         throw new HttpError(413, 'payload_too_large', 'The request body is too large.');
       },
-    }),
-  );
+    })(c, next);
+  });
 
   // ---- Public routes. Keep these free of anything worth protecting. ----
 
@@ -236,12 +320,14 @@ export function createApp({
         vocabulary: session.vocabulary,
         analytics: session.analytics,
         library: session.library,
+        maps: session.maps,
+        discovery: session.discovery,
         exporter: session.exporter,
         session,
       });
       return next();
     }
-    c.set('scope', { review: service, vocabulary, analytics, library, exporter, session: null });
+    c.set('scope', { review: service, vocabulary, analytics, library, maps, discovery, exporter, session: null });
     await next();
   });
 
@@ -254,6 +340,22 @@ export function createApp({
   const requireLibrary = (c: Context<AppEnv>): LibraryService => {
     const scoped = c.get('scope').library;
     if (scoped === null) throw notConfigured();
+    return scoped;
+  };
+
+  const requireMaps = (c: Context<AppEnv>): VocabMapsService => {
+    const scoped = c.get('scope').maps;
+    // Absent where the database has no room for maps yet (schema version 18);
+    // the settings panel already reports how far behind it is.
+    if (scoped === null) throw new HttpError(503, 'setup_incomplete', 'Vocabulary maps need the newest database update.');
+    return scoped;
+  };
+
+  const requireDiscovery = (c: Context<AppEnv>): DiscoveryService => {
+    const scoped = c.get('scope').discovery;
+    // Absent where the database has no room for discovery content yet
+    // (schema version 19); the settings panel reports how far behind it is.
+    if (scoped === null) throw new HttpError(503, 'setup_incomplete', 'Discovery needs the newest database update.');
     return scoped;
   };
 
@@ -408,6 +510,243 @@ export function createApp({
   });
 
   app.delete('/api/relations/:id', async (c) => c.json(await requireLibrary(c).deleteRelation(idParam(c, 'id', 'link'))));
+
+  // ---- Vocabulary maps: the learner's own diagrams. Reading, drawing and
+  // saving a map never touches a word's content, schedule or review history;
+  // the one call that can create vocabulary is a candidate saved on purpose. ----
+
+  app.get('/api/maps', async (c) => c.json(await requireMaps(c).list()));
+
+  app.post('/api/maps', async (c) => {
+    const request = await parseBody(c, createMapRequestSchema);
+    return c.json(await requireMaps(c).create(request), 201);
+  });
+
+  // Registered before the parameterised routes: this is a view, not a map id.
+  app.get('/api/maps/personal', async (c) => c.json(await requireMaps(c).personal()));
+
+  app.post('/api/maps/generate', async (c) => {
+    if (!config.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
+    const request = await parseBody(c, generateMapRequestSchema);
+    const accountKey = c.get('scope').session?.account.id ?? 'sample';
+    const maps = requireMaps(c);
+    const seeds = await maps.seedsFor(request);
+    // The model drafts; the service decides what of it may be stored. Seed
+    // words land saved by their own ids, every other label stays a candidate.
+    const draft = await withAiErrors(() =>
+      mapBuilder.generate(accountKey, {
+        type: request.type,
+        topic: request.topic,
+        seeds: seeds.words.map((word) => ({ word: word.word })),
+      }),
+    );
+    return c.json(await maps.createFromDraft(request, draft, seeds), 201);
+  });
+
+  app.get('/api/maps/:id', async (c) => c.json(await requireMaps(c).get(idParam(c, 'id', 'map'))));
+
+  app.patch('/api/maps/:id', async (c) => {
+    const id = idParam(c, 'id', 'map');
+    const request = await parseBody(c, updateMapRequestSchema);
+    return c.json(await requireMaps(c).update(id, request));
+  });
+
+  // Removes the map, its nodes and its edges. Every word it referenced stays.
+  app.delete('/api/maps/:id', async (c) => c.json(await requireMaps(c).remove(idParam(c, 'id', 'map'))));
+
+  app.post('/api/maps/:id/nodes', async (c) => {
+    const id = idParam(c, 'id', 'map');
+    const request = await parseBody(c, addMapNodeRequestSchema);
+    return c.json(await requireMaps(c).addNode(id, request), 201);
+  });
+
+  app.patch('/api/maps/:id/nodes/:nodeId', async (c) => {
+    const mapId = idParam(c, 'id', 'map');
+    const nodeId = idParam(c, 'nodeId', 'node');
+    const request = await parseBody(c, updateMapNodeRequestSchema);
+    return c.json(await requireMaps(c).patchNode(mapId, nodeId, request));
+  });
+
+  // Takes the node's edges with it. The word a saved node points at stays.
+  app.delete('/api/maps/:id/nodes/:nodeId', async (c) =>
+    c.json(await requireMaps(c).removeNode(idParam(c, 'id', 'map'), idParam(c, 'nodeId', 'node'))),
+  );
+
+  // The one call that turns a suggestion into real vocabulary — on this
+  // explicit request only, through the ordinary word path and its rules.
+  app.post('/api/maps/:id/nodes/:nodeId/save', async (c) => {
+    const mapId = idParam(c, 'id', 'map');
+    const nodeId = idParam(c, 'nodeId', 'node');
+    const request = await parseBody(c, saveCandidateRequestSchema);
+    return c.json(await requireMaps(c).saveCandidate(mapId, nodeId, request), 201);
+  });
+
+  app.post('/api/maps/:id/edges', async (c) => {
+    const id = idParam(c, 'id', 'map');
+    const request = await parseBody(c, addMapEdgeRequestSchema);
+    return c.json(await requireMaps(c).addEdge(id, request), 201);
+  });
+
+  app.patch('/api/maps/:id/edges/:edgeId', async (c) => {
+    const mapId = idParam(c, 'id', 'map');
+    const edgeId = idParam(c, 'edgeId', 'relationship');
+    const request = await parseBody(c, updateMapEdgeRequestSchema);
+    return c.json(await requireMaps(c).patchEdge(mapId, edgeId, request));
+  });
+
+  app.delete('/api/maps/:id/edges/:edgeId', async (c) =>
+    c.json(await requireMaps(c).removeEdge(idParam(c, 'id', 'map'), idParam(c, 'edgeId', 'relationship'))),
+  );
+
+  app.put('/api/maps/:id/layout', async (c) => {
+    const id = idParam(c, 'id', 'map');
+    const request = await parseBody(c, saveMapLayoutRequestSchema);
+    return c.json(await requireMaps(c).saveLayout(id, request));
+  });
+
+  app.post('/api/maps/:id/expand', async (c) => {
+    const request = await parseBody(c, expandMapRequestSchema);
+    if (!config.writesRequested && request.apply === true) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
+    const accountKey = c.get('scope').session?.account.id ?? 'sample';
+    const maps = requireMaps(c);
+    const { map } = await maps.get(idParam(c, 'id', 'map'));
+    const type = map.type;
+    if (type === 'personal') {
+      // The personal map is drawn from the library on every read; there is
+      // nothing of its own to expand.
+      throw new HttpError(400, 'invalid_request', 'The personal map is drawn live from your library and cannot be expanded.');
+    }
+    // Only with `apply` are the suggestions stored — as candidate nodes,
+    // which are map data, not vocabulary. Without it they are just proposed.
+    const draft: AiMapDraft = await withAiErrors(() =>
+      mapBuilder.expand(accountKey, {
+        type,
+        title: map.title,
+        nodes: map.nodes.map((node) => ({
+          label: node.kind === 'candidate' ? node.label ?? '' : node.word?.word ?? '',
+          kind: node.kind,
+          group: node.group,
+        })),
+        edges: map.edges.map((edge) => ({ kind: edge.kind })),
+      }),
+    );
+    const suggestions = await maps.validateSuggestions(map, draft);
+    const applied = request.apply === true;
+    // Applying twice is harmless without any bookkeeping: the same suggestion
+    // is recognised by its label and reused rather than added again.
+    if (applied) await maps.applySuggestions(map.id, suggestions);
+    return c.json({ suggestions, applied });
+  });
+
+  // ---- Discovery & Input: sources, selections, and the one explicit save ----
+  //
+  // Reading, listening, importing, generating and marking write only
+  // discovery rows. The only calls that can create vocabulary are the two
+  // saves below, each on an explicit press, through the ordinary word path.
+  // Nothing here touches a schedule, mastery, review history or practice.
+
+  app.get('/api/discovery', async (c) => c.json(await requireDiscovery(c).list()));
+
+  app.post('/api/discovery', async (c) => {
+    const request = await parseBody(c, createDiscoverySourceRequestSchema);
+    return c.json(await requireDiscovery(c).create(request), 201);
+  });
+
+  // Views across sources — registered before the parameterised routes below.
+  app.get('/api/discovery/marks', async (c) => c.json(await requireDiscovery(c).marks()));
+
+  // Where a saved word was found: the link back from the Word Profile.
+  app.get('/api/discovery/context', async (c) => {
+    const parsed = pageIdSchema.safeParse(c.req.query('vocabularyId'));
+    if (!parsed.success) throw new HttpError(400, 'invalid_request', 'Give the id of a word to look up.');
+    return c.json(await requireDiscovery(c).contextFor(parsed.data));
+  });
+
+  // Save Now: one word, created by the same request the Add form uses, with
+  // the selection's context kept beside it.
+  app.post('/api/discovery/save', async (c) => {
+    const request = await parseBody(c, saveSelectionRequestSchema);
+    return c.json(await requireDiscovery(c).saveSelection(request), 201);
+  });
+
+  // The draft reading: shown and validated, stored only when the learner
+  // accepts it as an ordinary source creation.
+  app.post('/api/discovery/generate', async (c) => {
+    if (!config.writesRequested) {
+      throw new HttpError(
+        403,
+        'read_only',
+        'Saving is switched off, so nothing was changed. Set REVIEW_WRITES_ENABLED=true to allow it.',
+      );
+    }
+    const request = await parseBody(c, aiDiscoveryRequestSchema);
+    const accountKey = c.get('scope').session?.account.id ?? 'sample';
+    const discovery = requireDiscovery(c);
+    const seeds = await discovery.seedsFor(request);
+    const draft = await withAiErrors(() =>
+      discoveryWriter.draft(accountKey, {
+        seeds,
+        objective: request.objective,
+        length: request.length,
+      }),
+    );
+    return c.json({ draft: await discovery.checkDraft(draft) });
+  });
+
+  // Brings a page back as plain text for the preview. Nothing is stored —
+  // opening it as a source is the learner's next, separate press.
+  app.post('/api/discovery/fetch-url', async (c) => {
+    const request = await parseBody(c, fetchUrlRequestSchema);
+    try {
+      return c.json(await pageFetcher.fetch(request.url));
+    } catch (error) {
+      if (error instanceof WebImportError) throw webErrorToHttp(error);
+      throw error;
+    }
+  });
+
+  app.get('/api/discovery/:id', async (c) => c.json(await requireDiscovery(c).get(idParam(c, 'id', 'source'))));
+
+  app.patch('/api/discovery/:id', async (c) => {
+    const id = idParam(c, 'id', 'source');
+    const request = await parseBody(c, updateDiscoverySourceRequestSchema);
+    return c.json(await requireDiscovery(c).update(id, request));
+  });
+
+  // Removes the source and its marks. Every word those marks became stays.
+  app.delete('/api/discovery/:id', async (c) => c.json(await requireDiscovery(c).remove(idParam(c, 'id', 'source'))));
+
+  // Mark for Later: a selection kept, referencing nothing in the library.
+  app.post('/api/discovery/:id/marks', async (c) => {
+    const id = idParam(c, 'id', 'source');
+    const request = await parseBody(c, markSelectionRequestSchema);
+    if (request.sourceId !== id) throw new HttpError(400, 'invalid_request', 'That selection does not belong to this source.');
+    return c.json(await requireDiscovery(c).mark(request), 201);
+  });
+
+  // Processing a marked item later — the explicit save that gives it its word.
+  app.post('/api/discovery/marks/:markId/save', async (c) => {
+    const markId = idParam(c, 'markId', 'selection');
+    const request = await parseBody(c, saveMarkRequestSchema);
+    return c.json(await requireDiscovery(c).saveMark(markId, request), 201);
+  });
+
+  // Dismiss: the waiting selection is taken out. A saved one keeps its context.
+  app.delete('/api/discovery/marks/:markId', async (c) =>
+    c.json(await requireDiscovery(c).dismiss(idParam(c, 'markId', 'selection'))),
+  );
 
   // ---- Account settings ----
 
@@ -606,6 +945,45 @@ export function createApp({
   app.post('/api/vocabulary/:id/restore', async (c) =>
     c.json({ entry: await requireVocabulary(c).restore(entryId(c)) }),
   );
+
+  // ---- Senses (schema version 13) ----
+  app.get('/api/vocabulary/:id/senses', async (c) =>
+    c.json({ senses: await requireVocabulary(c).listSenses(entryId(c)) }),
+  );
+
+  // Registered before the by-sense-id route: "order" is a word of its own.
+  app.patch('/api/vocabulary/:id/senses/order', async (c) => {
+    const request = await parseBody(c, reorderSensesRequestSchema);
+    await requireVocabulary(c).reorderSenses(entryId(c), request);
+    return c.json({ ok: true });
+  });
+
+  app.get('/api/vocabulary/:id/senses/:senseId', async (c) =>
+    c.json({ sense: await requireVocabulary(c).getSense(c.req.param('senseId')) }),
+  );
+
+  app.post('/api/vocabulary/:id/senses', async (c) => {
+    const request = await parseBody(c, addSenseRequestSchema);
+    const result = await requireVocabulary(c).addSense(entryId(c), request);
+    return c.json(result, result.created ? 201 : 200);
+  });
+
+  app.patch('/api/vocabulary/:id/senses/:senseId', async (c) => {
+    const request = await parseBody(c, updateSenseRequestSchema);
+    return c.json({ sense: await requireVocabulary(c).updateSense(c.req.param('senseId'), request) });
+  });
+
+  app.post('/api/vocabulary/:id/senses/:senseId/archive', async (c) => {
+    const request = await parseBody(c, archiveSenseRequestSchema);
+    await requireVocabulary(c).archiveSense(c.req.param('senseId'), request);
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/vocabulary/:id/senses/:senseId/restore', async (c) => {
+    const request = await parseBody(c, restoreSenseRequestSchema);
+    await requireVocabulary(c).restoreSense(c.req.param('senseId'), request);
+    return c.json({ ok: true });
+  });
 
   return app;
 }

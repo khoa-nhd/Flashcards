@@ -7,6 +7,8 @@ import { createTokenBucket } from './ai/rate-limit.js';
 import { WRITING_COACH_RATE, createWritingCoach } from './ai/writing-coach.js';
 import { createApp } from './create-app.js';
 import { createGoalStore } from './goal-store.js';
+import { DiscoveryService } from './discovery-service.js';
+import { createMemoryDiscoveryStore } from './discovery-store.js';
 import { loadConfig, type AppConfig } from './env.js';
 import { ExportService } from './export-service.js';
 import { LibraryService } from './library-service.js';
@@ -16,6 +18,8 @@ import { sampleRules } from './mock/sample-rules.js';
 import { ReviewService } from './review-service.js';
 import { createSchedulerStore } from './scheduler-store.js';
 import { createSupabaseAccounts } from './supabase/supabase-accounts.js';
+import { VocabMapsService, type MapWordSource } from './vocab-maps-service.js';
+import { createMemoryVocabMapsStore } from './vocab-maps-store.js';
 import { VocabularyService } from './vocabulary-service.js';
 
 /** Wires configuration, data source and routes together. Shared by every entry point. */
@@ -93,10 +97,83 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     // The sample data is kept in memory for everyone; its goal follows the same switch.
     writesRequested: true,
   });
+  const libraryStore = createMemoryLibraryStore((id) => repository.ownsWord(id));
   const library = new LibraryService({
-    store: createMemoryLibraryStore((id) => repository.ownsWord(id)),
+    store: libraryStore,
     catalog: repository,
     writesRequested: true,
+  });
+  // What the map service needs to know about words, over the sample data.
+  // Saved nodes hold an id; this is where the text behind it is read, so a
+  // renamed word shows up in every map without the map being touched.
+  const mapWords: MapWordSource = {
+    async words(ids) {
+      const found: Array<{ id: string; word: string; meaning: string | null }> = [];
+      for (const id of ids) {
+        const entry = await repository.getEntry(id);
+        if (entry !== null) found.push({ id: entry.id, word: entry.word, meaning: entry.meaning });
+      }
+      return found;
+    },
+    async sense(id) {
+      // The sample store keeps senses on their word, so the owning word is
+      // found by looking, exactly as the sense lookup itself does.
+      const { entries } = await repository.listEntries();
+      for (const entry of entries) {
+        const sense = entry.senses?.find((candidate) => candidate.id === id);
+        if (sense !== undefined) return { id: sense.id, vocabularyId: entry.id, meaning: sense.meaning };
+      }
+      return null;
+    },
+    async ownsWord(id) {
+      return repository.ownsWord(id);
+    },
+    async overview() {
+      const [{ entries }, library] = await Promise.all([repository.listEntries(), libraryStore.load()]);
+      return {
+        words: entries.map((entry) => ({
+          id: entry.id,
+          word: entry.word,
+          meaning: entry.meaning,
+          updatedAt: entry.lastEditedTime ?? entry.createdTime ?? entry.dateAdded ?? '',
+        })),
+        collections: library.collections.map((collection) => ({ id: collection.id, name: collection.name })),
+        memberships: library.items.map((item) => ({ collectionId: item.collectionId, vocabularyId: item.vocabularyId })),
+        relations: library.relations.map((relation) => ({ lowId: relation.lowId, highId: relation.highId, kind: relation.kind })),
+        senses: entries.reduce((total, entry) => total + (entry.senses?.length ?? 0), 0),
+      };
+    },
+    async saveWord(request) {
+      const { entry } = await vocabulary.create({ word: request.word, requestId: request.requestId });
+      return { id: entry.id };
+    },
+  };
+  const maps = new VocabMapsService({
+    store: createMemoryVocabMapsStore(),
+    words: mapWords,
+    writesRequested: true,
+  });
+  // Discovery keeps its sources and selections here too — the sample words
+  // belong to nobody, so nothing is shared and nothing persists by itself.
+  const discovery = new DiscoveryService({
+    store: createMemoryDiscoveryStore(),
+    vocabulary,
+    library: {
+      async findCollection(id) {
+        const [{ entries }, data] = await Promise.all([repository.listEntries(), libraryStore.load()]);
+        const collection = data.collections.find((candidate) => candidate.id === id);
+        if (collection === undefined) return null;
+        const words = new Map(entries.map((entry) => [entry.id, entry.word]));
+        const members: string[] = [];
+        for (const item of data.items) {
+          if (item.collectionId !== id) continue;
+          const word = words.get(item.vocabularyId);
+          if (word !== undefined) members.push(word);
+        }
+        return { name: collection.name, words: members };
+      },
+    },
+    writesRequested: config.writesRequested,
   });
   const exporter = new ExportService({
     repository,
@@ -109,7 +186,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
       scheduler: scheduler.get(),
     }),
   });
-  return { app: createApp({ config, service, vocabulary, analytics, library, exporter }), config };
+  return { app: createApp({ config, service, vocabulary, analytics, library, maps, discovery, exporter }), config };
 }
 
 let shared: ReturnType<typeof buildApp> | undefined;

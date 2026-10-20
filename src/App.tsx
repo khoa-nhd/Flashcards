@@ -5,6 +5,7 @@ import { AppShell } from './components/AppShell.js';
 import { AuthScreen } from './components/AuthScreen.js';
 import { Link } from './components/Link.js';
 import { Spinner } from './components/Spinner.js';
+import { QuickCapture } from './components/discovery/QuickCapture.js';
 import { Toasts } from './components/Toasts.js';
 import { WordDetailPanel } from './components/WordDetailPanel.js';
 import { BUTTON_PRIMARY } from './components/ui.js';
@@ -17,10 +18,12 @@ import { BankPage } from './pages/BankPage.js';
 import { CalendarPage } from './pages/CalendarPage.js';
 import { CollectionsPage } from './pages/CollectionsPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
+import { DiscoverPage } from './pages/DiscoverPage.js';
 import { ExamPage } from './pages/ExamPage.js';
 import { ImportPage } from './pages/ImportPage.js';
 import { InsightsPage } from './pages/InsightsPage.js';
 import { MapPage } from './pages/MapPage.js';
+import { MapsPage } from './pages/MapsPage.js';
 import { PracticePage } from './pages/PracticePage.js';
 import { ReviewPage } from './pages/ReviewPage.js';
 import { SettingsPage } from './pages/SettingsPage.js';
@@ -37,6 +40,8 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   exam: { title: 'Exam', render: () => <ExamPage /> },
   collections: { title: 'Collections', render: () => <CollectionsPage /> },
   map: { title: 'Topic map', render: () => <MapPage /> },
+  maps: { title: 'Vocabulary maps', render: () => <MapsPage /> },
+  discover: { title: 'Discovery', render: () => <DiscoverPage /> },
   weak: { title: 'Weak words', render: () => <WeakWordsPage /> },
   insights: { title: 'Insights', render: () => <InsightsPage /> },
   settings: { title: 'Settings', render: () => <SettingsPage /> },
@@ -228,6 +233,22 @@ function Root() {
   const vocab = useSyncExternalStore(vocabulary.subscribe, vocabulary.getState);
   const outboxState = useOutbox();
   const { reduceMotion } = useSettings();
+  const [quickCapture, setQuickCapture] = useState(false);
+
+  // Quick capture from anywhere: Alt+K opens it unless a modifier, a repeat
+  // or an IME composition says the keypress means something else.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key.toLowerCase() !== 'k' || !event.altKey || event.ctrlKey || event.metaKey || event.repeat) return;
+      if (event.isComposing) return;
+      const target = event.target as HTMLElement | null;
+      if (target !== null && target.isContentEditable) return;
+      event.preventDefault();
+      setQuickCapture(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.reduceMotion = String(reduceMotion);
@@ -250,6 +271,7 @@ function Root() {
         reviewCount={reviewCount}
         badge={badge}
         account={account}
+        quickCapture={{ open: () => setQuickCapture(true) }}
         pending={{
           count: outboxState.entries.length,
           refused: outboxState.refused,
@@ -270,6 +292,7 @@ function Root() {
           PAGES[route].render()
         )}
       </AppShell>
+      <QuickCapture open={quickCapture} onClose={() => setQuickCapture(false)} />
       {wordId !== null && pageIdSchema.safeParse(wordId).success && (
         <WordDetailPanel key={wordId} entryId={wordId} onClose={closeWord} />
       )}

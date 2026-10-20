@@ -98,12 +98,18 @@ describe('schema', () => {
       { relname: 'card_states', relrowsecurity: true },
       { relname: 'collection_items', relrowsecurity: true },
       { relname: 'collections', relrowsecurity: true },
+      { relname: 'discovery_marks', relrowsecurity: true },
+      { relname: 'discovery_sources', relrowsecurity: true },
       { relname: 'review_logs', relrowsecurity: true },
       { relname: 'study_sessions', relrowsecurity: true },
       { relname: 'user_settings', relrowsecurity: true },
       { relname: 'vocabulary', relrowsecurity: true },
       { relname: 'vocabulary_examples', relrowsecurity: true },
+      { relname: 'vocabulary_map_edges', relrowsecurity: true },
+      { relname: 'vocabulary_map_nodes', relrowsecurity: true },
+      { relname: 'vocabulary_maps', relrowsecurity: true },
       { relname: 'vocabulary_relations', relrowsecurity: true },
+      { relname: 'vocabulary_senses', relrowsecurity: true },
     ]);
   });
 
@@ -114,11 +120,17 @@ describe('schema', () => {
     for (const table of [
       'vocabulary',
       'card_states',
+      'vocabulary_senses',
       'review_logs',
       'user_settings',
       'study_sessions',
       'vocabulary_cards',
       'effective_reviews',
+      'vocabulary_map_edges',
+      'vocabulary_map_nodes',
+      'vocabulary_maps',
+      'discovery_sources',
+      'discovery_marks',
     ]) {
       for (const privilege of ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) {
         expect(await can('anon', table, privilege), `anon ${privilege} ${table}`).toBe(false);
@@ -135,8 +147,8 @@ describe('schema', () => {
     expect(await can('authenticated', 'effective_reviews', 'SELECT')).toBe(true);
     expect(await can('authenticated', 'effective_reviews', 'INSERT')).toBe(false);
     expect(await can('authenticated', 'study_sessions', 'DELETE')).toBe(false);
-    // Nobody can remove a word or its state outright; the app only ever trashes.
-    for (const table of ['vocabulary', 'card_states']) {
+    // Nobody can remove a word, its senses or their state outright; the app only ever trashes.
+    for (const table of ['vocabulary', 'card_states', 'vocabulary_senses']) {
       expect(await can('authenticated', table, 'SELECT'), table).toBe(true);
       expect(await can('authenticated', table, 'INSERT'), table).toBe(true);
       expect(await can('authenticated', table, 'UPDATE'), table).toBe(true);
@@ -145,40 +157,75 @@ describe('schema', () => {
   });
 
   it('has a policy for every operation that is allowed, and for no other', async () => {
-    const policies = await db.admin<{ tablename: string; cmd: string; roles: string }>(
-      `select tablename, cmd, roles::text as roles from pg_policies where schemaname = 'public' order by tablename, cmd`,
+    const policies = await db.admin<{ tablename: string; cmd: string; policyname: string; roles: string }>(
+      `select tablename, cmd, policyname, roles::text as roles from pg_policies where schemaname = 'public' order by tablename, cmd, policyname`,
     );
     // Words, their schedules and their history can never be deleted. Only the
     // organising tables (collections, further examples, links) allow it.
-    expect(policies.map((policy) => `${policy.tablename} ${policy.cmd} ${policy.roles}`)).toEqual([
-      'card_states INSERT {authenticated}',
-      'card_states SELECT {authenticated}',
-      'card_states UPDATE {authenticated}',
-      'collection_items DELETE {authenticated}',
-      'collection_items INSERT {authenticated}',
-      'collection_items SELECT {authenticated}',
-      'collections DELETE {authenticated}',
-      'collections INSERT {authenticated}',
-      'collections SELECT {authenticated}',
-      'collections UPDATE {authenticated}',
-      'review_logs INSERT {authenticated}',
-      'review_logs SELECT {authenticated}',
-      'study_sessions INSERT {authenticated}',
-      'study_sessions SELECT {authenticated}',
-      'study_sessions UPDATE {authenticated}',
-      'user_settings INSERT {authenticated}',
-      'user_settings SELECT {authenticated}',
-      'user_settings UPDATE {authenticated}',
-      'vocabulary INSERT {authenticated}',
-      'vocabulary SELECT {authenticated}',
-      'vocabulary UPDATE {authenticated}',
-      'vocabulary_examples DELETE {authenticated}',
-      'vocabulary_examples INSERT {authenticated}',
-      'vocabulary_examples SELECT {authenticated}',
-      'vocabulary_examples UPDATE {authenticated}',
-      'vocabulary_relations DELETE {authenticated}',
-      'vocabulary_relations INSERT {authenticated}',
-      'vocabulary_relations SELECT {authenticated}',
+    // The senses guard policies (version 16, restated in 17) are
+    // restrictive: they add a condition to the insert and update above and
+    // take nothing away. The recovery policies (version 17) let the one
+    // NOLOGIN recovery role — the owner of resume_vocabulary_sense — see and
+    // write its own account's rows, and nothing else ever holds that role.
+    expect(policies.map((policy) => `${policy.tablename} ${policy.cmd} ${policy.policyname} ${policy.roles}`)).toEqual([
+      'card_states INSERT card_states_insert {authenticated}',
+      'card_states SELECT card_states_select {authenticated}',
+      'card_states UPDATE card_states_update {authenticated}',
+      'collection_items DELETE collection_items_delete {authenticated}',
+      'collection_items INSERT collection_items_insert {authenticated}',
+      'collection_items SELECT collection_items_select {authenticated}',
+      'collections DELETE collections_delete {authenticated}',
+      'collections INSERT collections_insert {authenticated}',
+      'collections SELECT collections_select {authenticated}',
+      'collections UPDATE collections_update {authenticated}',
+      'discovery_marks DELETE discovery_marks_delete {authenticated}',
+      'discovery_marks INSERT discovery_marks_insert {authenticated}',
+      'discovery_marks SELECT discovery_marks_select {authenticated}',
+      'discovery_marks UPDATE discovery_marks_update {authenticated}',
+      'discovery_sources DELETE discovery_sources_delete {authenticated}',
+      'discovery_sources INSERT discovery_sources_insert {authenticated}',
+      'discovery_sources SELECT discovery_sources_select {authenticated}',
+      'discovery_sources UPDATE discovery_sources_update {authenticated}',
+      'review_logs INSERT review_logs_insert {authenticated}',
+      'review_logs SELECT review_logs_select {authenticated}',
+      'study_sessions INSERT study_sessions_insert {authenticated}',
+      'study_sessions SELECT study_sessions_select {authenticated}',
+      'study_sessions UPDATE study_sessions_update {authenticated}',
+      'user_settings INSERT user_settings_insert {authenticated}',
+      'user_settings SELECT user_settings_select {authenticated}',
+      'user_settings UPDATE user_settings_update {authenticated}',
+      'vocabulary INSERT vocabulary_insert {authenticated}',
+      'vocabulary SELECT vocabulary_recovery_select {app_sense_recovery}',
+      'vocabulary SELECT vocabulary_select {authenticated}',
+      'vocabulary UPDATE vocabulary_recovery_update {app_sense_recovery}',
+      'vocabulary UPDATE vocabulary_update {authenticated}',
+      'vocabulary_examples DELETE vocabulary_examples_delete {authenticated}',
+      'vocabulary_examples INSERT vocabulary_examples_insert {authenticated}',
+      'vocabulary_examples SELECT vocabulary_examples_select {authenticated}',
+      'vocabulary_examples UPDATE vocabulary_examples_update {authenticated}',
+      'vocabulary_map_edges DELETE vocabulary_map_edges_delete {authenticated}',
+      'vocabulary_map_edges INSERT vocabulary_map_edges_insert {authenticated}',
+      'vocabulary_map_edges SELECT vocabulary_map_edges_select {authenticated}',
+      'vocabulary_map_edges UPDATE vocabulary_map_edges_update {authenticated}',
+      'vocabulary_map_nodes DELETE vocabulary_map_nodes_delete {authenticated}',
+      'vocabulary_map_nodes INSERT vocabulary_map_nodes_insert {authenticated}',
+      'vocabulary_map_nodes SELECT vocabulary_map_nodes_select {authenticated}',
+      'vocabulary_map_nodes UPDATE vocabulary_map_nodes_update {authenticated}',
+      'vocabulary_maps DELETE vocabulary_maps_delete {authenticated}',
+      'vocabulary_maps INSERT vocabulary_maps_insert {authenticated}',
+      'vocabulary_maps SELECT vocabulary_maps_select {authenticated}',
+      'vocabulary_maps UPDATE vocabulary_maps_update {authenticated}',
+      'vocabulary_relations DELETE vocabulary_relations_delete {authenticated}',
+      'vocabulary_relations INSERT vocabulary_relations_insert {authenticated}',
+      'vocabulary_relations SELECT vocabulary_relations_select {authenticated}',
+      'vocabulary_senses INSERT vocabulary_senses_insert {authenticated}',
+      'vocabulary_senses INSERT vocabulary_senses_insert_guard {app_sense_recovery,authenticated}',
+      'vocabulary_senses INSERT vocabulary_senses_recovery_insert {app_sense_recovery}',
+      'vocabulary_senses SELECT vocabulary_senses_recovery_select {app_sense_recovery}',
+      'vocabulary_senses SELECT vocabulary_senses_select {authenticated}',
+      'vocabulary_senses UPDATE vocabulary_senses_recovery_update {app_sense_recovery}',
+      'vocabulary_senses UPDATE vocabulary_senses_update {authenticated}',
+      'vocabulary_senses UPDATE vocabulary_senses_update_guard {app_sense_recovery,authenticated}',
     ]);
   });
 
@@ -222,11 +269,17 @@ describe('isolation between users', () => {
     for (const table of [
       'vocabulary',
       'card_states',
+      'vocabulary_senses',
       'review_logs',
       'user_settings',
       'study_sessions',
       'vocabulary_cards',
       'effective_reviews',
+      'vocabulary_map_edges',
+      'vocabulary_map_nodes',
+      'vocabulary_maps',
+      'discovery_sources',
+      'discovery_marks',
     ]) {
       await expect(db.asAnon((s) => s.query(`select * from public.${table}`)), table).rejects.toMatchObject({ code: RLS_DENIED });
     }
@@ -235,6 +288,7 @@ describe('isolation between users', () => {
       `public.record_review('{}'::jsonb)`,
       `public.undo_review('${mine.id}'::uuid, '${mine.id}'::uuid)`,
       `public.session_summary('${mine.id}'::uuid)`,
+      `public.bump_discovery_source_revision('${mine.id}'::uuid)`,
     ]) {
       await expect(db.asAnon((s) => s.query(`select * from ${call}`)), call).rejects.toMatchObject({ code: RLS_DENIED });
     }
@@ -575,6 +629,17 @@ describe('update_vocabulary', () => {
 
   beforeEach(async () => {
     word = (await db.as(alice, (s) => createWord(s))).id;
+    // The word's content lives in its first sense, with the shown columns
+    // carrying the same text: giving the word its meaning here is done the
+    // way the app stores it, so the two never disagree under a later edit.
+    await db.admin(
+      `insert into public.vocabulary_senses (user_id, vocabulary_id, position, meaning, definition)
+       select v.user_id, v.id, 0, 'thẳng thắn', 'honest'
+         from public.vocabulary v
+        where v.id = $1
+          and not exists (select 1 from public.vocabulary_senses s where s.vocabulary_id = v.id)`,
+      [word],
+    );
     await db.admin(`update public.vocabulary set meaning = 'thẳng thắn', definition = 'honest', date_added = '2026-10-01'`);
   });
 

@@ -19,6 +19,8 @@ import { LibraryService } from '../library-service.js';
 import { NO_LIBRARY_STORE } from '../library-store.js';
 import { ReviewService } from '../review-service.js';
 import { MASTERY_ONLY, createSchedulerStore } from '../scheduler-store.js';
+import { VocabMapsService } from '../vocab-maps-service.js';
+import { DiscoveryService } from '../discovery-service.js';
 import { VocabularyService } from '../vocabulary-service.js';
 import type { WritingCoach } from '../ai/writing-coach.js';
 import {
@@ -29,6 +31,8 @@ import {
   type VocabularyDatabase,
 } from './supabase-database.js';
 import { createSupabaseLibraryStore } from './supabase-library.js';
+import { createSupabaseMapsStore, createSupabaseMapWords } from './supabase-maps.js';
+import { createSupabaseDiscoveryLibrary, createSupabaseDiscoveryStore } from './supabase-discovery.js';
 import { SupabaseVocabularyRepository } from './supabase-repository.js';
 
 export interface TokenVerifier {
@@ -173,22 +177,48 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         schemaVersion >= 8
           ? createSchedulerStore(settings?.scheduler ?? undefined, (next) => database.saveScheduler(next))
           : MASTERY_ONLY;
+      const vocabularyService = new VocabularyService({
+        catalog: repository,
+        rules,
+        defaults,
+        timeZone,
+        writesRequested,
+        scheduler,
+        capabilities: repository.capabilities,
+        now,
+      });
+      // Maps live where the database has the tables for them (schema version
+      // 18). Where it does not, the service is absent and the endpoints say
+      // so, rather than pretending a map could be kept.
+      const maps =
+        schemaVersion >= 18
+          ? new VocabMapsService({
+              store: createSupabaseMapsStore(database),
+              words: createSupabaseMapWords(database, vocabularyService),
+              writesRequested,
+              now,
+            })
+          : null;
+      // Discovery content lives where the database has the tables for it
+      // (schema version 19). Where it does not, the service is absent and
+      // the endpoints say so, rather than pretending a source could be kept.
+      const discovery =
+        schemaVersion >= 19
+          ? new DiscoveryService({
+              store: createSupabaseDiscoveryStore(database),
+              vocabulary: vocabularyService,
+              library: createSupabaseDiscoveryLibrary(database),
+              writesRequested,
+              now,
+            })
+          : null;
       return {
         account,
         timeZone,
         database: { version: schemaVersion, latest: LATEST_SCHEMA_VERSION },
         fsrsRetention,
         review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, coach, now }),
-        vocabulary: new VocabularyService({
-          catalog: repository,
-          rules,
-          defaults,
-          timeZone,
-          writesRequested,
-          scheduler,
-          capabilities: repository.capabilities,
-          now,
-        }),
+        vocabulary: vocabularyService,
         analytics: new AnalyticsService({
           repository,
           catalog: repository,
@@ -200,6 +230,8 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           now,
         }),
         library,
+        maps,
+        discovery,
         exporter: new ExportService({
           repository,
           catalog: repository,

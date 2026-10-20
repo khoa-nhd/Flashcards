@@ -38,8 +38,10 @@ const PRIMARY: NavItem[] = [
 ];
 
 const SECONDARY: NavItem[] = [
+  { route: 'discover', label: 'Discovery', short: 'Discover', icon: 'search' },
   { route: 'practice', label: 'Practice', short: 'Practice', icon: 'practice' },
   { route: 'collections', label: 'Collections', short: 'Collections', icon: 'collections' },
+  { route: 'maps', label: 'Vocabulary maps', short: 'Maps', icon: 'map' },
   { route: 'map', label: 'Topic map', short: 'Map', icon: 'map' },
   { route: 'weak', label: 'Weak words', short: 'Weak', icon: 'weak' },
   { route: 'insights', label: 'Insights', short: 'Insights', icon: 'insights' },
@@ -55,6 +57,8 @@ export interface AppShellProps {
   badge: string | null;
   /** The signed-in account, where the app has accounts. */
   account?: { email: string | null; signOut(): Promise<void> } | null;
+  /** Opens the quick-capture dialog; the button it belongs to is drawn here. */
+  quickCapture?: { open(): void } | null;
   /** Answers still waiting to be saved. Shown as one strip above the page while there are any. */
   pending?: {
     count: number;
@@ -66,7 +70,15 @@ export interface AppShellProps {
   children: ReactNode;
 }
 
-export function AppShell({ active, reviewCount, badge, account = null, pending = null, children }: AppShellProps) {
+export function AppShell({
+  active,
+  reviewCount,
+  badge,
+  account = null,
+  quickCapture = null,
+  pending = null,
+  children,
+}: AppShellProps) {
   const main = useRef<HTMLElement>(null);
   const [focusOn, setFocusOn] = useState(false);
   const focus = useMemo<FocusMode>(
@@ -129,6 +141,20 @@ export function AppShell({ active, reviewCount, badge, account = null, pending =
                 <span className="rounded-full bg-warn-soft px-2 py-0.5 text-xs font-medium text-warn-ink">{badge}</span>
               )}
             </div>
+            {quickCapture !== null && (
+              <button
+                type="button"
+                onClick={quickCapture.open}
+                title="Quick capture (Alt+K)"
+                className="mb-3 flex w-full cursor-pointer items-center gap-3 rounded-xl bg-accent-soft px-3 py-2 text-sm font-semibold text-accent transition hover:opacity-90"
+              >
+                <Icon name="add" />
+                <span className="flex-1 text-left">Quick capture</span>
+                <span aria-hidden="true" className="text-xs font-medium opacity-70">
+                  Alt+K
+                </span>
+              </button>
+            )}
             <nav aria-label="Main" className="flex flex-1 flex-col gap-1">
               {PRIMARY.map(sideLink)}
               <div className="my-2 border-t border-line" />
@@ -162,6 +188,17 @@ export function AppShell({ active, reviewCount, badge, account = null, pending =
               )}
             </div>
             <div className="flex shrink-0 items-center gap-1">
+              {quickCapture !== null && (
+                <button
+                  type="button"
+                  onClick={quickCapture.open}
+                  aria-label="Quick capture"
+                  title="Quick capture (Alt+K)"
+                  className="flex size-10 shrink-0 cursor-pointer items-center justify-center rounded-xl text-muted"
+                >
+                  <Icon name="add" />
+                </button>
+              )}
               {SECONDARY.map((item) => (
                 <Link
                   key={item.route}

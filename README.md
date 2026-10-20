@@ -14,6 +14,8 @@ in on.
 | **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples, related words and — from database version 11 — the word family it belongs to, with an AI draft builder and suggested example sentences. |
 | **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
 | **Topic map** | The whole vocabulary drawn three ways on one page: your collections as islands of words, the word families under their root, and the saved relations as a network. Read-only — every word in a drawing opens its panel. |
+| **Vocabulary maps** | Diagrams you draw yourself from your own words: semantic links tied to a meaning, word families, collocations, topics, contrasts, ordered scenarios and communicative functions — plus a personal map drawn live from the library. Saving a map saves no vocabulary: a suggestion becomes a word only when you save it, and no map ever touches a schedule. |
+| **Discovery** | Where words are found, not entered. Quick capture from anywhere (Alt+K); a reading workspace over any text you bring in; a listening workspace over a transcript, with its timestamps; AI-drafted readings; imports by file, paste or web address. Saving is always your own press — marking for later keeps the selection with its sentence or its time, and nothing here ever changes a schedule, mastery or practice. See [docs/discovery.md](docs/discovery.md). |
 | **Calendar** | A month at a glance: words by the day they were added, or saved reviews by the day you did them. |
 | **Weak words** | Words that need attention, weakest first, each with the reasons it is listed and a suggested action. Starts a review of just those that are due, or practice with all of them. |
 | **Insights** | Reviews per day, accuracy and time per card week by week, accuracy and retention by period, confidence calibration, practice by mode, additions over time, share mastered, busiest days, incomplete entries. |
@@ -27,6 +29,8 @@ Reference documents:
 - [docs/supabase-migration.md](docs/supabase-migration.md) — the record of the move from Notion to Supabase.
 - [docs/import-and-export.md](docs/import-and-export.md) — importing a list, the export format, and backup and recovery.
 - [docs/ai-features.md](docs/ai-features.md) — what the AI features send, how to configure one, and how they fail safe.
+- [docs/vocabulary-maps.md](docs/vocabulary-maps.md) — the eight map experiences, the lines they never cross, and the schema behind them.
+- [docs/discovery.md](docs/discovery.md) — finding words in reading, listening, drafts and imports: the five views, what each sends or stores, and the lines it never crosses.
 - [docs/upgrade-plan.md](docs/upgrade-plan.md) — the plan for turning this into a fuller learning system, and how far it has got.
 - [docs/offline-mode-design.md](docs/offline-mode-design.md) — the plan for offline review. Its first two steps are built (an answer's own date, and a page-open outbox); the rest is not.
 
@@ -364,6 +368,28 @@ picture opens its panel, exactly as in the bank.
   grid, every link a curve between the two — with the totals by kind beneath
   (synonyms, antonyms, word families, collocations, and so on).
 
+## Vocabulary maps
+
+**Vocabulary maps** in the menu (the older *Topic map* above is a separate,
+read-only page). Seven kinds can be started — by hand, or drafted by the
+model from a word, a collection or a topic — and the eighth, the personal
+map, is never created: every visit draws it live from your library.
+Each kind reads its own way — a collocation as a table with the
+combination itself, a scenario as an ordered list you reorder with
+buttons, a word family as rooted trees, a nuance pair side by side with
+the difference spelled between them — and every drawing is repeated as a
+list beside it, with a word and a suggestion always told apart (a
+suggestion carries its own dashed chip and saves into a word with one
+deliberate press).
+
+Three rules hold throughout: **saving a map saves no vocabulary**; a saved
+node stores no text of its own — the word's display text is read live, so
+renaming a word updates its maps at once; and **no map reading or writing
+touches FSRS, mastery, review dates or practice**. Maps need database
+version 18 (the first run says so until the migrations are applied) and
+respect the read-only switch. Full detail, including the AI behaviour:
+[docs/vocabulary-maps.md](docs/vocabulary-maps.md).
+
 ## Importing a list
 
 Add vocabulary → **Import a list**. Paste text or choose a file: CSV or
@@ -538,6 +564,11 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 | `PUT /api/collections/:id/words/:wordId` | `{ member }`: put a word in a collection or take it out. |
 | `POST /api/vocabulary/:id/examples`, `PATCH`, `DELETE /api/examples/:id` | Further example sentences for a word. |
 | `POST /api/relations`, `DELETE /api/relations/:id` | `{ fromId, toId, kind }`: link two of your words. Stored once per pair and kind. |
+| `GET /api/maps`, `POST /api/maps` | The learner's maps; create one `{ type, title, requestId }` — one creation per repeated request id, and never a word. |
+| `GET /api/maps/:id`, `PATCH`, `DELETE /api/maps/:id` | One map: read, rename (`If-Match` → `409 conflict`), delete — every word stays. |
+| `GET /api/maps/personal` | The personal map, recomputed from the library on each read; stored nowhere. |
+| `POST/PATCH/DELETE /api/maps/:id/nodes…`, `POST /api/maps/:id/nodes/:nodeId/save`, `POST/PATCH/DELETE /api/maps/:id/edges…`, `PUT /api/maps/:id/layout` | Drawing a map: place a saved word or a suggestion, correct either, connect two items with a kind the map's type accepts, save positions. The one call that turns a suggestion into a word is `…/nodes/:nodeId/save`; candidates refuse a `vocabularyId` and saved nodes refuse a `label` (`400`). |
+| `POST /api/maps/generate`, `POST /api/maps/:id/expand` | Draft a map with the model (seed words land saved, the rest arrive as suggestions), or expand one — which proposes first and adds only candidates when asked, never overwriting links you drew. Same `409`/`429`/frozen behaviour as the AI routes below; `502 ai_invalid` for unusable output. |
 | `GET /api/settings`, `PUT /api/settings` | The account's time zone and FSRS target retention; the database version found. |
 | `POST /api/ai/extract` | `{ text, word }` → the sentence your word sits in (always taken from your own text), plus a suggested definition and meaning. Smart Reader only; refused (`409`) where no model is configured, rate-limited per account (`429`), and frozen with the rest of saving. Every failure leaves the form working by hand. See [docs/ai-features.md](ai-features.md). |
 | `POST /api/ai/word-family` | `{ word, meaning?, definition? }` → the words formed from one root, each with a short gloss and one marked the root. A draft to review; saving it is ordinary create + `PATCH` with `rootId` (needs database version 11). Same `409`/`429`/frozen behaviour as above. |

@@ -51,9 +51,11 @@ order.
 | 10 | `20261019090000_writing_mode.sql` | `submitted_answer` up to 6000 characters; `writing` as a history mode; `ai_feedback`, `model_answer` on `review_logs`; `record_practice` reads the two new keys. | The Writing Challenge and its coach note. |
 | 11 | `20261020090000_root_derived.sql` | `root_id` on `vocabulary` (a word points at the root it was formed from; self-reference refused, one index) and `update_vocabulary` manages it with the root checked to be the caller's own word. | The word-family panel: the family timeline and the AI family builder. |
 | 12 | `20261021090000_speaking_mode.sql` | `review_logs_mode_check` accepts `speaking` alongside the other practice modes. | Speaking practice: the transcript the browser wrote down is recorded under its own name. |
+| 18 | `20261027090000_vocabulary_maps.sql` | `vocabulary_maps`, `vocabulary_map_nodes`, `vocabulary_map_edges` — owner-only, with checked kinds and a check that keeps `personal` unstoreable; `bump_vocabulary_map_revision()`; a unique key (`id`, `vocabulary_id`, `user_id`) on `vocabulary_senses` so a sense can only ever point at its own word. | Vocabulary maps (the `/maps` page). |
+| 19 | `20261028090000_discovery.sql` | `discovery_sources` (the text, transcript or imported page a learner reads or listens to: kind, title, origin, up to 120,000 characters of plain content, a reading or listening position, a revision and a per-account request id) and `discovery_marks` (one selection kept for later — its label, the sentence or cue around it, where it sat, an optional note; saved into `vocabulary` only by an explicit save, with a check keeping "marked" and "saved" exclusive and one open mark per label per source); `bump_discovery_source_revision()`. | Discovery & Input: quick capture, the reading and listening workspaces, marking for later, generated readings, imports (`/discover`). |
 
 There are no database credentials in the project, so the owner runs each file
-in the Supabase SQL Editor. Nothing in versions 2 to 12 alters or removes
+in the Supabase SQL Editor. Nothing in versions 2 to 19 alters or removes
 existing rows.
 
 If the hosting project is linked to Supabase through Vercel's integration,
@@ -75,6 +77,9 @@ has been applied.
 | `collection_items` | word in a collection | (Version 7.) Which word is in which collection; a word can be in several. |
 | `vocabulary_examples` | further example | (Version 7.) Extra example sentences for a word, with a source note. |
 | `vocabulary_relations` | link between two words | (Version 7.) Synonym, antonym, word family, collocation, related, often confused. |
+| `vocabulary_maps` | map | (Version 18.) One diagram: its kind, title, description and revision. |
+| `vocabulary_map_nodes` | item on a map | (Version 18.) A saved word (its canonical id, optionally one sense) **or** a suggestion (its own text) — a check refuses both together. |
+| `vocabulary_map_edges` | link on a map | (Version 18.) Two items and a kind the map's type accepts, with an optional combination pattern and note. |
 
 Every row carries `user_id`, which defaults to the caller (`auth.uid()`) and
 references `auth.users` with `on delete cascade`.
@@ -219,6 +224,32 @@ or `review_logs`.
 A link, an example or a membership of a word in the trash is kept but not
 shown until the word is restored.
 
+### Vocabulary maps
+
+Version 18. Diagrams drawn from words already in the account: organising
+tables like the ones above, and equally outside a word's schedule or
+history — nothing here reads or writes `card_states` or `review_logs`.
+
+- **`vocabulary_maps`**: `id`, `user_id`, `type` (the seven creatable
+  kinds; a check refuses `personal`, which is drawn live on every read and
+  stored nowhere), `title`, `description`, `revision`, `request_id` —
+  unique per user, so the same creation submitted twice lands once.
+- **`vocabulary_map_nodes`**: a saved item carries `vocabulary_id` and an
+  optional `sense_id` and **no stored label** — its text is read from the
+  word on every read, so renaming a word updates its maps at once. A
+  suggestion carries its own `label` and no word id. Both carry `note`,
+  `group`, `step` and `x`/`y`. The key (`id`, `user_id`) lets the edges'
+  foreign keys refuse another account's item, and the sense reference is
+  checked to be a sense of that very word.
+- **`vocabulary_map_edges`**: `from_node_id`, `to_node_id`, `kind` (one of
+  the stored kinds — a check list), optional `pattern` and `note`
+  (a contrast without its note is refused). Two items with a kind are
+  stored once (natural uniqueness, in either order of the pair), and an
+  item cannot be linked to itself.
+
+Deleting a map removes only its diagram (nodes and links cascade);
+deleting a word removes its nodes and links and leaves the map standing.
+
 ## Row Level Security
 
 RLS is enabled on every table. Every policy is the same test:
@@ -235,11 +266,15 @@ RLS is enabled on every table. Every policy is the same test:
 | `collection_items` | own | own | — | own |
 | `vocabulary_examples` | own | own | own | own |
 | `vocabulary_relations` | own | own | — | own |
+| `vocabulary_maps` | own | own | own | own |
+| `vocabulary_map_nodes` | own | own | own | own |
+| `vocabulary_map_edges` | own | own | own | own |
 
 - **Signed-out visitors (`anon`) have no privileges on anything.**
-- **No word, schedule or review can be deleted outright.** Only the four
-  organising tables above allow deletion, and deleting from them removes
-  nothing else. "Delete" on a word in the app sets `deleted_at`,
+- **No word, schedule or review can be deleted outright.** Only the
+  organising tables above allow deletion: a collection takes only its
+  memberships, a map only its diagram, and neither ever touches a word.
+  "Delete" on a word in the app sets `deleted_at`,
   and Settings → Deleted words restores it. Rows only go when the account
   itself is deleted (cascade from `auth.users`).
 - `user_id` cannot be changed to another user's (the `WITH CHECK` refuses it),
@@ -268,6 +303,7 @@ empty `search_path`, executable by `authenticated` only.
 | `confidence_stats(since)` | (Version 5.) Per confidence level: standing answers that carried it, and how many were remembered. |
 | `record_practice(event)` | (Version 6.) Appends one practice answer, once per request id, for a live word of the caller's. Returns `recorded`, `already_recorded` or `not_found`. Never updates anything. From version 10 the event may also carry `ai_feedback` and `model_answer`, read only when present. |
 | `practice_daily_stats(from, to)` | (Version 6.) Practice answers per day and study mode: answers, correct, time. |
+| `bump_vocabulary_map_revision(map_id)` | (Version 18.) Adds one to a map's `revision` and returns it, for a map the caller owns. Under row-level security a blocked call returns one row of NULLs instead of an error, which the server reads as *nothing changed* — a write that somehow slipped past RLS can never report a revision it did not update. |
 
 The new mastery and review date are computed by the API server with the same
 rules engine (`shared/review-logic.ts`) and passed to the function as absolute

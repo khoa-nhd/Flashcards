@@ -93,7 +93,7 @@ export function ImportPage() {
 
   const checked: CheckedRow[] = useMemo(() => {
     if (parsed === null || problem !== null) return [];
-    return checkRows(toImportRows(parsed.rows, mapping, skipFirst), state.entries);
+    return checkRows(toImportRows(parsed.rows, mapping, skipFirst, parsed.senses), state.entries);
   }, [parsed, mapping, skipFirst, problem, state.entries]);
 
   const counts = useMemo(() => {
@@ -184,6 +184,9 @@ export function ImportPage() {
         ...(row.example === null ? {} : { example: row.example }),
         ...(row.dateAdded === null ? {} : { dateAdded: row.dateAdded }),
         ...(row.status === 'new' ? {} : { allowDuplicate: true }),
+        // A word from this app's own export carries its senses; they travel
+        // with the row so a restore brings the whole profile back.
+        ...(row.senses === undefined ? {} : { senses: row.senses }),
       };
     });
 
@@ -341,8 +344,9 @@ export function ImportPage() {
                 <p className={HELP}>
                   CSV or tab-separated text with one word per row, a plain list with one word per line, an Excel file
                   (.xlsx, first sheet only), or a file this app exported. A file is read on this device and is not
-                  uploaded. Only the word, meaning, definition, example and date added are used. A mastery or review
-                  date in the file is ignored: an imported word starts as a new one.
+                  uploaded. Only the word, meaning, definition, example, date added — and, from a file this app
+                  exported, its senses — are used. A mastery or review date in the file is ignored: an imported word
+                  starts as a new one.
                 </p>
               </section>
 
@@ -465,6 +469,11 @@ export function ImportPage() {
                               <td className="px-3 py-1.5 tabular-nums text-muted">{row.line}</td>
                               <th scope="row" className="px-3 py-1.5 font-medium wrap-anywhere">
                                 {row.word || <span className="text-muted">(none)</span>}
+                                {row.senses !== undefined && row.senses.length > 0 && (
+                                  <span className="ml-1 font-normal text-muted">
+                                    · {row.senses.length} sense{row.senses.length === 1 ? '' : 's'}
+                                  </span>
+                                )}
                               </th>
                               <td className="px-3 py-1.5 text-muted wrap-anywhere">{row.meaning ?? row.definition ?? ''}</td>
                               <td className="px-3 py-1.5">
