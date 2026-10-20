@@ -226,7 +226,7 @@ export function scoreWeakWord(
   };
 }
 
-/** Every word with something against it, weakest first. Ties are broken by lower mastery, then by word so the order is stable. */
+/** Every word with something against it, sorted by mastery then by weakness. Ties are broken by word so the order is stable. */
 export function rankWeakWords(
   inputs: readonly WeakWordInput[],
   today: IsoDate,
@@ -237,9 +237,8 @@ export function rankWeakWords(
     .filter((word): word is WeakWord => word !== null)
     .sort(
       (a, b) =>
-        b.score - a.score ||
-        // A word with no mastery recorded is not thereby well learned: it sorts with the weakest.
         (a.mastery ?? -1) - (b.mastery ?? -1) ||
+        b.score - a.score ||
         a.word.localeCompare(b.word),
     );
 }
