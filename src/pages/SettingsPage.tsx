@@ -68,7 +68,7 @@ export function SettingsPage() {
         }
       />
 
-      <div className="flex max-w-2xl flex-col gap-6">
+      <div className="flex max-w-2xl flex-col gap-6 [&_p]:max-w-[70ch]">
         {account !== null && <AccountSection account={account} />}
         {account !== null && <TimeZoneSection />}
         <SchedulerSection />

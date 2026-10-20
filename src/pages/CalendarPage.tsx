@@ -272,7 +272,7 @@ export function CalendarPage() {
                               data-level={showing.level(count)}
                               className={`heat-cell flex aspect-square w-full cursor-pointer flex-col items-center justify-center gap-0.5 rounded-xl border text-sm ${
                                 isSelected ? 'border-ink ring-2 ring-ink' : 'border-transparent hover:border-muted'
-                              } ${day.inMonth ? '' : 'opacity-40'}`}
+                              } ${day.inMonth ? '' : 'is-outside'}`}
                             >
                               <span className={isToday ? 'font-bold underline underline-offset-4' : ''}>
                                 {Number(day.date.slice(8))}

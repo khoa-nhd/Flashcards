@@ -251,7 +251,7 @@ export function SchedulerSection() {
 
           <ScheduleSimulation defaultRetention={report.fsrs.requestRetention} />
 
-          <div className="flex flex-col gap-2 rounded-xl border border-line p-4">
+          <div className="flex flex-col gap-2 border-t border-line pt-4">
             <h3 className="text-sm font-semibold tracking-tight">Which schedule is in charge</h3>
             {!report.switchable ? (
               <p className={HELP}>

@@ -68,6 +68,12 @@
   color: var(--heat-ink-high);
 }
 
+/* Adjacent-month days keep their full-strength type; muting the whole cell fails contrast. */
+.heat-cell.is-outside {
+  background: transparent;
+  color: var(--muted);
+}
+
 /* The setting in the app overrides the system preference in one direction only: less motion. */
 :root[data-reduce-motion='true'] *,
 :root[data-reduce-motion='true'] *::before,
@@ -217,7 +223,8 @@ input[type='radio']:disabled {
   background-clip: content-box;
 }
 
-h1,
+/* `text-wrap` is a shorthand: applied to a `.truncate` heading it would undo the nowrap. */
+h1:not(.truncate),
 h2,
 h3 {
   text-wrap: balance;

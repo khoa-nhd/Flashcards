@@ -200,7 +200,7 @@ export function ScheduleSimulation({ defaultRetention }: { defaultRetention: num
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl border border-line p-4">
+    <div className="flex flex-col gap-3 border-t border-line pt-4">
       <h3 className="text-sm font-semibold tracking-tight">Try it on your saved answers</h3>
       <p className={HELP}>
         See where FSRS would put each word if it had been in charge of the answers you have already saved, at any target

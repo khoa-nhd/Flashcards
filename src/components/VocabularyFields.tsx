@@ -168,21 +168,29 @@ export function VocabularyFields({
         </>
       )}
 
-      <div className="rounded-xl border border-line">
+      <div className="border-t border-line">
         <button
           type="button"
           aria-expanded={showSchedule}
           onClick={onToggleSchedule}
-          className="flex w-full cursor-pointer flex-wrap items-center justify-between gap-x-3 gap-y-1 px-3 py-2.5 text-left text-sm font-medium"
+          className="flex w-full cursor-pointer flex-wrap items-center justify-between gap-x-3 gap-y-1 py-2.5 text-left text-sm font-medium"
         >
           <span>Starting review settings</span>
-          <span className="text-xs font-normal text-muted">
-            Mastery {values.mastery || '—'} ·{' '}
-            {values.reviewDate === '' ? 'no review date (due right away)' : `first review ${formatDate(values.reviewDate, 'short')}`}
+          <span className="flex items-center gap-2 text-xs font-normal text-muted">
+            <span>
+              Mastery {values.mastery || '—'} ·{' '}
+              {values.reviewDate === ''
+                ? 'no review date (due right away)'
+                : `first review ${formatDate(values.reviewDate, 'short')}`}
+            </span>
+            <Icon
+              name="right"
+              className={`size-3.5 shrink-0 transition-transform ${showSchedule ? 'rotate-90' : ''}`}
+            />
           </span>
         </button>
         {showSchedule && (
-          <div className="grid gap-3 border-t border-line p-3 sm:grid-cols-2">
+          <div className="grid gap-3 border-t border-line py-3 sm:grid-cols-2">
             <Field id={id('mastery')} label="Mastery" hint={`New words start at ${masteryDefault}.`} error={errors.mastery}>
               <input
                 id={id('mastery')}

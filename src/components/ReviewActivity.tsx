@@ -134,7 +134,7 @@ const hasFigures = (activity: Remote<AnalyticsResponse>): activity is Remote<Ana
 /** The dashboard's short account of recent reviewing. Every figure comes from saved answers. */
 export function ReviewActivityCard({ activity }: { activity: Remote<AnalyticsResponse> & { reload(): void } }) {
   return (
-    <section className={`${CARD} p-5`} aria-label="Review activity">
+    <section className="flex flex-col" aria-label="Review activity">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className={SECTION_TITLE}>Review activity</h2>
         <div className="flex gap-4 text-sm font-medium">

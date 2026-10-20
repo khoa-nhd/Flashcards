@@ -99,8 +99,8 @@ export function DashboardPage() {
               aria-label="Ready to review"
               className="pool pool-top overflow-hidden rounded-2xl border border-line px-6 py-7 md:px-9 md:py-9"
             >
-              <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
-                <div className="max-w-[36rem]">
+              <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+                <div className="min-w-0 max-w-[36rem]">
                   <h2 className="font-serif text-[2.5rem] font-semibold leading-[1.04] tracking-[-0.025em] text-ink md:text-[3.25rem]">
                     {ready === 0
                       ? 'Nothing is due right now.'
@@ -145,7 +145,7 @@ export function DashboardPage() {
             <ReviewActivityCard activity={activity} />
 
             {/* Next useful action - clearly distinguish due review from weak knowledge */}
-            <section className={`${CARD} p-5`} aria-label="What to do next">
+            <section className="flex flex-col" aria-label="What to do next">
               <h2 className={SECTION_TITLE}>What to do next</h2>
               <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                 {/* Due review */}
@@ -211,7 +211,8 @@ export function DashboardPage() {
             </section>
 
             <section aria-label="Summary">
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <h2 className={SECTION_TITLE}>Summary</h2>
+              <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
                 <StatTile label="Total vocabulary" value={summary.total} to={ROUTES.bank} />
                 <StatTile
                   label="Mastered"
@@ -306,7 +307,7 @@ export function DashboardPage() {
             </section>
 
             {trueMasterySummary && (
-              <section className={`${CARD} p-5`} aria-label="True Mastery">
+              <section className="flex flex-col" aria-label="True Mastery">
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
                   <h2 className={SECTION_TITLE}>True Mastery</h2>
                   <span className="text-xs text-muted">

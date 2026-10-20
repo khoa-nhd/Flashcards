@@ -193,7 +193,7 @@ export function Flashcard({
         aria-keyshortcuts="Space"
         className="absolute bottom-4 left-1/2 flex -translate-x-1/2 cursor-pointer items-center gap-2 whitespace-nowrap rounded-full border border-line-strong bg-paper px-4 py-1.5 text-xs font-medium text-muted transition-colors hover:text-ink"
       >
-        <span className="keyboard:hidden">Tap to flip</span>
+        <span className="keyboard:hidden">{flipped ? 'Tap to flip back' : 'Tap to flip'}</span>
         <span className="hidden keyboard:inline">{flipped ? 'Flip back' : 'Show answer'}</span>
         <kbd className="hidden rounded border border-line bg-surface px-1.5 py-0.5 text-[0.6875rem] keyboard:inline">
           Space

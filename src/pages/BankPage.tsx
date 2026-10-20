@@ -105,7 +105,7 @@ function BankTable({
         <thead className="border-b border-line text-left text-[0.6875rem] uppercase tracking-[0.12em] text-faint">
           <tr>
             {header('word')}
-            <th scope="col" className="hidden px-3 py-2.5 font-medium md:table-cell">
+            <th scope="col" className="hidden px-3 py-2.5 font-medium lg:table-cell">
               Meaning
             </th>
             {header('mastery', 'w-24')}
@@ -115,7 +115,7 @@ function BankTable({
               'True Mastery is an evidence-based estimate (0–100) of how well you know a word, from your practice history across modes. It is separate from Review Mastery, which drives the schedule.',
             )}
             {header('reviewDate', 'w-40')}
-            {header('dateAdded', 'hidden w-32 sm:table-cell')}
+            {header('dateAdded', 'hidden w-32 xl:table-cell')}
           </tr>
         </thead>
         <tbody>
@@ -143,7 +143,7 @@ function BankTable({
                     <QualityFlag entry={entry} />
                   </span>
                 </th>
-                <td className="hidden max-w-xs px-3 py-2.5 text-muted md:table-cell">
+                <td className="hidden max-w-xs px-3 py-2.5 text-muted lg:table-cell">
                   <span className="line-clamp-1">{entry.meaning ?? entry.definition ?? '—'}</span>
                 </td>
                 <td className="px-3 py-2.5">
@@ -198,7 +198,7 @@ function BankTable({
                     )}
                   </span>
                 </td>
-                <td className="hidden whitespace-nowrap px-3 py-2.5 text-muted sm:table-cell">
+                <td className="hidden whitespace-nowrap px-3 py-2.5 text-muted xl:table-cell">
                   {formatDate(entry.dateAdded, 'short')}
                 </td>
               </tr>
@@ -420,7 +420,7 @@ export function BankPage() {
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
                 <FilterSelect
                   label="Review status"
                   value={query.status ?? ''}

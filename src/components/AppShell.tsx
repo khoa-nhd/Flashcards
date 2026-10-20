@@ -111,10 +111,10 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between gap-2 border-b border-line px-4 pb-2 pt-[max(0.5rem,env(safe-area-inset-top))] md:hidden">
-          <div className="flex min-w-0 items-center gap-2">
-            <h1 className="truncate text-[0.9375rem] font-semibold tracking-[-0.01em]">{title}</h1>
+          <div className="flex min-w-0 items-center gap-1 sm:gap-2">
+            <h1 title={title} className="truncate text-[0.9375rem] font-semibold tracking-[-0.01em]">{title}</h1>
             {badge !== null && (
-              <span className="shrink-0 rounded-full border border-line-strong px-2 py-0.5 text-[0.6875rem] font-medium text-faint">
+              <span className="shrink-0 rounded-full border border-line-strong px-1 py-0.5 text-[0.6875rem] font-medium text-faint sm:px-2">
                 {badge}
               </span>
             )}

@@ -114,7 +114,7 @@ export function BarChart({ title, unit, data, categoryLabel, height = 180 }: Bar
           type="button"
           onClick={() => setAsTable((shown) => !shown)}
           aria-pressed={asTable}
-          className="cursor-pointer rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-line-strong/50 hover:text-ink"
+          className="shrink-0 cursor-pointer whitespace-nowrap rounded-lg px-2 py-1 text-xs font-medium text-muted hover:bg-line-strong/50 hover:text-ink"
         >
           {asTable ? 'Show chart' : 'Show table'}
         </button>
