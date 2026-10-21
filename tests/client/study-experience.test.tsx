@@ -150,9 +150,6 @@ describe('choosing what to review', () => {
 describe('counting towards mastery', () => {
   const headerSwitch = () => screen.getByLabelText('Count toward mastery') as HTMLInputElement;
   const note = () => screen.queryByText(/Not counting toward mastery/);
-  const settingsSwitch = () => screen.getByLabelText(/Count reviews toward mastery/) as HTMLInputElement;
-  /** The sidebar item, wherever else a link of the same name may be drawn. */
-  const navLink = (name: string) => screen.getAllByRole('link', { name })[0]!;
 
   /** Flips the card and answers Remember, waiting for the answer to leave. */
   const answerOne = async (api: ReturnType<typeof createFakeApi>['api'], times: number) => {
@@ -219,21 +216,6 @@ describe('counting towards mastery', () => {
     expect(note()).toBeInTheDocument();
   });
 
-  it('is one switch wherever it is flipped, Settings included', async () => {
-    const { user } = await open('/review', { cards: [card(1)] });
-    await screen.findByTestId('flashcard');
-    await user.click(headerSwitch());
-
-    await user.click(navLink('Settings'));
-    expect(await screen.findByLabelText(/Count reviews toward mastery/)).not.toBeChecked();
-
-    // And back the other way: the Review tab reads the same choice.
-    await user.click(settingsSwitch());
-    await user.click(navLink('Review'));
-    await screen.findByTestId('flashcard');
-    expect(headerSwitch()).toBeChecked();
-  });
-
   it('says a chosen review counts again once the switch is back on', async () => {
     const { api, user } = await open('/review', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
@@ -294,6 +276,40 @@ describe('picking the words yourself', () => {
     expect(ticked()[0]).toContain('word-2');
     expect(ticked()[1]).toContain('word-1');
     expect(screen.getByRole('button', { name: 'Review 2 words' })).toBeEnabled();
+  });
+
+  it('lists the words from the lowest mastery to the highest', async () => {
+    await open('/review?focus=select', {
+      entries: [entry(1, { mastery: 8 }), entry(2, { mastery: 1 }), entry(3, { mastery: 4 })],
+    });
+    await picker();
+
+    const words = screen
+      .getAllByRole('checkbox', { name: /^word-/ })
+      .map((box) => within(box.closest('label')!).getByText(/^word-/).textContent);
+    expect(words).toEqual(['word-2', 'word-3', 'word-1']);
+  });
+
+  it('ticks the whole range when a word is Shift-clicked', async () => {
+    const { user } = await open('/review?focus=select', {
+      entries: [
+        entry(1, { mastery: 1 }),
+        entry(2, { mastery: 2 }),
+        entry(3, { mastery: 3 }),
+        entry(4, { mastery: 4 }),
+      ],
+    });
+    await picker();
+
+    await user.click(row('word-2'));
+    await user.keyboard('{Shift>}');
+    await user.click(row('word-4'));
+    await user.keyboard('{/Shift}');
+
+    expect(ticked()).toHaveLength(3);
+    expect(ticked()[0]).toContain('word-2');
+    expect(ticked()[1]).toContain('word-3');
+    expect(ticked()[2]).toContain('word-4');
   });
 
   it('narrows the list with the same search as the bank, and can take a word out again', async () => {
@@ -625,12 +641,9 @@ describe('review preferences in Settings', () => {
     expect(store.getState()).toMatchObject({ answerKeys: 'none' });
   });
 
-  it('count reviews towards mastery until told otherwise', async () => {
-    const { user } = await open('/settings');
-    const counting = await screen.findByLabelText(/Count reviews toward mastery/);
-    expect(counting).toBeChecked();
-    await user.click(counting);
-    expect(counting).not.toBeChecked();
+  it('does not repeat the mastery switch that belongs to the Review tab', async () => {
+    await open('/settings');
+    expect(screen.queryByLabelText(/Count reviews toward mastery/)).not.toBeInTheDocument();
   });
 });
 

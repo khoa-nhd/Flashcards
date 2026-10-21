@@ -2,10 +2,12 @@
  * Choosing the words to review, when the reviewer wants a set of their own.
  *
  * The list is the same vocabulary the bank shows, read with the same search, so
- * it reaches every live word without a new endpoint. Mastered words are left out
- * rather than shown unusable: the schedule would drop them from the queue
- * anyway. The order words are ticked in is the order they will be reviewed in,
- * and the ticked list shows exactly that.
+ * it reaches every live word without a new endpoint. It is ordered by mastery,
+ * lowest first, so the words that need the most work come first. Mastered words
+ * are left out rather than shown unusable: the schedule would drop them from the
+ * queue anyway. The order words are ticked in is the order they will be reviewed
+ * in, and the ticked list shows exactly that. Shift-clicking ticks a whole range
+ * from the last word clicked.
  *
  * Starting a review with no connection is not possible — the queue is worked out
  * by the server — so this screen waits for the same read the bank does and says
@@ -44,6 +46,8 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE_SIZE);
   const [ticked, setTicked] = useState<string[]>(() => [...initialIds]);
+  /** The last word clicked without Shift: a Shift-click ticks everything from here to there. */
+  const anchor = useRef<string | null>(null);
   /** Set once the starting words have been applied, so a later collection read cannot overwrite a choice. */
   const seeded = useRef(initialIds.length > 0);
 
@@ -56,13 +60,31 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
 
   const byId = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries]);
   const hidden = useMemo(() => entries.filter(isMastered).length, [entries]);
-  // What there is to choose from, in the bank's own order (newest first), mastered words aside.
-  const choices = useMemo(() => entries.filter((entry) => !isMastered(entry)), [entries]);
+  // What there is to choose from, lowest mastery first. Ties keep the bank's own order.
+  const choices = useMemo(
+    () =>
+      entries
+        .filter((entry) => !isMastered(entry))
+        .sort((a, b) => (a.mastery ?? 0) - (b.mastery ?? 0)),
+    [entries],
+  );
   const found = useMemo(() => choices.filter((entry) => matches(entry, query)), [choices, query]);
   const visible = found.slice(0, shown);
   const tickedSet = new Set(ticked);
 
-  const toggle = (id: string) => {
+  const toggle = (id: string, extend = false) => {
+    const to = visible.findIndex((entry) => entry.id === id);
+    const from = extend && anchor.current !== null ? visible.findIndex((entry) => entry.id === anchor.current) : -1;
+    if (from !== -1 && to !== -1) {
+      const range = visible.slice(Math.min(from, to), Math.max(from, to) + 1).map((entry) => entry.id);
+      setTicked((current) => {
+        // A Shift-click on a ticked word takes the range out; on an unticked one it adds the range.
+        if (current.includes(id)) return current.filter((each) => !range.includes(each));
+        return [...current, ...range.filter((each) => !current.includes(each))];
+      });
+      return;
+    }
+    anchor.current = id;
     setTicked((current) => (current.includes(id) ? current.filter((each) => each !== id) : [...current, id]));
   };
 
@@ -70,6 +92,7 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
     const collection = collections.find((each) => each.id === collectionId);
     if (collection === undefined) return;
     seeded.current = true;
+    anchor.current = null;
     setTicked((current) => [...current, ...collection.wordIds.filter((id) => !current.includes(id))]);
   };
 
@@ -95,6 +118,7 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
           onChange={(event) => {
             setQuery(event.target.value);
             setShown(PAGE_SIZE);
+            anchor.current = null;
           }}
         />
         {collections.length > 0 && (
@@ -123,6 +147,8 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
         )}
       </div>
 
+      <p className={HELP}>Lowest mastery first. Shift-click to tick a whole range.</p>
+
       <div className={`${CARD} min-h-0 flex-1 overflow-y-auto`}>
         {status === 'loading' || status === 'idle' ? (
           <div role="status" className="flex items-center justify-center gap-3 p-6 text-muted">
@@ -141,12 +167,14 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
           <ul className="divide-y divide-line">
             {visible.map((entry) => (
               <li key={entry.id}>
-                <label className="flex cursor-pointer items-center gap-3 px-3 py-2.5 text-sm">
+                <label className="flex cursor-pointer select-none items-center gap-3 px-3 py-2.5 text-sm">
                   <input
                     type="checkbox"
                     className="size-4 shrink-0 accent-[var(--accent)]"
                     checked={tickedSet.has(entry.id)}
-                    onChange={() => toggle(entry.id)}
+                    onChange={(event) =>
+                      toggle(entry.id, (event.nativeEvent as MouseEvent).shiftKey === true)
+                    }
                   />
                   <span className="min-w-0 flex-1">
                     <span className="block truncate font-medium">{entry.word}</span>
