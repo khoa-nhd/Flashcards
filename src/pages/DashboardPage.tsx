@@ -1,11 +1,12 @@
-import { useMemo } from 'react';
-import type { VocabularyEntry } from '../../shared/api.js';
+import { useMemo, useState } from 'react';
+import type { DayPlanResponse, VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates } from '../../shared/dates.js';
 import { additionsByPeriod, computeSummary, masteryDistribution } from '../../shared/metrics.js';
 import { useApp, useSettings, useVocabulary, useTrueMastery } from '../app-context.js';
 import { BarChart } from '../components/BarChart.js';
 import { MasteryPill, StatusBadge, formatDate } from '../components/badges.js';
-import { GoalProgress, hasGoal, useDayPlan } from '../components/GoalStatus.js';
+import { GoalForm } from '../components/GoalSection.js';
+import { GoalProgress, goalTargetText, hasGoal, useDayPlan } from '../components/GoalStatus.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -28,6 +29,74 @@ function recentAdditions(entries: readonly VocabularyEntry[]): VocabularyEntry[]
         (b.createdTime ?? '').localeCompare(a.createdTime ?? ''),
     )
     .slice(0, RECENT_COUNT);
+}
+
+/**
+ * The daily goal, kept in plain sight near the top of the Dashboard. With a goal
+ * it shows the target and today's progress; without one, the form to set it is
+ * one click away rather than a trip to Settings. Either way the goal only
+ * measures what was saved: the queue is untouched.
+ */
+function DashboardGoal({ plan, onSaved }: { plan: DayPlanResponse; onSaved: (next: DayPlanResponse) => void }) {
+  const [editing, setEditing] = useState(false);
+  const goalSet = hasGoal(plan);
+
+  return (
+    <section
+      aria-label="Daily goal"
+      className={`${CARD} overflow-hidden border-accent/30 bg-accent-soft/30 p-5`}
+    >
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex min-w-0 items-start gap-3">
+          <span
+            aria-hidden="true"
+            className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-accent/30 bg-surface text-accent"
+          >
+            <Icon name="goal" className="size-5" />
+          </span>
+          <div className="min-w-0">
+            <h2 className={SECTION_TITLE}>Daily goal</h2>
+            <p className="mt-0.5 text-sm text-muted">
+              {goalSet ? goalTargetText(plan) : 'A target for reviews, minutes, or both.'}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          className={BUTTON_SECONDARY}
+          aria-expanded={editing}
+          onClick={() => setEditing((open) => !open)}
+        >
+          {editing ? 'Close goal editor' : goalSet ? 'Edit goal' : 'Set goal'}
+        </button>
+      </div>
+
+      {goalSet && (
+        <div className="mt-4">
+          <GoalProgress plan={plan} showTitle={false} />
+        </div>
+      )}
+
+      {!goalSet && !editing && (
+        <p className="mt-3 text-xs text-muted">
+          A goal is only compared with what you have saved. It never hides or postpones a word.
+        </p>
+      )}
+
+      {editing && (
+        <div className="mt-4 border-t border-line/80 pt-4">
+          <GoalForm
+            initial={plan}
+            showProgress={false}
+            onSaved={(next) => {
+              onSaved(next);
+              setEditing(false);
+            }}
+          />
+        </div>
+      )}
+    </section>
+  );
 }
 
 export function DashboardPage() {
@@ -128,18 +197,7 @@ export function DashboardPage() {
             </section>
 
             {plan.status === 'ready' && plan.data.available && (
-              <section className={`${CARD} p-5`} aria-label="Daily goal">
-                {hasGoal(plan.data) ? (
-                  <GoalProgress plan={plan.data} />
-                ) : (
-                  <p className="text-sm text-muted">
-                    No daily goal is set.{' '}
-                    <Link to={ROUTES.settings} className="font-medium text-accent hover:underline">
-                      Set one in Settings
-                    </Link>
-                  </p>
-                )}
-              </section>
+              <DashboardGoal plan={plan.data} onSaved={plan.adopt} />
             )}
 
             <ReviewActivityCard activity={activity} />

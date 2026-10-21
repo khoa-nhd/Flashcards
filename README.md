@@ -8,7 +8,7 @@ in on.
 
 | Tab | What it does |
 | --- | --- |
-| **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
+| **Dashboard** | What is ready to review, the daily goal and its progress (with the form to set or change it), review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
 | **Review** | Flashcards: flip, then answer Remember or Not remember. Choose what to review (everything due, the weakest words, or words you pick yourself) and whether the session counts towards mastery. Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. Answers are recorded on the device first and sent in the background, so nothing waits on the network. |
 | **Practice** | Other ways to work on words: recognition, typing, fill in the blank, and listening (experimental). Recorded for your statistics; never changes mastery or a review date. |
 | **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
@@ -110,18 +110,19 @@ Selecting words is client-side: nothing is narrowed by the address bar beyond
 opening the picker, and the server learns which words to send only when the
 session starts.
 
-**Counting towards mastery.** Beside the choices is one switch, also kept in
-Settings → Review and remembered for your account *and* on the device, so it
-still holds without a connection. With it off, an answer is still recorded and
-still counts towards your accuracy, streak and daily goal, but the word keeps
-the mastery, review date and FSRS state it had — which is what lets a word be
-answered again before it is due. Weakest words leaves the switch off for you;
-you can turn it back on, and your choice is remembered. With the switch on, a
-word taken early moves exactly as a due answer would.
+**Counting towards mastery.** Beside the choices is one switch, remembered for
+your account and on the device, so it still holds without a connection. With it
+off, an answer is still recorded and still counts towards your accuracy, streak
+and daily goal, but the word keeps the mastery, review date and FSRS state it
+had — which is what lets a word be answered again before it is due. Weakest
+words leaves the switch off for you; you can turn it back on, and your choice is
+remembered. With the switch on, a word taken early moves exactly as a due answer
+would.
 
-**A daily goal** (Settings) is a number of reviews, a number of minutes, or
-both. It is only ever compared with what you saved: it never hides, reorders
-or reschedules a card, and it changes no scheduling setting.
+**A daily goal** (on the Dashboard or in Settings) is a number of reviews, a
+number of minutes, or both. It is only ever compared with what you saved: it
+never hides, reorders or reschedules a card, and it changes no scheduling
+setting.
 
 ### Practice
 

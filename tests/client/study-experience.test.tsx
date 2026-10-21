@@ -684,11 +684,35 @@ describe('the daily goal on the Dashboard', () => {
     expect(within(region).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '5');
   });
 
-  it('points to Settings when no goal is set', async () => {
-    await open('/');
+  it('names the target and opens the stored goal for editing', async () => {
+    const { user } = await open('/', { plan: { goal: { reviews: 20, minutes: 10 } } });
     const region = await goalRegion();
-    expect(region).toHaveTextContent('No daily goal is set.');
-    expect(within(region).getByRole('link', { name: 'Set one in Settings' })).toHaveAttribute('href', '/settings');
+    expect(region).toHaveTextContent('20 reviews and 10 minutes a day');
+
+    await user.click(within(region).getByRole('button', { name: 'Edit goal' }));
+    expect(within(region).getByRole('button', { name: 'Close goal editor' })).toHaveAttribute('aria-expanded', 'true');
+    expect(within(region).getByLabelText('Reviews per day')).toHaveValue('20');
+    expect(within(region).getByLabelText('Minutes per day')).toHaveValue('10');
+  });
+
+  it('offers to set a goal from the Dashboard itself', async () => {
+    const { api, user } = await open('/');
+    const region = await goalRegion();
+    expect(region).toHaveTextContent('A target for reviews, minutes, or both.');
+    expect(within(region).queryByRole('progressbar')).not.toBeInTheDocument();
+
+    await user.click(within(region).getByRole('button', { name: 'Set goal' }));
+    await user.type(await within(region).findByLabelText('Reviews per day'), '15');
+    await user.click(within(region).getByRole('button', { name: 'Save goal' }));
+
+    await waitFor(() => expect(api.saveGoal).toHaveBeenCalledWith({ reviews: 15, minutes: null }));
+    expect(await screen.findByText('Daily goal saved.')).toBeInTheDocument();
+    expect(within(region).queryByLabelText('Reviews per day')).not.toBeInTheDocument();
+    expect(within(region).getByRole('progressbar', { name: 'Reviews towards today’s goal' })).toHaveAttribute(
+      'aria-valuemax',
+      '15',
+    );
+    expect(region).toHaveTextContent('15 reviews a day');
   });
 
   it('is left out where a goal cannot be kept', async () => {

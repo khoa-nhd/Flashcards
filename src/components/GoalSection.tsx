@@ -55,7 +55,17 @@ export function GoalSection() {
 }
 
 /** The form, started from what is stored. Shown only once that has been read. */
-function GoalForm({ initial }: { initial: DayPlanResponse }) {
+export function GoalForm({
+  initial,
+  onSaved,
+  showProgress = true,
+}: {
+  initial: DayPlanResponse;
+  /** Told about the newly saved plan, so the screen around the form can show it at once. */
+  onSaved?: (plan: DayPlanResponse) => void;
+  /** Off where the surrounding card already shows the progress. */
+  showProgress?: boolean;
+}) {
   const { api, toasts } = useApp();
   const [plan, setPlan] = useState(initial);
   const [reviews, setReviews] = useState(asText(initial.goal.reviews));
@@ -79,6 +89,7 @@ function GoalForm({ initial }: { initial: DayPlanResponse }) {
       toasts.show({
         message: next.goal.reviews === null && next.goal.minutes === null ? 'Daily goal cleared.' : 'Daily goal saved.',
       });
+      onSaved?.(next);
     } catch (cause) {
       setError(cause instanceof ApiError ? cause.message : 'Could not save the goal.');
     } finally {
@@ -179,7 +190,7 @@ function GoalForm({ initial }: { initial: DayPlanResponse }) {
           )}
         </div>
       </form>
-      <GoalProgress plan={plan} />
+      {showProgress && <GoalProgress plan={plan} />}
     </>
   );
 }

@@ -4,12 +4,23 @@ import { useRemote, type Remote } from '../hooks/useRemote.js';
 import { count, formatDuration } from '../lib/format.js';
 
 /** The day's plan is loaded by whoever shows it, so their Refresh can re-read it. */
-export function useDayPlan(): Remote<DayPlanResponse> & { reload(): void } {
+export function useDayPlan(): Remote<DayPlanResponse> & {
+  reload(): void;
+  adopt(plan: DayPlanResponse): void;
+} {
   const { api } = useApp();
   return useRemote(api.fetchPlan, 'Could not load your daily goal.');
 }
 
 export const hasGoal = (plan: DayPlanResponse): boolean => plan.reviews !== null || plan.time !== null;
+
+/** The target itself, in words, for a heading or summary. */
+export function goalTargetText(plan: DayPlanResponse): string {
+  const parts: string[] = [];
+  if (plan.goal.reviews !== null) parts.push(count(plan.goal.reviews, 'review'));
+  if (plan.goal.minutes !== null) parts.push(count(plan.goal.minutes, 'minute'));
+  return parts.length === 0 ? '' : `${parts.join(' and ')} a day`;
+}
 
 /**
  * What the figures mean for the rest of the day, in a sentence or two. A goal
@@ -67,11 +78,18 @@ function Bar({ name, text, done, target }: { name: string; text: string; done: n
 }
 
 /** Progress towards today's goal. Renders nothing when no goal is set. */
-export function GoalProgress({ plan }: { plan: DayPlanResponse }) {
+export function GoalProgress({
+  plan,
+  showTitle = true,
+}: {
+  plan: DayPlanResponse;
+  /** Off when the card around it already says “Daily goal”. */
+  showTitle?: boolean;
+}) {
   if (!hasGoal(plan)) return null;
   return (
     <div role="group" aria-label="Daily goal" className="flex flex-col gap-2">
-      <p className="text-sm font-semibold tracking-tight">Daily goal</p>
+      {showTitle && <p className="text-sm font-semibold tracking-tight">Daily goal</p>}
       {plan.reviews !== null && (
         <Bar
           name="Reviews towards today’s goal"

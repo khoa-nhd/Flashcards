@@ -9,9 +9,13 @@ export type Remote<T> =
 /**
  * Loads something once when the component appears, and again on `reload`.
  * `load` must keep its identity between renders (an API method does). A reload
- * keeps what is on screen until the new answer arrives.
+ * keeps what is on screen until the new answer arrives. `adopt` puts an answer
+ * that arrived another way (a save, say) on screen without another request.
  */
-export function useRemote<T>(load: () => Promise<T>, fallbackMessage: string): Remote<T> & { reload(): void } {
+export function useRemote<T>(
+  load: () => Promise<T>,
+  fallbackMessage: string,
+): Remote<T> & { reload(): void; adopt(data: T): void } {
   const [state, setState] = useState<Remote<T>>({ status: 'loading', data: null, error: null });
   const [attempt, setAttempt] = useState(0);
 
@@ -32,5 +36,6 @@ export function useRemote<T>(load: () => Promise<T>, fallbackMessage: string): R
   }, [load, fallbackMessage, attempt]);
 
   const reload = useCallback(() => setAttempt((count) => count + 1), []);
-  return { ...state, reload };
+  const adopt = useCallback((data: T) => setState({ status: 'ready', data, error: null }), []);
+  return { ...state, reload, adopt };
 }
