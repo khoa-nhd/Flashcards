@@ -50,7 +50,7 @@ export type ReviewActionPayload = {
 export type PracticePayload = {
   pageId: string;
   mode: StudyMode;
-  answer: { kind: 'self'; correct: boolean } | { kind: 'choice'; selectedId: string } | { kind: 'typed'; text: string };
+  answer: { kind: 'choice'; selectedId: string } | { kind: 'typed'; text: string };
   sessionId: string | null;
   durationMs: number | null;
   confidence: Confidence | null;

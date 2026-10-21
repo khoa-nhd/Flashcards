@@ -19,7 +19,7 @@ import { ApiError, type AppApi } from '../api-client.js';
 import type { LocalStore } from './storage.js';
 
 /** Bumped when the shape of a stored read changes, so an old copy is never served. */
-const READ_CACHE_VERSION = 1;
+const READ_CACHE_VERSION = 2;
 /** The longest a day-independent copy is served. */
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
 

@@ -10,6 +10,7 @@ import {
   answerText,
   buildChoices,
   ineligibility,
+  isStudyMode,
   judge,
   selectForPractice,
   type Choice,
@@ -48,7 +49,6 @@ const SOURCE_LABELS: Record<(typeof SOURCES)[number], string> = {
 
 const LENGTHS = [5, 10, 20, 50] as const;
 
-const isMode = (value: string | null): value is StudyMode => STUDY_MODES.includes(value as StudyMode);
 const isSource = (value: string | null): value is (typeof SOURCES)[number] =>
   SOURCES.includes(value as (typeof SOURCES)[number]);
 
@@ -106,7 +106,10 @@ export function PracticePage() {
   const weak = useRemote(api.fetchWeakWords, 'Could not load your weak words.');
   const { statsMap, loading: statsLoading, error: statsError, reload: reloadStats } = usePracticeStats();
 
-  const [mode, setMode] = useState<StudyMode>(() => (isMode(query.get('mode')) ? (query.get('mode') as StudyMode) : 'recognition'));
+  const [mode, setMode] = useState<StudyMode>(() => {
+    const requested = query.get('mode');
+    return isStudyMode(requested) ? requested : 'recognition';
+  });
   const [source, setSource] = useState<Source>(() => sourceFromQuery(query));
   const { collections } = useLibrary();
   const [length, setLength] = useState<number>(10);

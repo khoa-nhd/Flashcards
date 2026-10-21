@@ -174,7 +174,7 @@ describe('the what-if comparison', () => {
     expect(undone.status).toBe(200);
     const practised = await call(app, alice, '/api/practice', {
       method: 'POST',
-      body: { pageId: word.id, mode: 'recall', answer: { kind: 'self', correct: true }, requestId: newId() },
+      body: { pageId: word.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' }, requestId: newId() },
     });
     expect(practised.status).toBe(200);
 

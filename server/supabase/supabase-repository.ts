@@ -6,7 +6,7 @@ import type { CardHistory } from '../../shared/weak-words.js';
 import type { WeakWordDayRow } from '../../shared/weak-recovery.js';
 import type { ReviewRules } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
-import type { StudyMode } from '../../shared/study-modes.js';
+import { isStudyMode, type StudyMode } from '../../shared/study-modes.js';
 import { DEFAULT_SCHEDULER, isSchedulerId } from '../../shared/scheduler/active.js';
 import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
 import type { StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
@@ -256,15 +256,18 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
 
   async practiceDailyStats(from: IsoDate, to: IsoDate): Promise<PracticeDailyStat[]> {
     if (!this.capabilities.practice) return [];
-    return (await this.database.practiceDailyStats(from, to)).map((row) => ({
-      day: row.day,
-      mode: row.review_mode,
-      answers: row.answers,
-      correct: row.correct,
-      durationMs: row.duration_ms,
-      timedAnswers: row.timed_answers,
-      cards: row.cards,
-    }));
+    return (await this.database.practiceDailyStats(from, to))
+      // Rows recorded in a mode the app no longer offers are left out of today's figures.
+      .filter((row) => isStudyMode(row.review_mode))
+      .map((row) => ({
+        day: row.day,
+        mode: row.review_mode,
+        answers: row.answers,
+        correct: row.correct,
+        durationMs: row.duration_ms,
+        timedAnswers: row.timed_answers,
+        cards: row.cards,
+      }));
   }
 
   async practiceCorrectCounts(id: string): Promise<Map<string, number>> {
@@ -276,7 +279,7 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
 
   async practiceHistory(since: IsoDate | null): Promise<PracticeHistoryRow[]> {
     if (!this.capabilities.practiceHistory) return [];
-    const rows = await this.database.practiceHistory(since);
+    const rows = (await this.database.practiceHistory(since)).filter((row) => isStudyMode(row.review_mode));
     return rows.map((row) => ({
       vocabularyId: row.vocabulary_id,
       mode: row.review_mode as StudyMode,

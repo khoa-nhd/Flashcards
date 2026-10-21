@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Practice mastery as the reader sees it: five small scores in a word's
+ * Practice mastery as the reader sees it: four small scores in a word's
  * panel, and one line after each practice answer saying where that word now
  * stands in that mode. The counting itself is tested on the server.
  */
@@ -37,18 +37,18 @@ const section = async () => (await within(await panelOf()).findByRole('heading',
 
 describe('practice mastery in a word’s panel', () => {
   it('shows every mode with its score out of three, and reads nothing else', async () => {
-    const { api } = await open(`/bank?word=${pageId(1)}`, { practiceCorrect: { [pageId(1)]: { typing: 2, recall: 12 } } });
+    const { api } = await open(`/bank?word=${pageId(1)}`, { practiceCorrect: { [pageId(1)]: { typing: 2, cloze: 12 } } });
     const shown = await section();
     expect(api.fetchPracticeMastery).toHaveBeenCalledWith(pageId(1));
 
     const rows = within(shown).getAllByRole('listitem').map((item) => item.textContent);
-    expect(rows).toEqual(['Recognition0 / 3', 'Recall3 / 3', 'Typing2 / 3', 'Fill in the blank0 / 3', 'Listening0 / 3']);
+    expect(rows).toEqual(['Recognition0 / 3', 'Typing2 / 3', 'Fill in the blank3 / 3', 'Listening0 / 3']);
     const typing = within(shown).getByRole('meter', { name: 'Typing practice mastery' });
     expect(typing).toHaveAttribute('aria-valuenow', '2');
     expect(typing).toHaveAttribute('aria-valuemax', '3');
     expect(typing).toHaveAttribute('aria-valuetext', '2 of 3');
     // Twelve correct answers are still three: the score stops at its ceiling.
-    expect(within(shown).getByRole('meter', { name: 'Recall practice mastery' })).toHaveAttribute('aria-valuenow', '3');
+    expect(within(shown).getByRole('meter', { name: 'Fill in the blank practice mastery' })).toHaveAttribute('aria-valuenow', '3');
   });
 
   it('says what the score is, and that it is not the review mastery', async () => {
@@ -64,7 +64,7 @@ describe('practice mastery in a word’s panel', () => {
   it('points to Practice for a word that has not been practised yet', async () => {
     await open(`/bank?word=${pageId(1)}`);
     const shown = await section();
-    expect(within(shown).getAllByRole('meter').map((meter) => meter.getAttribute('aria-valuenow'))).toEqual(['0', '0', '0', '0', '0']);
+    expect(within(shown).getAllByRole('meter').map((meter) => meter.getAttribute('aria-valuenow'))).toEqual(['0', '0', '0', '0']);
     expect(within(shown).getByRole('link', { name: 'Start practising' })).toHaveAttribute('href', '/practice?source=all');
   });
 

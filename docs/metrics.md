@@ -202,7 +202,7 @@ reason that is shown beside the word.
 - Where the database keeps no review history yet (below version 4), only the
   last two reasons can apply, and the page says so.
 - At most 100 words are sent; the page says when there are more.
-- Practice answers (recognition, recall, typing, cloze, listening) now count
+- Practice answers (recognition, typing, cloze, listening) now count
   too, both correct and wrong: they feed the recent window, the latest answer
   and the recovery below. A wrong practice answer never adds to "forgotten on
   separate days", so practising hard cannot make a word harder to leave.
@@ -313,9 +313,9 @@ review is their decision to make, not the app's.
 | Mode | Shows | Asks for | Judged by |
 | --- | --- | --- | --- |
 | Recognition | The word | Its meaning, among four | The server: right when the word's own meaning is chosen. |
-| Recall | The meaning | The word, from memory | You: after the word is shown, you say whether you had it. |
 | Typing | The meaning | The word, typed | The server, by the rules below. |
 | Fill in the blank | Your example sentence with the word taken out | The word, typed | The server, by the same rules. |
+| Listening (experimental) | Nothing: the word is read aloud | The word, typed | The server, by the same rules. |
 
 "The meaning" is the Vietnamese meaning where there is one, otherwise the
 definition. Every prompt, choice and sentence is your own text; nothing is
@@ -324,13 +324,14 @@ generated.
 **What a word needs.** A word without what a mode needs is left out of that
 mode, and the page says how many and why.
 
-- Recognition, recall, typing: a meaning or a definition. Recognition also
+- Recognition, typing: a meaning or a definition. Recognition also
   needs three other words whose meaning reads differently, so that four
   distinct choices can be offered.
 - Fill in the blank: an example sentence that contains the word exactly as it
   is entered, as a whole word. An inflected form in the sentence ("alleviated"
   for "alleviate") is not blanked, because the entry would be the wrong answer
   to it. Edit the example to use the word as entered to make it eligible.
+- Listening: only the word, since it is read aloud.
 
 **Recognition choices.** The three wrong choices are drawn at random from your
 other words and the four are shuffled, so neither which are offered nor where
@@ -354,7 +355,7 @@ as an alternative.
 | Figure | Definition |
 | --- | --- |
 | Answers | Practice answers recorded in that mode. |
-| Correct | How many were right. For recall this is what you said about yourself. |
+| Correct | How many were right. |
 | Share | Correct ÷ Answers in that mode, from 5 answers up. |
 
 Modes are never added together or averaged: recognising a meaning and
@@ -377,7 +378,7 @@ The rule is in [`shared/study-modes.ts`](../shared/study-modes.ts)
 | | |
 | --- | --- |
 | What it is | For one word and one practice mode, a score from 0 to 3: **one point for every correct practice answer recorded for that word in that mode, stopping at 3.** A wrong answer adds nothing and takes nothing away. |
-| Per mode | Recognition, recall, typing, fill in the blank and listening each have their own score for each word. They are never added together. In recall, "correct" is what you said about yourself. |
+| Per mode | Recognition, typing, fill in the blank and listening each have their own score for each word. They are never added together. |
 | Where it comes from | It is counted from the practice history each time it is shown. It is not a second number stored beside the history, so it cannot disagree with it, an answer sent twice counts once, and practice recorded before the score existed counts too. |
 | What it is not | Review mastery. It never decides when a word is due, never hides a definition, never retires a word, and is not read by either schedule. Reviewing a word, or editing its review mastery, does not change it. |
 | What changes it | Only a recorded practice answer. It cannot be edited by hand. An answer judged while saving is switched off is not recorded, so it is not counted. |
@@ -399,15 +400,15 @@ technical failures). Each answer provides:
 | Field | Meaning |
 | --- | --- |
 | `correct` | `true` = correct, `false` = incorrect |
-| `mode` | One of: recognition, recall, typing, cloze, listening |
-| `grading` | `auto` (server-judged) or `self` (recall: you said whether you had it) |
+| `mode` | One of: recognition, typing, cloze, listening |
+| `grading` | `auto` (server-judged). `self` appears only on legacy rows and is not written any more. |
 | `reviewedOn` | The reviewer's calendar day (for recency) |
 | `reviewedAt` | Full timestamp (for session ordering) |
 | `sessionId` | Groups retries so repeated attempts in one sitting don't inflate evidence |
 
 Answers with missing timestamps, future dates, or `grading` not in `{auto, self}`
-are excluded. Self-assessed recall answers are included but the UI notes their
-subjective nature.
+are excluded. Practice is judged automatically; legacy self-graded rows are no
+longer offered or recorded.
 
 ### Formula (per word)
 
@@ -431,7 +432,7 @@ For each practice mode `m`, collect its eligible answers `i`. Let:
 - `c_m = n_eff,m / (n_eff,m + k)` with `k = 5`
 
 **Mode weights** (evidence strength defaults):
-- Recognition: 0.15, Recall: 0.20, Typing: 0.30, Cloze: 0.25, Listening: 0.10
+- Recognition: 0.15, Typing: 0.30, Cloze: 0.25, Listening: 0.10
 
 **Aggregate True Mastery:**
 ```
@@ -478,7 +479,6 @@ Coverage reflects both **quantity** and **diversity** of practice. A word with
 
 - **Not a calibrated probability.** `T/100` is not the chance of remembering tomorrow.
 - **History gaps.** Practice before the database supported it (schema version < 6) is not available. Legacy history without reliable correctness is not fabricated.
-- **Recall is self-assessed.** The `grading: 'self'` flag distinguishes it; treat with appropriate caution.
 - **Listening depends on device speech synthesis.** Quality varies.
 - **Thresholds are heuristic.** The coverage tiers and weight defaults are starting points, not validated constants.
 
@@ -497,7 +497,7 @@ minEvidenceModerate: 5,
 minEvidenceHigh: 15,
 minModesModerate: 2,
 minModesHigh: 3,
-modeWeights: { recognition: 0.15, recall: 0.20, typing: 0.30, cloze: 0.25, listening: 0.10 },
+modeWeights: { recognition: 0.15, typing: 0.30, cloze: 0.25, listening: 0.10 },
 sessionMaxEffectiveEvidence: 3,
 ```
 

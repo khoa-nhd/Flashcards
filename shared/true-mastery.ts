@@ -34,9 +34,6 @@ export interface TrueMasteryConfig {
   modeWeights: Record<string, number>;
   /** Session cap: max effective evidence from one session */
   sessionMaxEffectiveEvidence: number;
-  /** Weight multiplier for self-graded (recall) answers vs auto-graded.
-   * Self-graded answers are less reliable evidence, so we discount them. */
-  recallSelfGradeWeightMultiplier: number;
 }
 
 export const DEFAULT_TRUE_MASTERY_CONFIG: TrueMasteryConfig = {
@@ -51,14 +48,11 @@ export const DEFAULT_TRUE_MASTERY_CONFIG: TrueMasteryConfig = {
   minModesHigh: 3,
   modeWeights: {
     recognition: 0.15,
-    recall: 0.20,
     typing: 0.30,
     cloze: 0.25,
     listening: 0.10,
   },
   sessionMaxEffectiveEvidence: 3,
-  /** Self-graded recall answers are discounted to 50% weight vs auto-graded modes */
-  recallSelfGradeWeightMultiplier: 0.5,
 };
 
 /** One practice answer with full detail */
@@ -100,7 +94,7 @@ export interface ModeBreakdown {
   incorrectAnswers: number;
   /** Last attempted date */
   lastAttemptedOn: IsoDate | null;
-  /** Whether answers in this mode are self-graded (recall) or auto-graded */
+  /** How answers in this mode are graded. Practice is auto-graded. */
   grading: 'self' | 'auto';
 }
 
@@ -312,14 +306,9 @@ function computeMode(
       if (d < 0) continue; // Future date, ignore (should not happen due to pre-filter)
       const r = Math.pow(2, -d / cfg.recencyHalfLifeDays);
 
-      // Apply recall self-grade weight multiplier for self-graded recall answers
-      const selfGradeMultiplier = (a.mode === 'recall' && a.grading === 'self')
-        ? cfg.recallSelfGradeWeightMultiplier
-        : 1;
-
-      sessionWeightedCorrect += r * y * selfGradeMultiplier;
-      sessionWeightedIncorrect += r * (1 - y) * selfGradeMultiplier;
-      sessionTotalEffective += r * selfGradeMultiplier;
+      sessionWeightedCorrect += r * y;
+      sessionWeightedIncorrect += r * (1 - y);
+      sessionTotalEffective += r;
 
       if (lastAttemptedOn === null || a.reviewedOn > lastAttemptedOn) {
         lastAttemptedOn = a.reviewedOn;
@@ -348,21 +337,17 @@ function computeMode(
   // Confidence from effective evidence
   const confidence = totalEffective / (totalEffective + cfg.confidenceK);
 
-  // Apply recall self-grade multiplier to the mode's base weight
-  // This reflects that self-graded evidence is less reliable
-  const weight = baseWeight;
-
   return {
     mode,
     accuracy,
     effectiveEvidence: totalEffective,
     confidence,
-    weight,
+    weight: baseWeight,
     totalAnswers: answers.length, // Original count including future/invalid
     correctAnswers,
     incorrectAnswers,
     lastAttemptedOn,
-    grading: mode === 'recall' ? 'self' : 'auto',
+    grading: 'auto',
   };
 }
 

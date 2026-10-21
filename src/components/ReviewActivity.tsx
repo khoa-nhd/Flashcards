@@ -75,7 +75,7 @@ function Practice({ data }: { data: AnalyticsResponse }) {
       <p className={HELP}>
         Today: <span className="tabular-nums">{today.correct}</span> of {today.answers} practice{' '}
         {today.answers === 1 ? 'answer' : 'answers'} correct. Practice is kept apart from the review figures above and
-        never changes mastery or review dates. Recall is marked by you; the other modes are checked for you.
+        never changes mastery or review dates. Every practice answer is checked automatically.
       </p>
     </div>
   );

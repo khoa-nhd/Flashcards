@@ -38,7 +38,6 @@ const defaultConfig: Partial<TrueMasteryConfig> = {
   minModesHigh: 3,
   modeWeights: {
     recognition: 0.15,
-    recall: 0.20,
     typing: 0.30,
     cloze: 0.25,
     listening: 0.10,
@@ -199,16 +198,6 @@ describe('True Mastery', () => {
     expect(typingResult.modes.length).toBeGreaterThan(0);
     expect(recognitionResult.modes.length).toBeGreaterThan(0);
     expect(typingResult.modes[0]!.weight).toBeGreaterThan(recognitionResult.modes[0]!.weight);
-  });
-
-  it('self-graded recall answers are included but weighted appropriately', () => {
-    const recallAnswers = Array.from({ length: 10 }, (_, i) =>
-      makeAnswer({ mode: 'recall', correct: true, grading: 'self', reviewedOn: TODAY, reviewedAt: `2026-10-12T${10 + i}:00:00Z` })
-    );
-    const result = calculateTrueMastery(recallAnswers, TODAY, defaultConfig);
-    expect(result.modes.length).toBeGreaterThan(0);
-    expect(result.modes[0]!.mode).toBe('recall');
-    expect(result.modes[0]!.weight).toBe(defaultConfig.modeWeights!.recall);
   });
 
   it('technical failures (durationMs null) do not count as incorrect', () => {

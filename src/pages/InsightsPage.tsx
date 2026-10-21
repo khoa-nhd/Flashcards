@@ -293,12 +293,7 @@ function PracticeStatistics() {
                   return (
                     <tr key={mode.mode} className="border-t border-line">
                       <th scope="row" className="py-1.5 text-left font-normal">
-                        <span className="flex items-center gap-1">
-                          {STUDY_MODE_LABELS[mode.mode as keyof typeof STUDY_MODE_LABELS] ?? mode.mode}
-                          {mode.mode === 'recall' && (
-                            <span className="text-xs text-muted" title="Self-graded: you judge your own answer">(self-graded)</span>
-                          )}
-                        </span>
+                        {STUDY_MODE_LABELS[mode.mode as keyof typeof STUDY_MODE_LABELS] ?? mode.mode}
                       </th>
                       <td className="py-1.5 text-right">{mode.answers}</td>
                       <td className="py-1.5 text-right">{mode.correct}</td>
@@ -327,8 +322,8 @@ function PracticeStatistics() {
       )}
 
       <p className="mt-3 text-xs text-muted">
-        Practice is recorded separately from scheduled reviews and never changes mastery or review dates.
-        Recall is self-graded; the other modes are checked automatically.
+        Practice is recorded separately from scheduled reviews and never changes mastery or review dates. Every
+        practice answer is checked automatically.
       </p>
     </section>
   );

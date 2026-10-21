@@ -116,12 +116,7 @@ describe('a word’s practice mastery', () => {
     await typed(alice, word, 'candid', 'typing');
     await typed(alice, word, 'candid', 'cloze');
     await typed(alice, word, 'candid', 'listening');
-    const recalled = await call(app, alice, '/api/practice', {
-      method: 'POST',
-      body: { pageId: word.id, mode: 'recall', answer: { kind: 'self', correct: true }, requestId: newId() },
-    });
-    expect(practiceResponseSchema.parse(await recalled.json()).modeMastery).toBe(1);
-    expect(await scores(alice, word.id)).toEqual({ typing: 2, cloze: 1, listening: 1, recall: 1 });
+    expect(await scores(alice, word.id)).toEqual({ typing: 2, cloze: 1, listening: 1 });
   });
 
   it('stops at three, however many more correct answers follow', async () => {

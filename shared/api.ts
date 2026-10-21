@@ -519,8 +519,6 @@ export const deletedResponseSchema = z.object({ id: z.string(), deleted: z.liter
 export const studyModeSchema = z.enum(STUDY_MODES);
 
 export const practiceAnswerSchema = z.discriminatedUnion('kind', [
-  /** Recall: the reviewer says whether they had it. */
-  z.strictObject({ kind: z.literal('self'), correct: z.boolean() }),
   /** Recognition: the word whose meaning was chosen. */
   z.strictObject({ kind: z.literal('choice'), selectedId: pageIdSchema }),
   /** Typing and cloze. */

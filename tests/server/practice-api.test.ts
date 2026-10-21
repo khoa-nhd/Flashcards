@@ -121,21 +121,6 @@ describe('an answer in each mode', () => {
     ]);
   });
 
-  it('recall records what the reviewer said about themselves, marked as self-graded', async () => {
-    const app = on(TODAY);
-    const { candid } = await library(app);
-    expect(await practised(app, alice, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: false } })).toEqual({
-      outcome: 'recorded',
-      correct: false,
-      typed: null,
-      expected: 'candid',
-      modeMastery: 0,
-    });
-    expect(await rows()).toEqual([
-      { kind: 'practice', review_mode: 'recall', action: 'not_remember', answer_correct: false, grading: 'self', submitted_answer: null },
-    ]);
-  });
-
   it('typing is judged by the server, and what was typed is kept', async () => {
     const app = on(TODAY);
     const { candid, others } = await library(app);
@@ -222,8 +207,8 @@ describe('practice and the schedule', () => {
     const answers: Array<[string, Record<string, unknown>]> = [
       ['recognition', { kind: 'choice', selectedId: candid.id }],
       ['recognition', { kind: 'choice', selectedId: others[0]!.id }],
-      ['recall', { kind: 'self', correct: true }],
-      ['recall', { kind: 'self', correct: false }],
+      ['listening', { kind: 'typed', text: 'candid' }],
+      ['listening', { kind: 'typed', text: 'nope' }],
       ['typing', { kind: 'typed', text: 'candid' }],
       ['typing', { kind: 'typed', text: 'nope' }],
       ['cloze', { kind: 'typed', text: 'candid' }],
@@ -238,7 +223,7 @@ describe('practice and the schedule', () => {
   it('records the state it found, unchanged, on every practice row', async () => {
     const app = on(TODAY);
     const { candid } = await library(app);
-    await practised(app, alice, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } });
+    await practised(app, alice, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } });
     const logged = await db.admin(
       `select mastery_before, mastery_after, review_date_before::text as before, review_date_after::text as after,
               rating, fsrs_before, fsrs_after from public.review_logs`,
@@ -281,7 +266,7 @@ describe('practice and the schedule', () => {
       method: 'POST',
       body: { pageId: candid.id, action: 'remember', expected: { mastery: 3, nextReview: TODAY }, requestId: reviewId },
     });
-    await practised(app, alice, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: false } });
+    await practised(app, alice, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'nope' } });
 
     const undo = await call(app, alice, '/api/review-undo', { method: 'POST', body: { reviewRequestId: reviewId, requestId: newId() } });
     expect(undo.status).toBe(200);
@@ -292,7 +277,7 @@ describe('practice and the schedule', () => {
     const app = on(TODAY);
     const { candid } = await library(app);
     const requestId = newId();
-    await practise(app, alice, { requestId, pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } });
+    await practise(app, alice, { requestId, pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } });
     const undo = await call(app, alice, '/api/review-undo', { method: 'POST', body: { reviewRequestId: requestId, requestId: newId() } });
     expect(undo.status).toBe(404);
     expect(await entryOf(app, alice, candid.id)).toMatchObject({ mastery: 3, reviewDate: TODAY });
@@ -333,14 +318,14 @@ describe('practice kept apart from reviews', () => {
     const { candid } = await library(app);
     const typed = (text: string) => practised(app, alice, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text } });
     for (const text of ['candid', 'candid', 'candid', 'nope', 'nope']) await typed(text);
-    await practised(app, alice, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } });
+    await practised(app, alice, { pageId: candid.id, mode: 'listening', answer: { kind: 'typed', text: 'candid' } });
 
     const { practice } = analyticsResponseSchema.parse(await (await call(app, alice, '/api/analytics')).json());
     expect(practice).toEqual({
       available: true,
       modes: [
         { mode: 'typing', answers: 5, correct: 3, accuracy: 0.6 },
-        { mode: 'recall', answers: 1, correct: 1, accuracy: null },
+        { mode: 'listening', answers: 1, correct: 1, accuracy: null },
       ],
       today: { answers: 6, correct: 4 },
     });
@@ -348,13 +333,13 @@ describe('practice kept apart from reviews', () => {
 
   it('looks back thirty days, and counts "today" by the reviewer’s own day', async () => {
     const { candid } = await library(on('2026-09-01'));
-    const answer = { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } };
+    const answer = { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } };
     await practised(on('2026-09-09'), alice, answer);
     await practised(on('2026-09-10'), alice, answer);
     await practised(on('2026-10-08'), alice, answer);
     const { practice } = analyticsResponseSchema.parse(await (await call(on(TODAY), alice, '/api/analytics')).json());
     // From 9 October the window starts on 10 September.
-    expect(practice.modes).toEqual([{ mode: 'recall', answers: 2, correct: 2, accuracy: null }]);
+    expect(practice.modes).toEqual([{ mode: 'typing', answers: 2, correct: 2, accuracy: null }]);
     expect(practice.today).toEqual({ answers: 0, correct: 0 });
   });
 
@@ -416,7 +401,7 @@ describe('recording once', () => {
       method: 'POST',
       body: { pageId: candid.id, action: 'not_remember', expected: { mastery: 3, nextReview: TODAY }, requestId },
     });
-    const response = await practise(app, alice, { requestId, pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } });
+    const response = await practise(app, alice, { requestId, pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } });
     expect(response.status).toBe(400);
     expect((await rows()).map((row) => row.kind)).toEqual(['review']);
   });
@@ -438,16 +423,15 @@ describe('recording once', () => {
 
 describe('what is refused', () => {
   it.each([
-    ['a typed answer in recall', { mode: 'recall', answer: { kind: 'typed', text: 'candid' } }],
     ['a self-graded answer in typing', { mode: 'typing', answer: { kind: 'self', correct: true } }],
     ['a typed answer in recognition', { mode: 'recognition', answer: { kind: 'typed', text: 'thẳng thắn' } }],
     ['a choice in cloze', { mode: 'cloze', answer: { kind: 'choice', selectedId: '00000000-0000-4000-8000-000000000001' } }],
-    ['the flashcard mode, which is a review', { mode: 'flashcard', answer: { kind: 'self', correct: true } }],
-    ['a mode that does not exist', { mode: 'singing', answer: { kind: 'self', correct: true } }],
+    ['the flashcard mode, which is a review', { mode: 'flashcard', answer: { kind: 'typed', text: 'candid' } }],
+    ['a mode that does not exist', { mode: 'singing', answer: { kind: 'typed', text: 'candid' } }],
     ['a self-graded answer in listening', { mode: 'listening', answer: { kind: 'self', correct: true } }],
-    ['no answer', { mode: 'recall' }],
-    ['a mastery to store', { mode: 'recall', answer: { kind: 'self', correct: true }, mastery: 10 }],
-    ['a review date to store', { mode: 'recall', answer: { kind: 'self', correct: true }, expected: { mastery: 3, nextReview: null } }],
+    ['no answer', { mode: 'typing' }],
+    ['a mastery to store', { mode: 'typing', answer: { kind: 'typed', text: 'candid' }, mastery: 10 }],
+    ['a review date to store', { mode: 'typing', answer: { kind: 'typed', text: 'candid' }, expected: { mastery: 3, nextReview: null } }],
     ['an over-long answer', { mode: 'typing', answer: { kind: 'typed', text: 'x'.repeat(501) } }],
   ])('%s', async (_name, body) => {
     const app = on(TODAY);
@@ -462,7 +446,7 @@ describe('what is refused', () => {
     const { candid } = await library(app);
     const response = await call(app, alice, '/api/practice', {
       method: 'POST',
-      body: { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } },
+      body: { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } },
     });
     expect(response.status).toBe(400);
   });
@@ -478,7 +462,7 @@ describe('what is refused', () => {
     const app = on(TODAY);
     const { candid } = await library(app);
     await call(app, alice, `/api/vocabulary/${candid.id}`, { method: 'DELETE' });
-    const answer = { mode: 'recall', answer: { kind: 'self', correct: true } };
+    const answer = { mode: 'typing', answer: { kind: 'typed', text: 'candid' } };
     expect((await practise(app, alice, { pageId: candid.id, ...answer })).status).toBe(404);
     expect((await practise(app, alice, { pageId: '99999999-9999-4999-8999-999999999999', ...answer })).status).toBe(404);
     expect(await rows()).toEqual([]);
@@ -487,7 +471,7 @@ describe('what is refused', () => {
   it('a visitor who is not signed in', async () => {
     const app = on(TODAY);
     const { candid } = await library(app);
-    expect((await practise(app, null, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } })).status).toBe(401);
+    expect((await practise(app, null, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } })).status).toBe(401);
   });
 });
 
@@ -495,7 +479,7 @@ describe('one account’s practice and another’s', () => {
   it('cannot be recorded against someone else’s word', async () => {
     const app = on(TODAY);
     const { candid } = await library(app);
-    const response = await practise(app, bob, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } });
+    const response = await practise(app, bob, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } });
     expect(response.status).toBe(404);
     expect(await rows()).toEqual([]);
   });
@@ -503,7 +487,7 @@ describe('one account’s practice and another’s', () => {
   it('is invisible to the other account, in the rows and in the figures', async () => {
     const app = on(TODAY);
     const { candid } = await library(app);
-    await practised(app, alice, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } });
+    await practised(app, alice, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } });
 
     expect(await db.as(bob.id, (s) => s.query('select * from public.review_logs'))).toEqual([]);
     expect(await db.as(bob.id, (s) => s.query(`select * from public.practice_daily_stats('2026-01-01', '2026-12-31')`))).toEqual([]);
@@ -516,8 +500,8 @@ describe('one account’s practice and another’s', () => {
     const { candid } = await library(app);
     const mine = await addWord(app, bob, { word: 'mine', meaning: 'của tôi' });
     const sessionId = newId();
-    await practised(app, alice, { sessionId, pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } });
-    const response = await practise(app, bob, { sessionId, pageId: mine.id, mode: 'recall', answer: { kind: 'self', correct: true } });
+    await practised(app, alice, { sessionId, pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } });
+    const response = await practise(app, bob, { sessionId, pageId: mine.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } });
     expect(response.status).toBe(403);
     expect(await db.admin('select count(*)::int as count from public.review_logs where user_id = $1', [bob.id])).toEqual([{ count: 0 }]);
   });
@@ -533,9 +517,9 @@ describe('what the database itself insists on', () => {
   const event = (overrides: Record<string, unknown>) =>
     JSON.stringify({
       request_id: newId(),
-      review_mode: 'recall',
+      review_mode: 'typing',
       answer_correct: true,
-      grading: 'self',
+      grading: 'auto',
       reviewed_on: TODAY,
       ...overrides,
     });
@@ -548,7 +532,7 @@ describe('what the database itself insists on', () => {
           `insert into public.review_logs
              (vocabulary_id, request_id, kind, action, review_mode, reviewed_on, answer_correct, grading,
               mastery_before, mastery_after, review_date_before, review_date_after)
-           values ($1, $2, 'practice', 'remember', 'recall', $3, true, 'self', ${columns})`,
+           values ($1, $2, 'practice', 'remember', 'typing', $3, true, 'auto', ${columns})`,
           [candid.id, newId(), TODAY],
         ),
       );
@@ -572,7 +556,7 @@ describe('what the database itself insists on', () => {
   it('practice history cannot be edited or deleted, even by its owner', async () => {
     const app = on(TODAY);
     const { candid } = await library(app);
-    await practised(app, alice, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: false } });
+    await practised(app, alice, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'nope' } });
     await expect(db.as(alice.id, (s) => s.query('update public.review_logs set answer_correct = true'))).rejects.toMatchObject({
       code: '42501',
     });
@@ -629,7 +613,7 @@ describe('where practice cannot be recorded', () => {
   it('with saving switched off, an answer is judged and nothing is recorded', async () => {
     const { candid } = await library(on(TODAY));
     const frozen = on(TODAY, db, [alice, bob], { REVIEW_WRITES_ENABLED: 'false' });
-    expect(await practised(frozen, alice, { pageId: candid.id, mode: 'recall', answer: { kind: 'self', correct: true } })).toMatchObject({
+    expect(await practised(frozen, alice, { pageId: candid.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } })).toMatchObject({
       outcome: 'dry_run',
       correct: true,
     });

@@ -142,66 +142,6 @@ function Recognition({ word, choices, verdict, given, onAnswer }: PracticeCardPr
   );
 }
 
-function Recall({ word, verdict, onAnswer }: PracticeCardProps) {
-  const [shown, setShown] = useState(false);
-  const answered = verdict !== null;
-  useKeys((key) => {
-    if (!shown) {
-      if (key !== ' ') return false;
-      setShown(true);
-      return true;
-    }
-    if (key === 'ArrowRight') onAnswer({ kind: 'self', correct: true });
-    else if (key === 'ArrowLeft') onAnswer({ kind: 'self', correct: false });
-    else return false;
-    return true;
-  }, !answered);
-
-  return (
-    <div className="flex flex-col gap-4">
-      <MeaningPrompt word={word} />
-      {!shown ? (
-        <button type="button" autoFocus className={BUTTON_PRIMARY} onClick={() => setShown(true)}>
-          Show the word
-        </button>
-      ) : (
-        <>
-          <div className={PROMPT}>
-            <Label>Word</Label>
-            <p className="mt-2 font-serif text-3xl font-semibold">{word.word}</p>
-          </div>
-          {!answered && (
-            <div role="group" aria-label="Did you recall it?" className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                aria-keyshortcuts="ArrowLeft"
-                onClick={() => onAnswer({ kind: 'self', correct: false })}
-                className="flex h-14 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-bad/35 bg-bad-soft text-base font-semibold text-bad-ink hover:border-bad disabled:opacity-60"
-              >
-                <kbd aria-hidden="true" className={KEY_HINT}>
-                  ←
-                </kbd>
-                I did not have it
-              </button>
-              <button
-                type="button"
-                aria-keyshortcuts="ArrowRight"
-                onClick={() => onAnswer({ kind: 'self', correct: true })}
-                className="flex h-14 cursor-pointer items-center justify-center gap-2 rounded-2xl border border-good/35 bg-good-soft text-base font-semibold text-good-ink hover:border-good disabled:opacity-60"
-              >
-                I had it
-                <kbd aria-hidden="true" className={KEY_HINT}>
-                  →
-                </kbd>
-              </button>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
 function Typed({ mode, word, verdict, given, onAnswer, speechLang = 'en-US' }: PracticeCardProps) {
   const [text, setText] = useState('');
   const answered = verdict !== null;
@@ -269,7 +209,6 @@ function Typed({ mode, word, verdict, given, onAnswer, speechLang = 'en-US' }: P
 /** One practice question, in whichever mode. It shows the verdict it is given; it never decides one itself. */
 export function PracticeCard(props: PracticeCardProps) {
   if (props.mode === 'recognition') return <Recognition {...props} />;
-  if (props.mode === 'recall') return <Recall {...props} />;
   return <Typed {...props} />;
 }
 
@@ -293,18 +232,9 @@ export interface VerdictProps {
  * has confirmed it yet. Focus lands on the button so Enter continues.
  */
 export function Verdict({ mode, word, verdict, last, onNext }: VerdictProps) {
-  const headline =
-    verdict.typed !== null
-      ? TYPED_TEXT[verdict.typed]
-      : mode === 'recall'
-        ? verdict.correct
-          ? 'Marked as recalled.'
-          : 'Marked as not recalled.'
-        : verdict.correct
-          ? 'Correct.'
-          : 'Not quite.';
+  const headline = verdict.typed !== null ? TYPED_TEXT[verdict.typed] : verdict.correct ? 'Correct.' : 'Not quite.';
   // For recognition the right choice is already marked above; elsewhere a miss shows the answer.
-  const answer = !verdict.correct && mode !== 'recognition' && mode !== 'recall' ? verdict.expected : null;
+  const answer = !verdict.correct && mode !== 'recognition' ? verdict.expected : null;
   return (
     <div
       role="status"

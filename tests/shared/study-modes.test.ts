@@ -112,7 +112,7 @@ describe('what a word needs for each mode', () => {
 
   it('leaves out of every meaning-based mode a word with nothing to show', () => {
     const bare = word(1, { meaning: null, definition: null });
-    for (const mode of ['recognition', 'recall', 'typing'] as const) {
+    for (const mode of ['recognition', 'typing'] as const) {
       expect(ineligibility(mode, bare, POOL), mode).toBe('no_meaning');
     }
   });
@@ -135,7 +135,6 @@ describe('what a word needs for each mode', () => {
   it('does not need a meaning for a cloze question, or an example for the others', () => {
     expect(ineligibility('cloze', word(1, { meaning: null, definition: null }), POOL)).toBeNull();
     expect(ineligibility('typing', word(1, { example: null }), POOL)).toBeNull();
-    expect(ineligibility('recall', word(1, { example: null }), POOL)).toBeNull();
   });
 });
 
@@ -285,16 +284,16 @@ describe('choosing words for a session', () => {
   });
 
   it('never takes more than was asked for, and never repeats a word', () => {
-    const picked = selectForPractice('recall', POOL, POOL, 5, seeded(2)).words;
+    const picked = selectForPractice('typing', POOL, POOL, 5, seeded(2)).words;
     expect(picked).toHaveLength(5);
     expect(new Set(picked.map((item) => item.id)).size).toBe(5);
-    expect(selectForPractice('recall', POOL, POOL, 50, seeded(2)).words).toHaveLength(POOL.length);
-    expect(selectForPractice('recall', POOL, POOL, 0, seeded(2)).words).toEqual([]);
+    expect(selectForPractice('typing', POOL, POOL, 50, seeded(2)).words).toHaveLength(POOL.length);
+    expect(selectForPractice('typing', POOL, POOL, 0, seeded(2)).words).toEqual([]);
   });
 
   it('does not always start with the same word', () => {
     const firsts = new Set<string>();
-    for (let seed = 1; seed <= 60; seed += 1) firsts.add(selectForPractice('recall', POOL, POOL, 3, seeded(seed)).words[0]!.id);
+    for (let seed = 1; seed <= 60; seed += 1) firsts.add(selectForPractice('typing', POOL, POOL, 3, seeded(seed)).words[0]!.id);
     expect(firsts.size).toBeGreaterThan(4);
   });
 
@@ -305,17 +304,6 @@ describe('choosing words for a session', () => {
 
 describe('judging an answer', () => {
   const candid = word(1, { word: 'candid', meaning: 'thẳng thắn', example: 'He gave a Candid account.' });
-
-  it('takes the reviewer’s word for it in recall, and says so', () => {
-    expect(judge('recall', candid, { kind: 'self', correct: true })).toEqual({
-      correct: true,
-      grading: 'self',
-      typed: null,
-      submitted: null,
-      expected: 'candid',
-    });
-    expect(judge('recall', candid, { kind: 'self', correct: false })).toMatchObject({ correct: false, grading: 'self' });
-  });
 
   it('marks a recognition choice right only when it is the word’s own meaning', () => {
     expect(judge('recognition', candid, { kind: 'choice', selectedId: candid.id })).toEqual({
@@ -379,10 +367,7 @@ describe('judging an answer', () => {
   });
 
   it('refuses an answer of the wrong kind for the mode', () => {
-    expect(judge('listening', candid, { kind: 'self', correct: true })).toBeNull();
     expect(judge('listening', candid, { kind: 'choice', selectedId: candid.id })).toBeNull();
-    expect(judge('typing', candid, { kind: 'self', correct: true })).toBeNull();
-    expect(judge('recall', candid, { kind: 'typed', text: 'candid' })).toBeNull();
     expect(judge('recognition', candid, { kind: 'typed', text: 'thẳng thắn' })).toBeNull();
     expect(judge('cloze', candid, { kind: 'choice', selectedId: candid.id })).toBeNull();
   });

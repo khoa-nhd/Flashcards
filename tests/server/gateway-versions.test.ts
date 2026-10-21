@@ -150,7 +150,7 @@ const REQUESTS: Array<[label: string, path: string, method?: 'POST' | 'PUT', bod
   ['importing a word', '/api/vocabulary/import', 'POST', { items: [{ requestId: newId(), word: 'lucid' }] }],
   ['answering a card', '/api/review-action', 'POST', { pageId: WORD, action: 'remember', expected: { mastery: 3, nextReview: TODAY }, requestId: newId() }],
   ['undoing an answer', '/api/review-undo', 'POST', { reviewRequestId: newId(), requestId: newId() }],
-  ['a practice answer', '/api/practice', 'POST', { pageId: WORD, mode: 'recall', answer: { kind: 'self', correct: true }, requestId: newId() }],
+  ['a practice answer', '/api/practice', 'POST', { pageId: WORD, mode: 'typing', answer: { kind: 'typed', text: 'candid' }, requestId: newId() }],
   ['creating a collection', '/api/collections', 'POST', { name: 'Travel' }],
   ['adding an example', `/api/vocabulary/${WORD}/examples`, 'POST', { sentence: 'A candid answer.' }],
   ['linking two words', '/api/relations', 'POST', { fromId: WORD, toId: '00000000-0000-4000-8000-000000000002', kind: 'synonym' }],

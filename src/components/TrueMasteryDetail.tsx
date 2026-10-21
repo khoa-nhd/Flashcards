@@ -53,8 +53,8 @@ export function TrueMasteryDetail({
   const getModeBreakdown = (mode: string): ModeBreakdown | undefined =>
     result.modes.find(m => m.mode === mode);
 
-  // All modes in order
-  const allModes: Array<typeof STUDY_MODES[number]> = ['recognition', 'recall', 'typing', 'cloze', 'listening'];
+  // Every mode the app offers, in a fixed order.
+  const allModes: Array<typeof STUDY_MODES[number]> = [...STUDY_MODES];
 
   // Find the most recent practice activity across all modes
   const mostRecent = answers
@@ -132,12 +132,11 @@ export function TrueMasteryDetail({
                   <span>Evidence: {breakdown?.effectiveEvidence.toFixed(1) ?? '0'}</span>
                   <span>Confidence: {confidencePercent}%</span>
                 </div>
-                <div className="flex items-center justify-between text-xs text-muted mt-0.5">
-                  <span>{breakdown?.grading === 'self' ? 'Self-graded' : 'Auto-graded'}</span>
-                  {breakdown?.lastAttemptedOn && (
+                {breakdown?.lastAttemptedOn && (
+                  <div className="flex items-center justify-end text-xs text-muted mt-0.5">
                     <span>Last: {formatDate(breakdown.lastAttemptedOn, 'short')}</span>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             );
           }
@@ -146,7 +145,6 @@ export function TrueMasteryDetail({
           return (
             <div key={mode} className="col-span-2 rounded-xl border border-line bg-paper p-3 text-center text-xs text-muted">
               {getModeLabel(mode)}: No practice data yet.
-              {mode === 'recall' && <span className="ml-1 text-accent">(self-graded)</span>}
             </div>
           );
         })}
@@ -164,7 +162,6 @@ export function TrueMasteryDetail({
           </p>
           <p>
             Evidence decays over time (30-day half-life). Recent correct answers count more than old ones.
-            Self-graded Recall answers are included but weighted at 50% compared to auto-graded modes.
           </p>
           <p>
             Confidence grows with more independent evidence. Duplicates in the same session don't inflate it.

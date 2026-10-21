@@ -12,12 +12,16 @@
  * mode, with a reason that says what to add.
  */
 
-export const STUDY_MODES = ['recognition', 'recall', 'typing', 'cloze', 'listening'] as const;
+export const STUDY_MODES = ['recognition', 'typing', 'cloze', 'listening'] as const;
 export type StudyMode = (typeof STUDY_MODES)[number];
+
+/** Whether a stored mode name is one the app still offers. Older rows may name a mode since removed. */
+export function isStudyMode(value: string | null | undefined): value is StudyMode {
+  return value !== null && value !== undefined && (STUDY_MODES as readonly string[]).includes(value);
+}
 
 export const STUDY_MODE_LABELS: Record<StudyMode, string> = {
   recognition: 'Recognition',
-  recall: 'Recall',
   typing: 'Typing',
   cloze: 'Fill in the blank',
   listening: 'Listening',
@@ -25,7 +29,6 @@ export const STUDY_MODE_LABELS: Record<StudyMode, string> = {
 
 export const STUDY_MODE_SUMMARY: Record<StudyMode, string> = {
   recognition: 'See the word, pick its meaning from four.',
-  recall: 'See the meaning, recall the word, then say whether you had it.',
   typing: 'See the meaning, type the word.',
   cloze: 'See your example sentence with the word left out, type the word.',
   listening: 'Hear the word read aloud by your browser, type what you hear.',
@@ -295,8 +298,6 @@ export function selectForPractice(
 
 /** What the reviewer did, in the form each mode produces. */
 export type PracticeAnswer =
-  /** Recall: the reviewer says whether they had it. */
-  | { kind: 'self'; correct: boolean }
   /** Recognition: the word whose meaning was chosen. */
   | { kind: 'choice'; selectedId: string }
   /** Typing, cloze and listening. */
@@ -304,7 +305,6 @@ export type PracticeAnswer =
 
 export const ANSWER_KIND: Record<StudyMode, PracticeAnswer['kind']> = {
   recognition: 'choice',
-  recall: 'self',
   typing: 'typed',
   cloze: 'typed',
   listening: 'typed',
@@ -328,9 +328,6 @@ export interface Judgement {
  */
 export function judge(mode: StudyMode, word: PracticeWord, answer: PracticeAnswer): Judgement | null {
   if (answer.kind !== ANSWER_KIND[mode]) return null;
-  if (answer.kind === 'self') {
-    return { correct: answer.correct, grading: 'self', typed: null, submitted: null, expected: tidy(word.word) };
-  }
   if (answer.kind === 'choice') {
     const right = answerText(word);
     if (right === null) return null;

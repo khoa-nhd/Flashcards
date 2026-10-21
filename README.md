@@ -10,7 +10,7 @@ in on.
 | --- | --- |
 | **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
 | **Review** | Flashcards: flip, then answer Remember or Not remember. Choose what to review (everything due, the weakest words, or words you pick yourself) and whether the session counts towards mastery. Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. Answers are recorded on the device first and sent in the background, so nothing waits on the network. |
-| **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, and listening (experimental). Recorded for your statistics; never changes mastery or a review date. |
+| **Practice** | Other ways to work on words: recognition, typing, fill in the blank, and listening (experimental). Recorded for your statistics; never changes mastery or a review date. |
 | **Add vocabulary** | Creates a new word, with a duplicate check. **Import a list** brings in many at once from CSV, text, an Excel file or this app's own export, with a preview first. |
 | **Vocabulary bank** | Every word: search, filter (also by collection), sort, view details, edit, delete, export. A word's panel also holds its further examples and related words. |
 | **Collections** | Your own groupings of words. A word can be in several; deleting a collection never deletes a word. |
@@ -132,7 +132,6 @@ why.
 | Mode | You see | You do | Judged by |
 | --- | --- | --- | --- |
 | Recognition | The word | Pick its meaning from four of your own | The server |
-| Recall | The meaning | Recall the word, then say whether you had it | You |
 | Typing | The meaning | Type the word | The server |
 | Fill in the blank | Your example with the word left out | Type the word | The server |
 | Listening (experimental) | Nothing: the word is read aloud | Type what you hear | The server |

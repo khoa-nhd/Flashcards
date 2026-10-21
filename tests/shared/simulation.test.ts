@@ -127,7 +127,7 @@ describe('the comparison', () => {
     reviewed(1, -2),
     taken,
     event(2, { kind: 'undo', undoesId: taken.id }),
-    event(4, { kind: 'practice', mode: 'recall', answerCorrect: false }),
+    event(4, { kind: 'practice', mode: 'typing', answerCorrect: false }),
     // A word that is in the trash now: its answers are real, but it is not scheduled at all.
     reviewed(99, -3),
     // The retired word's history is real too, and equally beside the point.

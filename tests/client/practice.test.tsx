@@ -62,12 +62,11 @@ describe('the Practice page', () => {
     expect(await main().findByText(/it never changes mastery or review dates/)).toBeInTheDocument();
   });
 
-  it('offers the five modes, each with what it asks for', async () => {
+  it('offers the four modes, each with what it asks for', async () => {
     await open('/practice');
     await main().findByRole('heading', { name: 'Start a practice session' });
     expect(main().getAllByRole('radio').map((radio) => radio.closest('label')?.textContent)).toEqual([
       'RecognitionSee the word, pick its meaning from four.',
-      'RecallSee the meaning, recall the word, then say whether you had it.',
       'TypingSee the meaning, type the word.',
       'Fill in the blankSee your example sentence with the word left out, type the word.',
       'ListeningExperimentalHear the word read aloud by your browser, type what you hear.',
@@ -190,47 +189,6 @@ describe('recognition', () => {
     await main().findByRole('status');
     const after = choices().map((button) => button.textContent?.replace(/Correct answer|Your choice/g, ''));
     expect(after).toEqual(before);
-  });
-});
-
-describe('recall', () => {
-  it('shows the meaning and keeps the word out of the page until it is asked for', async () => {
-    const { api, user } = await open('/practice?mode=recall');
-    await start(user);
-    const word = promptedWord();
-    expect(main().queryByText(word.word)).not.toBeInTheDocument();
-    expect(screen.getByRole('main').innerHTML).not.toContain(word.word);
-
-    await user.click(main().getByRole('button', { name: 'Show the word' }));
-    expect(main().getByText(word.word)).toBeInTheDocument();
-    expect(api.submitPractice).not.toHaveBeenCalled();
-  });
-
-  it('records what the reviewer says about themselves', async () => {
-    const { api, user } = await open('/practice?mode=recall');
-    await start(user);
-    const word = promptedWord();
-    await user.click(main().getByRole('button', { name: 'Show the word' }));
-    await user.click(main().getByRole('button', { name: /I did not have it/ }));
-    expect(sent(api)).toMatchObject({ pageId: word.id, mode: 'recall', answer: { kind: 'self', correct: false } });
-    expect(await main().findByRole('status')).toHaveTextContent('Marked as not recalled.');
-  });
-
-  it('cannot be answered before the word has been shown', async () => {
-    const { api, user } = await open('/practice?mode=recall');
-    await start(user);
-    expect(main().queryByRole('button', { name: /I had it/ })).not.toBeInTheDocument();
-    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
-    expect(api.submitPractice).not.toHaveBeenCalled();
-  });
-
-  it('takes Space to show the word and the arrows to answer', async () => {
-    const { api, user } = await open('/practice?mode=recall');
-    await start(user);
-    fireEvent.keyDown(document.body, { key: ' ' });
-    fireEvent.keyDown(document.body, { key: 'ArrowRight' });
-    await main().findByRole('status');
-    expect(sent(api)?.answer).toEqual({ kind: 'self', correct: true });
   });
 });
 
@@ -431,8 +389,8 @@ describe('practice from the weak words', () => {
     expect(link).toHaveAttribute('href', '/practice?source=weak');
     await user.click(link);
     await main().findByRole('heading', { name: 'Start a practice session' });
-    await user.click(main().getByRole('radio', { name: /Recall/ }));
-    await waitFor(() => expect(main().getByText(/can be used for recall/)).toHaveTextContent('2 of 2 words'));
+    await user.click(main().getByRole('radio', { name: /Typing/ }));
+    await waitFor(() => expect(main().getByText(/can be used for typing/)).toHaveTextContent('2 of 2 words'));
   });
 });
 
