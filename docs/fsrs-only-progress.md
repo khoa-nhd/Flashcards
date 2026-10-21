@@ -12,7 +12,7 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 |---|---|
 | Nhánh làm việc | `main` (chủ dự án yêu cầu gộp vào `main` ngày 2026-10-21; nhánh `fsrs-only` đã gộp và xóa). **Chưa push** |
 | Typecheck / lint / build | Sạch |
-| Test | 78 file, 1906 test, tất cả đạt |
+| Test | 78 file, 1908 test, tất cả đạt |
 | Migration v15 | Đã viết: `supabase/migrations/20261029090000_fsrs_only.sql`. **Chưa chạy trên database thật** |
 | Server (lưu, Undo, archive, hàng đợi) | Xong và có test qua HTTP thật + schema thật + RLS |
 | Giao diện (Phase 4) | **Chưa bắt đầu** |
@@ -92,6 +92,8 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
   - Ngày đạt cả hai được ghi vào bảng `study_days` (thêm vào v15) ngay sau mỗi câu trả lời. Ngày đã đạt thì giữ là
     đạt (kể cả khi Undo sau đó), đổi mục tiêu không sửa ngày cũ. Streak = chuỗi ngày đạt liên tiếp; còn giữ từ
     hôm qua cho tới khi hôm nay đạt.
+- Trần review/ngày: khi đặt N, hàng đợi chỉ đưa tối đa N từ đến hạn trong ngày (trừ số đã ôn), hạn sớm nhất trước;
+  từ mới không bị giới hạn; ôn theo lựa chọn (weak/select) không bị cắt; `heldBack` cho biết còn bao nhiêu từ bị giữ lại.
   - Trước khi người dùng chọn mục tiêu (`chosen: false`), app gợi ý 10 + 30 nhưng **không ghi ngày nào**.
     Đây là chỗ tôi tự quyết (chủ dự án nói onboarding sẽ hỏi); đổi được nếu muốn.
 
@@ -111,7 +113,7 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 
 | Phase | Còn thiếu |
 |---|---|
-| 3. Server/API | Áp trần review/ngày vào hàng đợi (đã lưu được, chưa dùng); weak words theo rủi ro FSRS; analytics/insights theo strength; bỏ chỉnh mastery/ngày ở `PATCH /api/vocabulary/:id` cho rõ ràng (hiện server bỏ qua phần lịch) |
+| 3. Server/API | Weak words theo rủi ro FSRS (cần chủ dự án chốt cách tính); analytics/insights theo strength; bỏ chỉnh mastery/ngày ở `PATCH /api/vocabulary/:id` cho rõ ràng (hiện server bỏ qua phần lịch) |
 | 4. Giao diện | Tất cả: StrengthPill, thẻ thu gọn từ level 6 + nút mở, Bank (cột/lọc Sức nhớ, archive hàng loạt, lọc Archived), Dashboard hai vòng mục tiêu + phân bố strength, Settings (retention nâng cao, ngôn ngữ, mục tiêu, maintenance mode), đổi tên Practice score, onboarding 3 màn, switcher VI/EN, import hỏi rải theo từ/ngày (mặc định 20) |
 | 5. Export/import/offline, v16 | Export v2, đọc file v1; offline đã gửi `expectedRevision` nhưng cần xử lý 409 bằng tải lại thẻ; migration dọn dẹp v16 |
 | 6. Kiểm thử, docs, rollout | Kiểm tra thủ công trước production (mục 10 của kế hoạch); hướng dẫn chủ dự án chạy v15 |
@@ -140,7 +142,7 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 
 ## 6. Bắt đầu làm tiếp
 
-1. Phase 3 còn lại: trần review/ngày trong hàng đợi, weak words và thống kê theo FSRS.
+1. Phase 3 còn lại: weak words và thống kê theo FSRS.
 2. Phase 4: giao diện, làm trên `npm run dev:mock-fsrs`, kiểm tra bằng click thật (cả điện thoại và máy tính).
 3. Phase 5, 6; nâng `RECOMMENDED_SCHEMA_VERSION` lên 15; rồi mới hướng dẫn chủ dự án chạy v15 và deploy.
 

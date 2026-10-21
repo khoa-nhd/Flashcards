@@ -65,6 +65,7 @@ export function queueResponse(cards: ReviewCard[], overrides: Partial<QueueRespo
     capabilities: NO_CAPABILITIES,
     scheduler: 'mastery_v1',
     fsrsOnly: false,
+    heldBack: 0,
     focus: null,
     selection: false,
     skipped: [],

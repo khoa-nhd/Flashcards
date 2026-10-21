@@ -193,6 +193,8 @@ export const queueResponseSchema = z.object({
   scheduler: schedulerIdSchema.default(DEFAULT_SCHEDULER),
   /** True when FSRS is the only scheduler: the UI then never offers a choice. */
   fsrsOnly: z.boolean().default(false),
+  /** Due words left out today by the account's daily review limit (FSRS alone). */
+  heldBack: z.number().int().min(0).default(0),
   /** Set when the queue was narrowed on request. `weak` is ordered weakest first. */
   focus: reviewFocusSchema.nullable().default(null),
   /**

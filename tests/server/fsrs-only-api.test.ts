@@ -452,3 +452,40 @@ describe('the two daily goals', () => {
     ]);
   });
 });
+
+describe('the daily review limit', () => {
+  /** Three words answered once, then all made due again, earliest first. */
+  async function threeDue(user: TestUser) {
+    const words = [];
+    for (const [index, name] of ['first', 'second', 'third'].entries()) {
+      const word = await addWord(user, name);
+      await answer(user, remember(word.id, 0));
+      await db.admin(`update public.card_states set fsrs_due = $2 where vocabulary_id = $1`, [word.id, `2026-10-0${index + 1}T00:00:00Z`]);
+      words.push(word);
+    }
+    return words;
+  }
+
+  it('shows everything due until a limit is set', async () => {
+    await threeDue(alice);
+    const queue = await queueOf(alice);
+    expect(queue.cards.map((card) => card.word)).toEqual(['first', 'second', 'third']);
+    expect(queue.heldBack).toBe(0);
+  });
+
+  it('offers only the earliest-due reviews up to what is left of the limit, and never holds back a new word', async () => {
+    const words = await threeDue(alice);
+    await addWord(alice, 'brand-new');
+    await call(app, alice, '/api/settings', { method: 'PUT', body: { maxReviewsPerDay: 2 } });
+
+    const queue = await queueOf(alice);
+    expect(queue.cards.map((card) => card.word)).toEqual(['first', 'second', 'brand-new']);
+    expect(queue.heldBack).toBe(1);
+
+    // One of today's two is used up by a review; one more is offered.
+    await answer(alice, remember(words[0]!.id, 1));
+    const later = await queueOf(alice);
+    expect(later.cards.map((card) => card.word)).toEqual(['second', 'brand-new']);
+    expect(later.heldBack).toBe(1);
+  });
+});

@@ -239,7 +239,17 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         goals: settings?.studyGoals ?? null,
         maxReviewsPerDay: settings?.maxReviewsPerDay ?? null,
         uiLanguage: settings?.uiLanguage ?? null,
-        review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, now }),
+        review: new ReviewService({
+          repository,
+          rules,
+          cardFields,
+          timeZone,
+          writesRequested,
+          fsrs,
+          scheduler,
+          maxReviewsPerDay: settings?.maxReviewsPerDay ?? null,
+          now,
+        }),
         vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, fsrsOnly, now }),
         studyGoals: fsrsOnly
           ? new StudyGoalsService({

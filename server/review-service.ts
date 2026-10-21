@@ -75,6 +75,11 @@ export interface ReviewServiceOptions {
    * the mastery schedule is always in charge.
    */
   scheduler?: SchedulerStore;
+  /**
+   * Under FSRS alone, the most due words offered for review in one day (the
+   * account's optional limit). New words are never held back by it.
+   */
+  maxReviewsPerDay?: number | null;
   now?: () => Date;
 }
 
@@ -251,6 +256,7 @@ export class ReviewService {
       capabilities: repository.capabilities,
       scheduler,
       fsrsOnly: false,
+      heldBack: 0,
       focus: focus?.kind === 'weak' ? 'weak' : null,
       selection: focus?.kind === 'selection',
       skipped,
@@ -278,6 +284,24 @@ export class ReviewService {
       const rank = new Map(focus.ids.map((id, position) => [id, position]));
       queue = queue.filter((item) => rank.has(item.id));
       queue.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+    }
+
+    // The optional daily limit: the earliest-due reviews up to what is left of it today. A
+    // narrowed review is the reviewer's own choice and is never cut; new words never are.
+    let heldBack = 0;
+    const limit = this.options.maxReviewsPerDay ?? null;
+    if (focus === null && limit !== null) {
+      const done = repository.studyDayCounts === undefined ? 0 : (await repository.studyDayCounts(today)).reviews;
+      let room = Math.max(0, limit - done);
+      queue = queue.filter((item) => {
+        if (item.fsrs == null) return true;
+        if (room > 0) {
+          room -= 1;
+          return true;
+        }
+        heldBack += 1;
+        return false;
+      });
     }
 
     const skipped = [...invalid];
@@ -313,6 +337,7 @@ export class ReviewService {
       capabilities: repository.capabilities,
       scheduler: 'fsrs',
       fsrsOnly: true,
+      heldBack,
       focus: focus?.kind === 'weak' ? 'weak' : null,
       selection: focus?.kind === 'selection',
       skipped,
