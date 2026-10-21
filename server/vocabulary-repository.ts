@@ -95,6 +95,16 @@ export type FsrsReviewResult =
   | { outcome: 'conflict' | 'suspended' | 'undone'; state: FsrsCardState | null }
   | { outcome: 'not_found' };
 
+/** How one day stood against the two daily goals (FSRS alone). */
+export interface StudyDayRow {
+  day: IsoDate;
+  newWords: number;
+  reviews: number;
+  newGoal: number;
+  reviewGoal: number;
+  met: boolean;
+}
+
 export type FsrsUndoResult =
   | { outcome: 'undone' | 'already_undone'; id: string; state: FsrsCardState }
   | { outcome: 'not_latest' | 'conflict'; id: string; state: FsrsCardState | null }
@@ -205,6 +215,12 @@ export interface VocabularyRepository {
   applyFsrsReview?(write: FsrsReviewWrite): Promise<FsrsReviewResult>;
   /** Takes back one answer under FSRS alone. Only where `capabilities.fsrsOnly`. */
   undoFsrsReview?(input: { reviewRequestId: string; requestId: string }): Promise<FsrsUndoResult>;
+  /** What a day's answers count towards the goals: words brought into study, and due words reviewed. */
+  studyDayCounts?(day: IsoDate): Promise<{ newWords: number; reviews: number }>;
+  /** Records how a day stands. A met day stays met; returns whether it is met now. */
+  recordStudyDay?(row: StudyDayRow): Promise<boolean>;
+  /** Every day recorded as met, oldest first. */
+  listMetStudyDays?(): Promise<IsoDate[]>;
   /** What a session saved; `null` if there is no such session or the store keeps none. */
   sessionSummary(sessionId: string): Promise<SessionSummary | null>;
   /** Every live word with both of its schedules, for comparing them. */

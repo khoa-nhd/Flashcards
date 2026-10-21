@@ -494,6 +494,116 @@ revoke all on function public.set_cards_suspended(uuid[], boolean) from anon, au
 grant execute on function public.set_cards_suspended(uuid[], boolean) to authenticated;
 
 -- ---------------------------------------------------------------------------
+-- The two daily goals and the streak
+-- ---------------------------------------------------------------------------
+
+-- One row per day the goals were looked at: what was done, against which
+-- goals, and whether both were met. A day that was met stays met, and a goal
+-- changed later never rewrites an earlier day. The streak is the run of met days.
+create table if not exists public.study_days (
+  user_id uuid not null default auth.uid() references auth.users (id) on delete cascade,
+  day date not null,
+  new_words integer not null default 0 check (new_words >= 0),
+  reviews integer not null default 0 check (reviews >= 0),
+  new_goal integer not null check (new_goal between 0 and 1000),
+  review_goal integer not null check (review_goal between 0 and 1000),
+  met boolean not null default false,
+  updated_at timestamptz not null default now(),
+  primary key (user_id, day)
+);
+
+alter table public.study_days enable row level security;
+
+drop policy if exists study_days_select on public.study_days;
+create policy study_days_select on public.study_days for select to authenticated
+  using (user_id = (select auth.uid()));
+drop policy if exists study_days_insert on public.study_days;
+create policy study_days_insert on public.study_days for insert to authenticated
+  with check (user_id = (select auth.uid()));
+drop policy if exists study_days_update on public.study_days;
+create policy study_days_update on public.study_days for update to authenticated
+  using (user_id = (select auth.uid())) with check (user_id = (select auth.uid()));
+
+revoke all on public.study_days from anon, authenticated, public;
+grant select, insert, update on public.study_days to authenticated;
+
+drop trigger if exists study_days_touch on public.study_days;
+create trigger study_days_touch before update on public.study_days
+  for each row execute function public.touch_updated_at();
+
+-- What one day of the caller's study counts towards the goals, from the
+-- answers saved under FSRS alone that still stand:
+--   new_words  words brought into study that day (their first answer ever)
+--   reviews    other words answered that day that were due when answered
+create or replace function public.study_day_counts(p_day date)
+returns table (new_words integer, reviews integer)
+language sql
+stable
+security invoker
+set search_path = ''
+as $$
+  with zone as (
+    select coalesce(
+      (select s.time_zone from public.user_settings s where s.user_id = (select auth.uid())),
+      'UTC'
+    ) as name
+  ),
+  answers as (
+    select
+      l.vocabulary_id,
+      coalesce(l.counted_as_new, false) as is_new,
+      case
+        when coalesce(l.counted_as_new, false) then false
+        when jsonb_typeof(l.fsrs_before) = 'object'
+          then (l.fsrs_before ->> 'due')::timestamptz < ((l.reviewed_on + 1)::timestamp at time zone (select z.name from zone z))
+        else l.due_on_before is null or l.due_on_before <= l.reviewed_on
+      end as was_due
+    from public.review_logs l
+    where l.user_id = (select auth.uid())
+      and l.kind = 'review'
+      and l.reviewed_on = p_day
+      and l.revision_after is not null
+      and not exists (select 1 from public.review_logs u where u.undoes_log_id = l.id)
+  )
+  select
+    (count(distinct a.vocabulary_id) filter (where a.is_new))::integer,
+    (count(distinct a.vocabulary_id) filter (where a.was_due))::integer
+  from answers a
+$$;
+
+revoke all on function public.study_day_counts(date) from anon, authenticated, public;
+grant execute on function public.study_day_counts(date) to authenticated;
+
+-- Records how a day stands. `met` only ever goes from false to true.
+-- Returns whether the day is met now.
+create or replace function public.record_study_day(
+  p_day date,
+  p_new_words integer,
+  p_reviews integer,
+  p_new_goal integer,
+  p_review_goal integer,
+  p_met boolean
+)
+returns boolean
+language sql
+security invoker
+set search_path = ''
+as $$
+  insert into public.study_days as d (user_id, day, new_words, reviews, new_goal, review_goal, met)
+  values ((select auth.uid()), p_day, p_new_words, p_reviews, p_new_goal, p_review_goal, p_met)
+  on conflict (user_id, day) do update
+    set new_words = excluded.new_words,
+        reviews = excluded.reviews,
+        new_goal = excluded.new_goal,
+        review_goal = excluded.review_goal,
+        met = d.met or excluded.met
+  returning d.met
+$$;
+
+revoke all on function public.record_study_day(date, integer, integer, integer, integer, boolean) from anon, authenticated, public;
+grant execute on function public.record_study_day(date, integer, integer, integer, integer, boolean) to authenticated;
+
+-- ---------------------------------------------------------------------------
 -- One-off: every studied word gets an FSRS state
 -- ---------------------------------------------------------------------------
 

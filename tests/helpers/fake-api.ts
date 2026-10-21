@@ -265,7 +265,7 @@ export function createFakeApi({
     fsrsOnly: false,
     goals: null,
     maxReviewsPerDay: null,
-    uiLanguage: 'vi',
+    uiLanguage: null,
     ...account,
   };
   let nextId = 500;

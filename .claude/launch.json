@@ -18,6 +18,15 @@
         "dev:mock"
       ],
       "port": 5174
+    },
+    {
+      "name": "flashcards-mock-fsrs",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": [
+        "run",
+        "dev:mock-fsrs"
+      ],
+      "port": 5175
     }
   ]
 }

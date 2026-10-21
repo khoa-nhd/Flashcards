@@ -24,6 +24,7 @@ import type {
   ReviewWrite,
   ReviewWriteResult,
   SetupReport,
+  StudyDayRow,
   UndoResult,
   VocabularyRepository,
   AiConversationRow,
@@ -396,6 +397,25 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     }
     if (state === null) return { outcome: 'not_found' };
     return { outcome: result.outcome, id: result.vocabulary_id, state };
+  }
+
+  async studyDayCounts(day: IsoDate): Promise<{ newWords: number; reviews: number }> {
+    const count = this.database.studyDayCounts;
+    if (!this.capabilities.fsrsOnly || count === undefined) return { newWords: 0, reviews: 0 };
+    const row = await count.call(this.database, day);
+    return { newWords: row.new_words, reviews: row.reviews };
+  }
+
+  async recordStudyDay(row: StudyDayRow): Promise<boolean> {
+    const record = this.database.recordStudyDay;
+    if (!this.capabilities.fsrsOnly || record === undefined) return row.met;
+    return record.call(this.database, row);
+  }
+
+  async listMetStudyDays(): Promise<IsoDate[]> {
+    const list = this.database.listMetStudyDays;
+    if (!this.capabilities.fsrsOnly || list === undefined) return [];
+    return list.call(this.database);
   }
 
   async setEntriesSuspended(ids: readonly string[], suspended: boolean): Promise<EntryData[]> {

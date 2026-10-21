@@ -13,6 +13,7 @@ import {
   queueResponseSchema,
   reviewActionResponseSchema,
   reviewUndoResponseSchema,
+  studyGoalsResponseSchema,
   vocabularyListResponseSchema,
   type VocabularyEntry,
 } from '../../shared/api.js';
@@ -70,6 +71,34 @@ describe('the schema version Settings reports', () => {
     expect(settings.database).toEqual({ version: LATEST_SCHEMA_VERSION, latest: RECOMMENDED_SCHEMA_VERSION });
     expect(RECOMMENDED_SCHEMA_VERSION).toBe(14);
     expect(settings.database!.version >= settings.database!.latest).toBe(true);
+  });
+});
+
+describe('settings kept from version 15', () => {
+  const settingsOf = async (user: TestUser) => accountSettingsSchema.parse(await (await call(app, user, '/api/settings')).json());
+  const save = (user: TestUser, body: Record<string, unknown>) => call(app, user, '/api/settings', { method: 'PUT', body });
+
+  it('keeps a daily review limit and an interface language, and can go back to following the browser', async () => {
+    expect(await settingsOf(alice)).toMatchObject({ fsrsOnly: true, maxReviewsPerDay: null, uiLanguage: null });
+    const saved = await save(alice, { maxReviewsPerDay: 50, uiLanguage: 'en' });
+    expect(saved.status).toBe(200);
+    expect(accountSettingsSchema.parse(await saved.json())).toMatchObject({ maxReviewsPerDay: 50, uiLanguage: 'en' });
+    expect(await settingsOf(alice)).toMatchObject({ maxReviewsPerDay: 50, uiLanguage: 'en' });
+
+    await save(alice, { maxReviewsPerDay: null, uiLanguage: null });
+    expect(await settingsOf(alice)).toMatchObject({ maxReviewsPerDay: null, uiLanguage: null });
+    // Another account is untouched throughout.
+    expect(await settingsOf(bob)).toMatchObject({ maxReviewsPerDay: null, uiLanguage: null });
+  });
+
+  it('refuses a limit outside 1 to 1000 and a language it does not have', async () => {
+    expect((await save(alice, { maxReviewsPerDay: 0 })).status).toBe(400);
+    expect((await save(alice, { uiLanguage: 'fr' })).status).toBe(400);
+  });
+
+  it('takes the FSRS-first name of the counting choice as the same setting', async () => {
+    await save(alice, { countReviewsTowardSchedule: false });
+    expect((await settingsOf(alice)).countReviewsTowardMastery).toBe(false);
   });
 });
 
@@ -335,5 +364,91 @@ describe('the version 15 file on a database with old data', () => {
         return copy;
       });
     expect(withoutTouch(after)).toEqual(withoutTouch(before));
+  });
+});
+
+describe('the two daily goals', () => {
+  const goalsOf = async (user: TestUser) =>
+    studyGoalsResponseSchema.parse(await (await call(app, user, '/api/study-goals')).json());
+  const setGoals = (user: TestUser, body: Record<string, unknown>) => call(app, user, '/api/study-goals', { method: 'PUT', body });
+  const yesterday = '2026-10-08';
+
+  it('suggests 10 new words and 30 reviews until goals are chosen, and records nothing before that', async () => {
+    const goals = await goalsOf(alice);
+    expect(goals).toMatchObject({ available: true, chosen: false, goals: { newWords: 10, reviews: 30, maintenanceMode: false } });
+    expect(goals.streak).toEqual({ current: 0, longest: 0, metToday: false });
+    expect(await db.admin('select * from public.study_days')).toEqual([]);
+  });
+
+  it('counts a word brought into study, meets the review goal when nothing is left due, and starts a streak', async () => {
+    expect((await setGoals(alice, { newWords: 1, reviews: 5 })).status).toBe(200);
+    const word = await addWord(alice, 'candid');
+    expect(await goalsOf(alice)).toMatchObject({ chosen: true, newWords: { done: 0, met: false }, streak: { current: 0 } });
+
+    await answer(alice, remember(word.id, 0));
+    const goals = await goalsOf(alice);
+    expect(goals.newWords).toEqual({ target: 1, done: 1, remaining: 0, met: true, exhausted: true });
+    // Nothing is due any more, so five reviews are not needed today.
+    expect(goals.reviews).toMatchObject({ target: 5, done: 0, met: true, exhausted: true });
+    expect(goals.streak).toEqual({ current: 1, longest: 1, metToday: true });
+  });
+
+  it('counts only due words as reviews, not words taken early', async () => {
+    await setGoals(alice, { newWords: 1, reviews: 1 });
+    const due = await addWord(alice, 'candid');
+    const early = await addWord(alice, 'lucid');
+    await answer(alice, remember(due.id, 0));
+    await answer(alice, remember(early.id, 0));
+    // Make one of them due again today, as if its day had come.
+    await db.admin(`update public.card_states set fsrs_due = '2026-10-08T00:00:00Z' where vocabulary_id = $1`, [due.id]);
+    await answer(alice, remember(due.id, 1));
+    await answer(alice, remember(early.id, 1, { allowNotDue: true }));
+    const goals = await goalsOf(alice);
+    expect(goals.newWords.done).toBe(2);
+    expect(goals.reviews.done).toBe(1);
+  });
+
+  it('keeps a met day met, even after its answer is taken back', async () => {
+    await setGoals(alice, { newWords: 1, reviews: 1 });
+    const word = await addWord(alice, 'candid');
+    const requestId = newId();
+    await answer(alice, { ...remember(word.id, 0), requestId });
+    expect((await goalsOf(alice)).streak.metToday).toBe(true);
+    await call(app, alice, '/api/review-undo', { method: 'POST', body: { reviewRequestId: requestId, requestId: newId() } });
+    const goals = await goalsOf(alice);
+    expect(goals.newWords.done).toBe(0);
+    expect(goals.streak).toMatchObject({ current: 1, metToday: true });
+  });
+
+  it('counts the streak back over met days, and keeps it from yesterday until today is met', async () => {
+    await setGoals(alice, { newWords: 1, reviews: 1 });
+    for (const day of ['2026-10-06', '2026-10-07', yesterday]) {
+      await db.admin(
+        `insert into public.study_days (user_id, day, new_words, reviews, new_goal, review_goal, met) values ($1, $2, 1, 1, 1, 1, true)`,
+        [alice.id, day],
+      );
+    }
+    await addWord(alice, 'candid');
+    expect((await goalsOf(alice)).streak).toEqual({ current: 3, longest: 3, metToday: false });
+    // Another account has a streak of its own.
+    expect((await goalsOf(bob)).streak.current).toBe(0);
+  });
+
+  it('lets the new-word goal be 0 only in maintenance mode', async () => {
+    const refused = await setGoals(alice, { newWords: 0, reviews: 30 });
+    expect(refused.status).toBe(400);
+    expect(apiErrorSchema.parse(await refused.json()).error.message).toContain('maintenance mode');
+    const maintenance = await setGoals(alice, { newWords: 0, reviews: 30, maintenanceMode: true });
+    expect(maintenance.status).toBe(200);
+    expect(studyGoalsResponseSchema.parse(await maintenance.json()).newWords).toMatchObject({ target: 0, met: true });
+  });
+
+  it('records the day as soon as an answer completes it, without the goals being opened', async () => {
+    await setGoals(alice, { newWords: 1, reviews: 1 });
+    const word = await addWord(alice, 'candid');
+    await answer(alice, remember(word.id, 0));
+    expect(await db.admin('select day::text as day, met from public.study_days where user_id = $1', [alice.id])).toEqual([
+      { day: TODAY, met: true },
+    ]);
   });
 });

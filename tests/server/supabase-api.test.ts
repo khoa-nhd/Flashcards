@@ -158,7 +158,7 @@ describe('a new account', () => {
       fsrsOnly: false,
       goals: null,
       maxReviewsPerDay: null,
-      uiLanguage: 'vi',
+      uiLanguage: null,
     });
   });
 

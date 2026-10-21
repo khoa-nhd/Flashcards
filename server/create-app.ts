@@ -13,6 +13,7 @@ import {
   dailyGoalSchema,
   importRequestSchema,
   archiveEntriesRequestSchema,
+  updateStudyGoalsRequestSchema,
   isoDateSchema,
   membershipRequestSchema,
   normalizeId,
@@ -42,6 +43,7 @@ import { DatabaseError } from './supabase/supabase-database.js';
 import type { VocabularyService } from './vocabulary-service.js';
 import { type AiService } from './ai-service-impl.js';
 import { AiError, AiErrorCode } from './ai-service.js';
+import type { StudyGoalsService } from './study-goals-service.js';
 import { AI_MODES } from './ai-service.js';
 
 export interface AppDependencies {
@@ -60,6 +62,8 @@ export interface AppDependencies {
   library?: LibraryService | null;
   /** The account's own export; `null` under the same conditions as `service`. */
   exporter?: ExportService | null;
+  /** The two daily goals and the streak, under FSRS alone; `null` where there are none. */
+  studyGoals?: StudyGoalsService | null;
 }
 
 /** What the current request may use. With accounts, all of it belongs to one signed-in user. */
@@ -71,6 +75,7 @@ interface Scope {
   exporter: ExportService | null;
   session: AccountSession | null;
   ai: AiService | null;
+  studyGoals: StudyGoalsService | null;
 }
 
 type AppEnv = { Variables: { scope: Scope } };
@@ -138,6 +143,7 @@ export function createApp({
   analytics = null,
   library = null,
   exporter = null,
+  studyGoals = null,
 }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
@@ -255,11 +261,12 @@ export function createApp({
         library: session.library,
         exporter: session.exporter,
         ai: session.ai,
+        studyGoals: session.studyGoals ?? null,
         session,
       });
       return next();
     }
-    c.set('scope', { review: service, vocabulary, analytics, library, exporter, ai: null, session: null });
+    c.set('scope', { review: service, vocabulary, analytics, library, exporter, ai: null, session: null, studyGoals });
     await next();
   });
 
@@ -332,7 +339,31 @@ export function createApp({
 
   app.post('/api/review-action', async (c) => {
     const request = await parseBody(c, reviewActionRequestSchema);
-    return c.json(await requireService(c).submitAction(request));
+    const response = await requireService(c).submitAction(request);
+    // A saved answer may complete today's goals; the day is recorded so the streak keeps it.
+    // The answer is saved whatever happens here, so a failure is logged, not reported.
+    const goals = c.get('scope').studyGoals;
+    if (goals !== null && response.outcome === 'applied') {
+      await goals.progress().catch((error: unknown) => {
+        const kind = error instanceof DatabaseError ? `database ${error.failure}` : error instanceof Error ? error.name : 'non-error';
+        console.error(`Recording the day's goals failed: ${kind}`);
+      });
+    }
+    return c.json(response);
+  });
+
+  // The two daily goals and the streak (FSRS as the only schedule).
+  const requireStudyGoals = (c: Context<AppEnv>): StudyGoalsService => {
+    const goals = c.get('scope').studyGoals;
+    if (goals === null) throw new HttpError(409, 'not_supported', 'Daily goals need the latest database update.');
+    return goals;
+  };
+
+  app.get('/api/study-goals', async (c) => c.json(await requireStudyGoals(c).progress()));
+
+  app.put('/api/study-goals', async (c) => {
+    const changes = await parseBody(c, updateStudyGoalsRequestSchema);
+    return c.json(await requireStudyGoals(c).save(changes));
   });
 
   // Practice in another study mode: judged and recorded, never moving a word's schedule.
@@ -432,7 +463,7 @@ export function createApp({
         fsrsOnly: session.fsrsOnly ?? false,
         goals: session.goals ?? null,
         maxReviewsPerDay: session.maxReviewsPerDay ?? null,
-        uiLanguage: session.uiLanguage ?? 'vi',
+        uiLanguage: session.uiLanguage ?? null,
       };
     }
     if (config.timeZone === null) throw notConfigured();
@@ -447,7 +478,7 @@ export function createApp({
       fsrsOnly: false,
       goals: null,
       maxReviewsPerDay: null,
-      uiLanguage: 'vi',
+      uiLanguage: null,
     };
   };
 
@@ -458,7 +489,24 @@ export function createApp({
     if (session === null) {
       throw new HttpError(409, 'not_editable', 'The sample data has no account to keep settings in.');
     }
-    const { timeZone, fsrsRetention, countReviewsTowardMastery } = await parseBody(c, updateSettingsRequestSchema);
+    const request = await parseBody(c, updateSettingsRequestSchema);
+    const { timeZone, fsrsRetention, maxReviewsPerDay, uiLanguage } = request;
+    // The FSRS-first name and the older one are the same setting.
+    const countReviewsTowardMastery = request.countReviewsTowardSchedule ?? request.countReviewsTowardMastery;
+    if (
+      (maxReviewsPerDay !== undefined && session.saveMaxReviewsPerDay === undefined) ||
+      (uiLanguage !== undefined && session.saveUiLanguage === undefined)
+    ) {
+      throw new HttpError(409, 'not_supported', 'This setting needs the latest database update.');
+    }
+    const savedLimit =
+      maxReviewsPerDay === undefined || session.saveMaxReviewsPerDay === undefined
+        ? session.maxReviewsPerDay
+        : await session.saveMaxReviewsPerDay(maxReviewsPerDay);
+    const savedLanguage =
+      uiLanguage === undefined || session.saveUiLanguage === undefined
+        ? session.uiLanguage
+        : await session.saveUiLanguage(uiLanguage);
     const body: AccountSettings = {
       timeZone: timeZone === undefined ? session.timeZone : await session.saveTimeZone(timeZone),
       timeZoneEditable: true,
@@ -471,8 +519,8 @@ export function createApp({
           : await session.saveCountReviewsTowardMastery(countReviewsTowardMastery),
       fsrsOnly: session.fsrsOnly ?? false,
       goals: session.goals ?? null,
-      maxReviewsPerDay: session.maxReviewsPerDay ?? null,
-      uiLanguage: session.uiLanguage ?? 'vi',
+      maxReviewsPerDay: savedLimit ?? null,
+      uiLanguage: savedLanguage ?? null,
     };
     return c.json(body);
   });

@@ -9,10 +9,16 @@ import type { ReviewAction, ReviewState } from '../../shared/review-logic.js';
 import { normalizeWord } from '../../shared/text.js';
 import { DEFAULT_SCHEDULER, type SchedulerId } from '../../shared/scheduler/active.js';
 import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
+import { stabilityForLevel } from '../../shared/scheduler/strength.js';
 import type { CardFieldConfig, StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
 import type {
   ConfidenceStat,
+  FsrsCardState,
+  FsrsReviewResult,
+  FsrsReviewWrite,
+  FsrsUndoResult,
+  StudyDayRow,
   PracticeDailyStat,
   PracticeHistoryRow,
   PracticeWrite,
@@ -79,8 +85,23 @@ interface StoredWord {
   lastEditedTime: string;
   /** Kept beside the mastery schedule, as in the real store. */
   fsrs?: StoredFsrs | null;
+  /** The day a word FSRS has not seen yet comes up (FSRS alone only). */
+  dueOn?: IsoDate | null;
   revision: number;
   suspended: boolean;
+}
+
+/** What an answer under FSRS alone did, as the real store's history keeps it. */
+interface FsrsLogDetail {
+  revisionBefore: number;
+  revisionAfter: number;
+  dueOnBefore: IsoDate | null;
+  dueOnAfter: IsoDate | null;
+  counted: boolean;
+  /** The word's first answer ever: the day it was brought into study. */
+  newWord?: boolean;
+  /** It was due when it was answered. */
+  wasDue?: boolean;
 }
 
 interface MockLog {
@@ -106,6 +127,36 @@ interface MockLog {
   reviewMode: string;
   /** When it was recorded. */
   at: string;
+  /** Present for an answer saved under FSRS alone. */
+  fsrsOnly?: FsrsLogDetail;
+}
+
+/** The instant a calendar day starts in a time zone. */
+function startOfDay(date: IsoDate, timeZone: string): Date {
+  const utcMidnight = Date.parse(`${date}T00:00:00.000Z`);
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(utcMidnight));
+  const part = (type: string) => Number(parts.find((item) => item.type === type)?.value ?? 0);
+  const asLocal = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'));
+  return new Date(utcMidnight - (asLocal - utcMidnight));
+}
+
+export interface MockOptions {
+  /**
+   * FSRS as the only schedule, as a database at schema version 15 has it. The
+   * sample words are converted the way the version 15 file converts real ones.
+   */
+  fsrsOnly?: boolean;
+  /** The reviewer's zone, for the day an estimated FSRS state falls due. */
+  timeZone?: string;
 }
 
 /** In-memory sample vocabulary. Nothing here is ever stored anywhere. */
@@ -123,7 +174,6 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     library: true,
     aiChat: true,
     weakRecovery: true,
-    // The sample words keep the mastery schedule until the FSRS-only screens exist.
     fsrsOnly: false,
   };
 
@@ -137,11 +187,15 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
   private readonly words = new Map<string, StoredWord>();
   private readonly logs: MockLog[] = [];
   private created = 0;
+  private readonly timeZone: string;
 
   constructor(
     today: IsoDate,
     private readonly now: () => Date = () => new Date(),
+    options: MockOptions = {},
   ) {
+    this.capabilities = { ...this.capabilities, fsrsOnly: options.fsrsOnly === true };
+    this.timeZone = options.timeZone ?? 'UTC';
     SEEDS.forEach((seed, index) => {
       const [word, partOfSpeech, pronunciation, mastery, dueInDays, addedDaysAgo, meaning, definition, example] = seed;
       const id = `00000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`;
@@ -164,6 +218,39 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         suspended: false,
       });
     });
+    if (options.fsrsOnly === true) this.convertToFsrs(options.timeZone ?? 'UTC');
+  }
+
+  /**
+   * What the version 15 file does to real words: a studied word (mastery above
+   * the starting 1) gets an FSRS state estimated from its mastery, due on its
+   * old review day; a word never studied stays new.
+   */
+  private convertToFsrs(timeZone: string): void {
+    for (const word of this.words.values()) {
+      if (word.mastery <= 1) {
+        word.dueOn = word.reviewDate;
+        continue;
+      }
+      const stability = Math.max(0.5, stabilityForLevel(word.mastery));
+      const due = word.reviewDate === null ? this.now() : startOfDay(word.reviewDate, timeZone);
+      const lastReview = new Date(due.getTime() - stability * 86_400_000);
+      word.fsrs = {
+        engine: 'legacy-mapped',
+        state: {
+          due: due.toISOString(),
+          stability,
+          difficulty: 5,
+          scheduledDays: Math.max(0, Math.round(stability)),
+          learningSteps: 0,
+          reps: 0,
+          lapses: 0,
+          state: 2,
+          lastReview: lastReview.toISOString(),
+        },
+      };
+      word.dueOn = null;
+    }
   }
 
   private live(): StoredWord[] {
@@ -247,6 +334,172 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       at: this.now().toISOString(),
     });
     return { outcome: 'applied', state: write.next };
+  }
+
+  /** How far the reviewer's zone is ahead of UTC on a day, so "the end of the day" means their day. */
+  private zoneOffsetMs(day: IsoDate): number {
+    const utcMidnight = Date.parse(`${day}T00:00:00.000Z`);
+    return utcMidnight - startOfDay(day, this.timeZone).getTime();
+  }
+
+  private fsrsCardState(word: StoredWord): FsrsCardState {
+    return { fsrs: word.fsrs ?? null, dueOn: word.fsrs ? null : (word.dueOn ?? null), revision: word.revision };
+  }
+
+  async applyFsrsReview(write: FsrsReviewWrite): Promise<FsrsReviewResult> {
+    const earlier = this.logs.find((log) => log.kind === 'review' && log.requestId === write.requestId);
+    if (earlier) {
+      const moved = this.words.get(earlier.wordId);
+      const state = moved ? this.fsrsCardState(moved) : null;
+      if (!this.stands(earlier)) return { outcome: 'undone', state };
+      return {
+        outcome: 'already_applied',
+        state: {
+          fsrs: earlier.fsrs?.after ?? earlier.fsrs?.before ?? null,
+          dueOn: earlier.fsrsOnly?.dueOnAfter ?? null,
+          revision: earlier.fsrsOnly?.revisionAfter ?? 0,
+        },
+      };
+    }
+    const word = this.words.get(normalizeId(write.id));
+    if (!word || word.trashed) return { outcome: 'not_found' };
+    if (word.revision !== write.expectedRevision) return { outcome: 'conflict', state: this.fsrsCardState(word) };
+    if (word.suspended) return { outcome: 'suspended', state: this.fsrsCardState(word) };
+
+    const before = word.fsrs ?? null;
+    const revisionBefore = word.revision;
+    const dueOnBefore = word.dueOn ?? null;
+    const newWord = before === null && !this.logs.some((log) => log.wordId === word.id && this.stands(log));
+    const dueAt = before === null ? null : Date.parse(before.state.due);
+    const endOfDay = Date.parse(`${addDays(write.reviewedOn, 1)}T00:00:00.000Z`) - this.zoneOffsetMs(write.reviewedOn);
+    const wasDue = !newWord && (dueAt === null ? dueOnBefore === null || dueOnBefore <= write.reviewedOn : dueAt < endOfDay);
+    if (write.countsTowardSchedule) {
+      if (write.after === null || write.engine === null) throw new Error('An answer that counts must carry its FSRS result.');
+      word.fsrs = { state: write.after, engine: write.engine };
+      word.dueOn = null;
+      word.revision += 1;
+      this.touch(word);
+    }
+    // Mastery and the review date are frozen: the history repeats them.
+    const frozen = this.stateOf(word);
+    this.logs.push({
+      sequence: this.logs.length + 1,
+      wordId: word.id,
+      requestId: write.requestId,
+      kind: 'review',
+      undoes: null,
+      action: write.action,
+      sessionId: write.sessionId,
+      reviewedOn: write.reviewedOn,
+      before: frozen,
+      after: frozen,
+      durationMs: write.durationMs,
+      fsrs: word.fsrs == null ? null : { before, after: word.fsrs },
+      confidence: write.confidence,
+      scheduler: 'fsrs',
+      reviewMode: 'flashcard',
+      at: write.answeredAt ?? this.now().toISOString(),
+      fsrsOnly: {
+        revisionBefore,
+        revisionAfter: word.revision,
+        dueOnBefore,
+        dueOnAfter: word.dueOn ?? null,
+        counted: write.countsTowardSchedule,
+        newWord,
+        wasDue,
+      },
+    });
+    return { outcome: 'applied', state: this.fsrsCardState(word) };
+  }
+
+  async undoFsrsReview(input: { reviewRequestId: string; requestId: string }): Promise<FsrsUndoResult> {
+    const target = this.logs.find((log) => log.kind === 'review' && log.requestId === input.reviewRequestId);
+    if (!target) return { outcome: 'not_found' };
+    const word = this.words.get(target.wordId);
+    const current = word && !word.trashed ? this.fsrsCardState(word) : null;
+    if (this.logs.some((log) => log.undoes === target.sequence)) {
+      return current === null ? { outcome: 'not_found' } : { outcome: 'already_undone', id: target.wordId, state: current };
+    }
+    if (!word || word.trashed || current === null) return { outcome: 'conflict', id: target.wordId, state: null };
+    const newer = this.logs.some((log) => log.wordId === target.wordId && log.sequence > target.sequence && this.stands(log));
+    if (newer) return { outcome: 'not_latest', id: target.wordId, state: current };
+
+    const detail = target.fsrsOnly;
+    if (detail === undefined) {
+      // Saved before FSRS was the only schedule: taken back the old way, and the revision moves on.
+      const legacy = await this.undoReview(input);
+      if (legacy.outcome !== 'undone') return { outcome: 'conflict', id: target.wordId, state: this.fsrsCardState(word) };
+      word.revision += 1;
+      return { outcome: 'undone', id: word.id, state: this.fsrsCardState(word) };
+    }
+    if (word.revision !== detail.revisionAfter) return { outcome: 'conflict', id: target.wordId, state: current };
+
+    const revisionBefore = word.revision;
+    const dueOnBefore = word.dueOn ?? null;
+    if (detail.counted) {
+      word.fsrs = target.fsrs?.before ?? null;
+      word.dueOn = detail.dueOnBefore;
+      word.revision += 1;
+      this.touch(word);
+    }
+    const frozen = this.stateOf(word);
+    this.logs.push({
+      sequence: this.logs.length + 1,
+      wordId: word.id,
+      requestId: input.requestId,
+      kind: 'undo',
+      undoes: target.sequence,
+      action: target.action,
+      sessionId: target.sessionId,
+      reviewedOn: target.reviewedOn,
+      before: frozen,
+      after: frozen,
+      durationMs: null,
+      fsrs: null,
+      confidence: null,
+      scheduler: 'fsrs',
+      reviewMode: target.reviewMode,
+      at: this.now().toISOString(),
+      fsrsOnly: { revisionBefore, revisionAfter: word.revision, dueOnBefore, dueOnAfter: word.dueOn ?? null, counted: detail.counted },
+    });
+    return { outcome: 'undone', id: word.id, state: this.fsrsCardState(word) };
+  }
+
+  private readonly studyDays = new Map<IsoDate, StudyDayRow>();
+
+  async studyDayCounts(day: IsoDate): Promise<{ newWords: number; reviews: number }> {
+    const fresh = new Set<string>();
+    const reviewed = new Set<string>();
+    for (const log of this.logs) {
+      const detail = log.fsrsOnly;
+      if (log.kind !== 'review' || log.reviewedOn !== day || detail === undefined || !this.stands(log)) continue;
+      if (detail.newWord) fresh.add(log.wordId);
+      else if (detail.wasDue) reviewed.add(log.wordId);
+    }
+    return { newWords: fresh.size, reviews: reviewed.size };
+  }
+
+  async recordStudyDay(row: StudyDayRow): Promise<boolean> {
+    const met = (this.studyDays.get(row.day)?.met ?? false) || row.met;
+    this.studyDays.set(row.day, { ...row, met });
+    return met;
+  }
+
+  async listMetStudyDays(): Promise<IsoDate[]> {
+    return [...this.studyDays.values()].filter((row) => row.met).map((row) => row.day).sort();
+  }
+
+  async setEntriesSuspended(ids: readonly string[], suspended: boolean): Promise<EntryData[]> {
+    if (!this.capabilities.fsrsOnly) return [];
+    const changed: EntryData[] = [];
+    for (const id of ids) {
+      const word = this.words.get(normalizeId(id));
+      if (!word || word.trashed || word.suspended === suspended) continue;
+      word.suspended = suspended;
+      word.revision += 1;
+      changed.push(toEntry(this.touch(word)));
+    }
+    return changed;
   }
 
   async findReview(requestId: string) {
@@ -638,6 +891,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       trashed: false,
       createdTime: timestamp,
       lastEditedTime: timestamp,
+      dueOn: entry.dueOn ?? (this.capabilities.fsrsOnly ? entry.reviewDate : null),
       revision: 0,
       suspended: false,
     };
@@ -825,6 +1079,9 @@ function toRecord(word: StoredWord): VocabularyRecord {
       example: word.example,
     },
     fsrs: word.fsrs ?? null,
+    dueOn: word.dueOn ?? null,
+    revision: word.revision,
+    suspended: word.suspended,
   };
 }
 
@@ -841,6 +1098,8 @@ function toEntry(word: StoredWord): EntryData {
     dateAdded: word.dateAdded,
     createdTime: word.createdTime,
     lastEditedTime: word.lastEditedTime,
+    fsrs: word.fsrs ?? null,
+    dueOn: word.dueOn ?? null,
     revision: word.revision ?? 0,
     suspended: word.suspended ?? false,
   };

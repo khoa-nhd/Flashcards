@@ -11,6 +11,8 @@ export interface Account {
 }
 
 /** Everything one request may do, bound to the account that made it and to nothing else. */
+import type { StudyGoalsService } from './study-goals-service.js';
+
 export interface AccountSession {
   account: Account;
   /** The zone that decides this account's "today". */
@@ -32,9 +34,15 @@ export interface AccountSession {
   goals: { newWords: number; reviews: number; maintenanceMode: boolean } | null;
   /** The most reviews offered in one day; `null` means show everything due. */
   maxReviewsPerDay: number | null;
-  /** The interface language. Word meanings stay Vietnamese. */
-  uiLanguage: 'vi' | 'en';
+  /** Needs schema version 15. */
+  saveMaxReviewsPerDay?(value: number | null): Promise<number | null>;
+  /** The interface language; `null` follows the browser. Word meanings stay Vietnamese. */
+  uiLanguage: 'vi' | 'en' | null;
+  /** Needs schema version 15. */
+  saveUiLanguage?(value: 'vi' | 'en' | null): Promise<'vi' | 'en' | null>;
   review: ReviewService;
+  /** The two daily goals and the streak; only where FSRS is the only schedule (schema version 15). */
+  studyGoals?: StudyGoalsService | null;
   vocabulary: VocabularyService;
   analytics: AnalyticsService;
   library: LibraryService;

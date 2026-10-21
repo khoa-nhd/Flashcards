@@ -32,6 +32,7 @@ import {
 import { createSupabaseLibraryStore } from './supabase-library.js';
 import { SupabaseVocabularyRepository } from './supabase-repository.js';
 import { createAiService, loadAiConfig } from '../ai-service-impl.js';
+import { StudyGoalsService, createStudyGoalStore } from '../study-goals-service.js';
 import { AiError, AiErrorCode } from '../ai-service.js';
 
 export interface TokenVerifier {
@@ -184,7 +185,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
             countReviewsTowardMastery: null,
             studyGoals: null,
             maxReviewsPerDay: null,
-            uiLanguage: 'vi',
+            uiLanguage: null,
           },
           at: (now ?? (() => new Date()))().getTime(),
         });
@@ -237,9 +238,23 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         fsrsOnly,
         goals: settings?.studyGoals ?? null,
         maxReviewsPerDay: settings?.maxReviewsPerDay ?? null,
-        uiLanguage: settings?.uiLanguage ?? 'vi',
+        uiLanguage: settings?.uiLanguage ?? null,
         review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, now }),
         vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, fsrsOnly, now }),
+        studyGoals: fsrsOnly
+          ? new StudyGoalsService({
+              repository,
+              timeZone,
+              now,
+              store: createStudyGoalStore(settings?.studyGoals ?? null, async (goals) => {
+                const save = database.saveStudyGoals;
+                if (save === undefined) throw new DatabaseError('schema_missing', 'Daily goals need the latest database update.');
+                const saved = await save.call(database, goals);
+                forgetSettings(account.id);
+                return saved;
+              }),
+            })
+          : null,
         analytics: new AnalyticsService({
           repository,
           catalog: repository,
@@ -298,6 +313,27 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
             throw new DatabaseError('invalid', 'This setting needs the latest database update.');
           }
           const saved = await database.saveCountReviewsTowardMastery(next);
+          forgetSettings(account.id);
+          return saved;
+        },
+        async saveMaxReviewsPerDay(next) {
+          const save = database.saveMaxReviewsPerDay;
+          if (schemaVersion < 15 || save === undefined) {
+            throw new DatabaseError('invalid', 'This setting needs the latest database update.');
+          }
+          if (next !== null && (!Number.isInteger(next) || next < 1 || next > 1000)) {
+            throw new DatabaseError('invalid', 'The daily review limit must be a whole number from 1 to 1000.');
+          }
+          const saved = await save.call(database, next);
+          forgetSettings(account.id);
+          return saved;
+        },
+        async saveUiLanguage(next) {
+          const save = database.saveUiLanguage;
+          if (schemaVersion < 15 || save === undefined) {
+            throw new DatabaseError('invalid', 'This setting needs the latest database update.');
+          }
+          const saved = await save.call(database, next);
           forgetSettings(account.id);
           return saved;
         },

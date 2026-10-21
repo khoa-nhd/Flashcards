@@ -139,7 +139,7 @@ describe('with accounts', () => {
       fsrsOnly: false,
       goals: null,
       maxReviewsPerDay: null,
-      uiLanguage: 'vi',
+      uiLanguage: null,
     };
     const calls = stubFetch(ok(settings), ok({ ...settings, timeZone: 'Asia/Tokyo' }), ok({ entries: [] }));
     const api = createAppApi(signedIn(['a.b.c', 'a.b.c', 'a.b.c']));

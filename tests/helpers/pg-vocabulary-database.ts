@@ -29,6 +29,7 @@ import {
   cardRowSchema,
   fsrsReviewRowSchema,
   fsrsUndoRowSchema,
+  studyDayCountsRowSchema,
   practiceEvent,
   practiceOutcomeSchema,
   practiceStatRowSchema,
@@ -621,6 +622,73 @@ export function createPgVocabularyDatabase(
         ),
       );
       return rows[0]?.count ?? value;
+    },
+
+    async saveStudyGoals(goal) {
+      const rows = await run((session) =>
+        session.query<{ new_words: number; reviews: number; maintenance: boolean }>(
+          `insert into public.user_settings (study_goal_new_words, study_goal_reviews, maintenance_mode) values ($1, $2, $3)
+           on conflict (user_id) do update set study_goal_new_words = excluded.study_goal_new_words,
+             study_goal_reviews = excluded.study_goal_reviews, maintenance_mode = excluded.maintenance_mode
+           returning study_goal_new_words as new_words, study_goal_reviews as reviews, maintenance_mode as maintenance`,
+          [goal.newWords, goal.reviews, goal.maintenanceMode],
+        ),
+      );
+      const saved = rows[0];
+      return saved === undefined ? goal : { newWords: saved.new_words, reviews: saved.reviews, maintenanceMode: saved.maintenance };
+    },
+
+    async studyDayCounts(day) {
+      const rows = await run((session) =>
+        session.query<Row>(`select new_words, reviews from public.study_day_counts($1::date)`, [day]),
+      );
+      return studyDayCountsRowSchema.parse(rows[0] ?? { new_words: 0, reviews: 0 });
+    },
+
+    async recordStudyDay(row) {
+      const rows = await run((session) =>
+        session.query<{ met: boolean }>(`select public.record_study_day($1::date, $2, $3, $4, $5, $6) as met`, [
+          row.day,
+          row.newWords,
+          row.reviews,
+          row.newGoal,
+          row.reviewGoal,
+          row.met,
+        ]),
+      );
+      return rows[0]?.met === true;
+    },
+
+    async listMetStudyDays() {
+      const rows = await run((session) =>
+        session.query<{ day: string }>(`select day::text as day from public.study_days where met order by day`),
+      );
+      return rows.map((row) => row.day);
+    },
+
+    async saveMaxReviewsPerDay(value) {
+      const rows = await run((session) =>
+        session.query<{ daily_limit: number | null }>(
+          `insert into public.user_settings (max_reviews_per_day) values ($1)
+           on conflict (user_id) do update set max_reviews_per_day = excluded.max_reviews_per_day
+           returning max_reviews_per_day as daily_limit`,
+          [value],
+        ),
+      );
+      return rows[0]?.daily_limit ?? null;
+    },
+
+    async saveUiLanguage(value) {
+      const rows = await run((session) =>
+        session.query<{ language: string | null }>(
+          `insert into public.user_settings (ui_language) values ($1)
+           on conflict (user_id) do update set ui_language = excluded.ui_language
+           returning ui_language as language`,
+          [value],
+        ),
+      );
+      const saved = rows[0]?.language ?? null;
+      return saved === 'en' || saved === 'vi' ? saved : null;
     },
 
     async getTimeZone() {

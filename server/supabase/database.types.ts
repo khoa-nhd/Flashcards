@@ -118,6 +118,22 @@ export interface Database {
         Relationships: [];
       };
       /** From schema version 2. */
+      /** From schema version 15. */
+      study_days: {
+        Row: {
+          user_id: string;
+          day: string;
+          new_words: number;
+          reviews: number;
+          new_goal: number;
+          review_goal: number;
+          met: boolean;
+          updated_at: string;
+        };
+        Insert: { user_id?: string; day: string; new_words?: number; reviews?: number; new_goal: number; review_goal: number; met?: boolean };
+        Update: { new_words?: number; reviews?: number; new_goal?: number; review_goal?: number; met?: boolean };
+        Relationships: [];
+      };
       study_sessions: {
         Row: { id: string; user_id: string; mode: string; started_at: string; ended_at: string | null };
         Insert: { id: string; user_id?: string; mode?: string };
@@ -381,6 +397,16 @@ export interface Database {
       undo_fsrs_review: {
         Args: { p_review_request_id: string; p_request_id: string };
         Returns: Array<{ outcome: string; vocabulary_id: string | null; revision: number | null; due_on: string | null; fsrs: unknown }>;
+      };
+      /** From schema version 15. */
+      study_day_counts: {
+        Args: { p_day: string };
+        Returns: Array<{ new_words: number; reviews: number }>;
+      };
+      /** From schema version 15. */
+      record_study_day: {
+        Args: { p_day: string; p_new_words: number; p_reviews: number; p_new_goal: number; p_review_goal: number; p_met: boolean };
+        Returns: boolean;
       };
       /** From schema version 15. */
       set_cards_suspended: {

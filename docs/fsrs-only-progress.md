@@ -12,7 +12,7 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 |---|---|
 | Nhánh làm việc | `main` (chủ dự án yêu cầu gộp vào `main` ngày 2026-10-21; nhánh `fsrs-only` đã gộp và xóa). **Chưa push** |
 | Typecheck / lint / build | Sạch |
-| Test | 76 file, 1880 test, tất cả đạt |
+| Test | 78 file, 1906 test, tất cả đạt |
 | Migration v15 | Đã viết: `supabase/migrations/20261029090000_fsrs_only.sql`. **Chưa chạy trên database thật** |
 | Server (lưu, Undo, archive, hàng đợi) | Xong và có test qua HTTP thật + schema thật + RLS |
 | Giao diện (Phase 4) | **Chưa bắt đầu** |
@@ -75,6 +75,26 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 - Gửi `expectedRevision` cùng câu trả lời khi thẻ có revision (`session-controller.ts`, `offline/ops.ts`, `offline/send.ts`).
 - Sau Undo, thẻ hiện lại mang revision mới từ server (`session-machine.ts`), nên trả lời lại không bị từ chối.
 
+### Bản dữ liệu mẫu FSRS (`npm run dev:mock-fsrs`, cổng 5175)
+
+- `MockVocabularyRepository` có tùy chọn `fsrsOnly`: đổi các từ mẫu giống cách v15 đổi từ thật, lưu/Undo theo
+  revision, archive, mục tiêu ngày. `npm run dev:mock` (cổng 5174) vẫn là đường mastery cũ.
+- Launch config `flashcards-mock-fsrs` trong `.claude/launch.json`. Đã thử bằng click thật: trả lời → Undo → trả lời lại.
+
+### Cài đặt và mục tiêu ngày
+
+- `PUT /api/settings` lưu thật `maxReviewsPerDay` và `uiLanguage` (trước đó bị bỏ qua); `uiLanguage: null` = theo trình duyệt;
+  `countReviewsTowardSchedule` là tên mới của `countReviewsTowardMastery`.
+- Hai mục tiêu ngày (`shared/study-goals.ts`, `server/study-goals-service.ts`, `GET/PUT /api/study-goals`):
+  - Từ mới = số từ được đưa vào học lần đầu trong ngày (`counted_as_new`).
+  - Review = số từ **đến hạn** được ôn trong ngày (ôn sớm không tính); đạt luôn khi không còn từ đến hạn.
+  - Hết từ mới không tự đạt; maintenance mode cho phép mục tiêu từ mới = 0. Mục tiêu review ít nhất 1.
+  - Ngày đạt cả hai được ghi vào bảng `study_days` (thêm vào v15) ngay sau mỗi câu trả lời. Ngày đã đạt thì giữ là
+    đạt (kể cả khi Undo sau đó), đổi mục tiêu không sửa ngày cũ. Streak = chuỗi ngày đạt liên tiếp; còn giữ từ
+    hôm qua cho tới khi hôm nay đạt.
+  - Trước khi người dùng chọn mục tiêu (`chosen: false`), app gợi ý 10 + 30 nhưng **không ghi ngày nào**.
+    Đây là chỗ tôi tự quyết (chủ dự án nói onboarding sẽ hỏi); đổi được nếu muốn.
+
 ### Test mới
 
 - `tests/server/fsrs-only-api.test.ts` (18): từ mới, trả lời, trùng request, thiết bị cũ, câu trả lời không tính,
@@ -91,7 +111,7 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 
 | Phase | Còn thiếu |
 |---|---|
-| 3. Server/API | Route mục tiêu ngày (`/api/goals` hai mục tiêu, streak cần cả hai, maintenance mode); đếm "từ mới" bằng `counted_as_new`; trần review/ngày (`max_reviews_per_day`); lưu `ui_language`; weak words theo rủi ro FSRS; analytics/insights theo strength; bỏ chỉnh mastery/ngày ở `PATCH /api/vocabulary/:id` cho rõ ràng (hiện server bỏ qua phần lịch); **mock repository** (`npm run dev:mock`) chưa có chế độ FSRS-only, cần có để làm giao diện |
+| 3. Server/API | Áp trần review/ngày vào hàng đợi (đã lưu được, chưa dùng); weak words theo rủi ro FSRS; analytics/insights theo strength; bỏ chỉnh mastery/ngày ở `PATCH /api/vocabulary/:id` cho rõ ràng (hiện server bỏ qua phần lịch) |
 | 4. Giao diện | Tất cả: StrengthPill, thẻ thu gọn từ level 6 + nút mở, Bank (cột/lọc Sức nhớ, archive hàng loạt, lọc Archived), Dashboard hai vòng mục tiêu + phân bố strength, Settings (retention nâng cao, ngôn ngữ, mục tiêu, maintenance mode), đổi tên Practice score, onboarding 3 màn, switcher VI/EN, import hỏi rải theo từ/ngày (mặc định 20) |
 | 5. Export/import/offline, v16 | Export v2, đọc file v1; offline đã gửi `expectedRevision` nhưng cần xử lý 409 bằng tải lại thẻ; migration dọn dẹp v16 |
 | 6. Kiểm thử, docs, rollout | Kiểm tra thủ công trước production (mục 10 của kế hoạch); hướng dẫn chủ dự án chạy v15 |
@@ -120,10 +140,9 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 
 ## 6. Bắt đầu làm tiếp
 
-1. Cho mock repository chế độ FSRS-only để làm giao diện với `npm run dev:mock`.
-2. Phase 3 còn lại: mục tiêu ngày + streak, trần review/ngày, ngôn ngữ, weak words theo FSRS.
-3. Phase 4: giao diện, kiểm tra bằng click thật trong trình duyệt (cả điện thoại và máy tính).
-4. Phase 5, 6; nâng `RECOMMENDED_SCHEMA_VERSION` lên 15; rồi mới hướng dẫn chủ dự án chạy v15 và deploy.
+1. Phase 3 còn lại: trần review/ngày trong hàng đợi, weak words và thống kê theo FSRS.
+2. Phase 4: giao diện, làm trên `npm run dev:mock-fsrs`, kiểm tra bằng click thật (cả điện thoại và máy tính).
+3. Phase 5, 6; nâng `RECOMMENDED_SCHEMA_VERSION` lên 15; rồi mới hướng dẫn chủ dự án chạy v15 và deploy.
 
 Lệnh kiểm tra:
 

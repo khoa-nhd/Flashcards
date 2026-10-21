@@ -159,6 +159,12 @@ export const fsrsUndoRowSchema = z.object({
 
 export type FsrsUndoRow = z.infer<typeof fsrsUndoRowSchema>;
 
+/** What `study_day_counts` reports (schema version 15). */
+export const studyDayCountsRowSchema = z.object({
+  new_words: z.coerce.number().int().min(0),
+  reviews: z.coerce.number().int().min(0),
+});
+
 /** One answer as `record_fsrs_review` takes it. */
 export interface FsrsReviewArgs {
   id: string;
@@ -220,7 +226,8 @@ export interface StoredSettings {
   /** FSRS-first goals, where the database keeps them. */
   studyGoals: { newWords: number; reviews: number; maintenanceMode: boolean } | null;
   maxReviewsPerDay: number | null;
-  uiLanguage: 'vi' | 'en';
+  /** `null` follows the browser. */
+  uiLanguage: 'vi' | 'en' | null;
 }
 
 export const reviewWriteResultSchema = z.object({
@@ -514,6 +521,19 @@ export interface VocabularyDatabase {
   recordFsrsReview?(args: FsrsReviewArgs): Promise<FsrsReviewRow>;
   /** Takes an answer back under FSRS alone. Needs schema version 15. */
   undoFsrsReview?(args: { reviewRequestId: string; requestId: string }): Promise<FsrsUndoRow>;
+  /** Needs schema version 15. */
+  studyDayCounts?(day: IsoDate): Promise<{ new_words: number; reviews: number }>;
+  /** Needs schema version 15. Returns whether the day is met now. */
+  recordStudyDay?(row: {
+    day: IsoDate;
+    newWords: number;
+    reviews: number;
+    newGoal: number;
+    reviewGoal: number;
+    met: boolean;
+  }): Promise<boolean>;
+  /** Needs schema version 15. Oldest first. */
+  listMetStudyDays?(): Promise<IsoDate[]>;
   setCardTrashed(id: string, trashed: boolean): Promise<boolean>;
   applyReview(args: ReviewWriteArgs): Promise<ReviewWriteRow>;
   findReviewByRequestId(requestId: string): Promise<{ mastery: number; reviewDate: IsoDate | null } | null>;
@@ -609,7 +629,7 @@ export interface VocabularyDatabase {
   /** Needs schema version 15. */
   saveMaxReviewsPerDay?(value: number | null): Promise<number | null>;
   /** Needs schema version 15. */
-  saveUiLanguage?(value: 'vi' | 'en'): Promise<'vi' | 'en'>;
+  saveUiLanguage?(value: 'vi' | 'en' | null): Promise<'vi' | 'en' | null>;
   getTimeZone(): Promise<string | null>;
   /** Stores the zone only if the user has none yet; returns the one in effect. */
   ensureTimeZone(timeZone: string): Promise<string>;
@@ -695,7 +715,7 @@ export const settingsColumns = (schemaVersion: number): string =>
 
 export function settingsFromRow(row: SettingsRow, schemaVersion: number): StoredSettings {
   const retention = row.fsrs_request_retention == null ? null : Number(row.fsrs_request_retention);
-  const language = row.ui_language === 'en' ? 'en' : 'vi';
+  const language = row.ui_language === 'en' || row.ui_language === 'vi' ? row.ui_language : null;
   return {
     timeZone: row.time_zone,
     fsrsRetention: retention !== null && Number.isFinite(retention) ? retention : null,
@@ -714,16 +734,17 @@ export function settingsFromRow(row: SettingsRow, schemaVersion: number): Stored
     // A database that cannot keep the choice counts every review, as it always did.
     // From version 15 the same choice decides whether an answer moves the FSRS schedule.
     countReviewsTowardMastery: schemaVersion >= 13 ? row.count_reviews_toward_mastery !== false : null,
+    // Null until the reviewer has chosen; the app then suggests a pair.
     studyGoals:
-      schemaVersion >= 15
+      schemaVersion >= 15 && row.study_goal_new_words != null && row.study_goal_reviews != null
         ? {
-            newWords: row.study_goal_new_words ?? 10,
-            reviews: row.study_goal_reviews ?? 30,
+            newWords: row.study_goal_new_words,
+            reviews: row.study_goal_reviews,
             maintenanceMode: row.maintenance_mode === true,
           }
         : null,
     maxReviewsPerDay: schemaVersion >= 15 ? (row.max_reviews_per_day ?? null) : null,
-    uiLanguage: schemaVersion >= 15 ? language : 'vi',
+    uiLanguage: schemaVersion >= 15 ? language : null,
   };
 }
 
@@ -1540,7 +1561,7 @@ export function createSupabaseDatabase(
         .select('ui_language')
         .single();
       if (error) throw toDatabaseError(error, status);
-      return data.ui_language === 'en' ? 'en' : 'vi';
+      return data.ui_language === 'en' || data.ui_language === 'vi' ? data.ui_language : null;
     },
 
     async recordFsrsReview(args) {
@@ -1568,6 +1589,38 @@ export function createSupabaseDatabase(
         throw new DatabaseError('unavailable', 'The database did not confirm the review.');
       }
       return rows.data[0];
+    },
+
+    async studyDayCounts(day) {
+      if (schemaVersion < 15) throw new DatabaseError('schema_missing', 'This database cannot count daily goals yet.');
+      const { data, error, status } = await client.rpc('study_day_counts', { p_day: day });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(studyDayCountsRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned goal counts in an unexpected shape.');
+      return rows.data[0] ?? { new_words: 0, reviews: 0 };
+    },
+
+    async recordStudyDay(row) {
+      if (schemaVersion < 15) throw new DatabaseError('schema_missing', 'This database cannot keep daily goals yet.');
+      const { data, error, status } = await client.rpc('record_study_day', {
+        p_day: row.day,
+        p_new_words: row.newWords,
+        p_reviews: row.reviews,
+        p_new_goal: row.newGoal,
+        p_review_goal: row.reviewGoal,
+        p_met: row.met,
+      });
+      if (error) throw toDatabaseError(error, status);
+      return data === true;
+    },
+
+    async listMetStudyDays() {
+      if (schemaVersion < 15) return [];
+      const { data, error, status } = await client.from('study_days').select('day').eq('met', true).order('day');
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(z.object({ day: z.string().refine(isIsoDate) })).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned days in an unexpected shape.');
+      return rows.data.map((row) => row.day);
     },
 
     async undoFsrsReview(args) {

@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "dev:mock": "vite --mode mock --port 5174",
+    "dev:mock-fsrs": "vite --mode mock-fsrs --port 5175",
     "supabase:import": "tsx scripts/supabase-import.ts",
     "supabase:verify": "tsx scripts/supabase-verify.ts",
     "emoji:generate": "tsx scripts/generate-emoji-pool.ts",

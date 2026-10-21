@@ -227,7 +227,7 @@ describe('access', () => {
       fsrsOnly: false,
       goals: null,
       maxReviewsPerDay: null,
-      uiLanguage: 'vi',
+      uiLanguage: null,
     });
     const change = await app.request('/api/settings', { ...post({ timeZone: 'UTC' }), method: 'PUT' });
     expect(change.status).toBe(409);

@@ -951,6 +951,8 @@ const goalPartProgressSchema = z.object({
 /** Today's two goals, their progress, and the streak that needs both. */
 export const studyGoalsResponseSchema = z.object({
   available: z.boolean(),
+  /** False until the reviewer has chosen; `goals` is then the suggested pair, and no day is recorded. */
+  chosen: z.boolean(),
   today: isoDateSchema,
   timeZone: z.string(),
   goals: studyGoalsSchema,
@@ -996,7 +998,7 @@ export const accountSettingsSchema = z.object({
   /** The most reviews offered in one day; `null` means show everything due. */
   maxReviewsPerDay: z.number().int().min(1).max(1000).nullable().default(null),
   /** The interface language. Word meanings stay Vietnamese. */
-  uiLanguage: uiLanguageSchema.default('vi'),
+  uiLanguage: uiLanguageSchema.nullable().default(null),
 });
 
 export const updateSettingsRequestSchema = z
@@ -1006,7 +1008,8 @@ export const updateSettingsRequestSchema = z
     countReviewsTowardMastery: z.boolean().optional(),
     countReviewsTowardSchedule: z.boolean().optional(),
     maxReviewsPerDay: z.number().int().min(1).max(1000).nullable().optional(),
-    uiLanguage: uiLanguageSchema.optional(),
+    /** `null` goes back to following the browser. */
+    uiLanguage: uiLanguageSchema.nullable().optional(),
   })
   .refine(
     (value) =>

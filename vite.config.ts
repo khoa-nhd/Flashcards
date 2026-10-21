@@ -14,9 +14,11 @@ function apiDevServer(): Plugin {
     name: 'flashcard-api-dev-server',
     apply: (_config, env) => env.command === 'serve' && env.mode !== 'test',
     configureServer(server) {
-      if (server.config.mode === 'mock') {
+      if (server.config.mode === 'mock' || server.config.mode === 'mock-fsrs') {
         // `npm run dev:mock`: built-in sample words and no database, whatever .env says.
         process.env.DATA_MODE = 'mock';
+        // `npm run dev:mock-fsrs`: the same words with FSRS as the only schedule (schema version 15).
+        process.env.MOCK_FSRS_ONLY = server.config.mode === 'mock-fsrs' ? 'true' : 'false';
       } else {
         try {
           process.loadEnvFile();

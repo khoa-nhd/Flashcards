@@ -13,6 +13,7 @@ import { sampleRules } from './mock/sample-rules.js';
 import { ReviewService } from './review-service.js';
 import { createSchedulerStore } from './scheduler-store.js';
 import { createSupabaseAccounts } from './supabase/supabase-accounts.js';
+import { StudyGoalsService, createStudyGoalStore } from './study-goals-service.js';
 import { VocabularyService } from './vocabulary-service.js';
 
 /** Wires configuration, data source and routes together. Shared by every entry point. */
@@ -47,7 +48,12 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     return { app: createApp({ config, service: null }), config };
   }
   const { timeZone } = config;
-  const repository = new MockVocabularyRepository(calendarDateInTimeZone(new Date(), timeZone));
+  // `npm run dev:mock-fsrs`: the sample words with FSRS as the only schedule, as schema version 15 has it.
+  const fsrsOnly = env.MOCK_FSRS_ONLY === 'true';
+  const repository = new MockVocabularyRepository(calendarDateInTimeZone(new Date(), timeZone), undefined, {
+    fsrsOnly,
+    timeZone,
+  });
   // The sample data has no account, so its choice of schedule is kept in memory with everything else.
   const scheduler = createSchedulerStore();
   const service = new ReviewService({
@@ -66,6 +72,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     timeZone,
     writesRequested: true,
     scheduler,
+    fsrsOnly,
   });
   // The sample data has no account, so its goal is kept in memory with everything else.
   const goals = createGoalStore();
@@ -95,7 +102,11 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
       countReviewsTowardMastery: true,
     }),
   });
-  return { app: createApp({ config, service, vocabulary, analytics, library, exporter }), config };
+  // The sample data has no account either, so its two goals are kept in memory too.
+  const studyGoals = fsrsOnly
+    ? new StudyGoalsService({ repository, timeZone, store: createStudyGoalStore() })
+    : null;
+  return { app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals }), config };
 }
 
 let shared: ReturnType<typeof buildApp> | undefined;

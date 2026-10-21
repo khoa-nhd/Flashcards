@@ -111,7 +111,7 @@ export interface AccountApi {
     countReviewsTowardMastery?: boolean;
     countReviewsTowardSchedule?: boolean;
     maxReviewsPerDay?: number | null;
-    uiLanguage?: 'vi' | 'en';
+    uiLanguage?: 'vi' | 'en' | null;
   }): Promise<AccountSettings>;
   /** The two schedules side by side, and which of them is in charge. */
   fetchScheduler(): Promise<SchedulerReport>;
