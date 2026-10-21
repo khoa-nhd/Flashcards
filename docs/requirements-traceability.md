@@ -184,5 +184,6 @@ OPEN_DECISIONs live in the register (D-01…D-12).
 | **Total (95 rows)** | **78** | **9** | **8** |
 
 Cross-cutting: **G-01** hosted migrations v13–v19 — BLOCKED, no hosted credentials/CLI/config exist in this environment (verified: only `.env.example`, no `SUPABASE_URL`, no `supabase` CLI, no `supabase/config.toml`) — physically infeasible here, not merely awaiting approval.
-**G-02** real-browser verification — **closed for the surfaces changed this task**: dev-server browser session confirmed Home (Continue/Quick Actions), the four-area navigation with `aria-current`, Review flashcard, Discovery, Vocabulary maps, Insights, Vocabulary bank — no console error, correct titles; graph render/zoom and audio playback remain covered by integration tests only.
+**G-02** real-browser verification — **CLOSED**: every checklist item executed in a real browser (verification-record §4b–§4d) — Home/Continue/Quick Actions, four-area navigation with `aria-current`, Review/Discovery/Maps/Insights/Bank, **audio playback**, transcript seek + highlight + position persist/restore, graph render/zoom/pan/keyboard; 0 console errors.
+**G-17** hosted deploy — BLOCKED, no hosting CLI/credentials/runtime env (verification-record §4e feasibility check); the deploy *drill* against the production artifacts was executed.
 **OPEN_DECISION** — D-01/D-07/D-10 now decided (delegated self-approval, [gap & decision register](gap-and-decision-register.md)); D-02…D-12 carry recorded recommendations awaiting PO revision.

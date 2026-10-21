@@ -7,7 +7,8 @@
 > **Done in FC-MGMT-001 (this task):** navigation restructure to the four approved areas + Home
 > `Continue`/`Quick actions` (D-01/D-10 → items C1, C2); Focus Test on Exam + optional 25-min Pomodoro
 > block (items C5, C6); word-family edge-direction guidance in the AI prompt (D-07 → item B7);
-> real-browser verification of the changed surfaces (item A2, partial — remainder below).
+> real-browser verification of **all** G-02 surfaces (item A2 → done) and a local deploy drill
+> against the production artifacts (A1b drill — the hosted deploy itself is G-17, blocked).
 
 ## Ordering principles
 
@@ -25,7 +26,8 @@
 | # | Item | Closes | Needs | Effort |
 | --- | --- | --- | --- | --- |
 | A1 | Run & verify migrations **v13–v19 on hosted Supabase**, record checksums/migration state | **G-01** (UNVERIFIED → PASS_VERIFIED) | **PO approval for remote migration** (BLOCKED) | S (once approved) |
-| A2 | Real-browser verification pass: Discovery (audio plays/seek/captions, transcript scroll + position restore, read-aloud) & Maps (graph render, zoom/pan, keyboard, all 8 directions) | **G-02** (reduced: Home/nav/Review/Discovery/Maps/Insights/Bank already verified this task), remainder of A/C rows | Browser environment only | M |
+| A2 | ~~Real-browser verification pass~~ **DONE** — every G-02 checklist item executed in a real browser this task (verification-record §4b–§4d): audio plays, transcript seek/restore, graph render/zoom/pan/keyboard | **G-02 CLOSED** | — | done |
+| A1b | **Deploy to Vercel** (config ready in `vercel.json`; drill executed against the production artifacts) | **G-17** (BLOCKED — needs PO: hosting account/token, hosted Supabase env, AI key; runs after A1) | **PO credentials** | S once supplied |
 | A3 | PO walk-through of the traceability matrix (95 rows) + accept/reject the documented limits in D-06 | §14 criterion, **D-06** | PO time | S |
 | A4 | Apply PO verdicts from A3 to the matrix/register (statuses only change with new evidence) | maintenance | — | S |
 

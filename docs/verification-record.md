@@ -103,8 +103,7 @@ Dev server (`npm run dev`, `localhost:5173`) + desktop browser, exercised by scr
 | Navigation really works | Clicked Review → `/review`, `Review · Vocabulary`, flashcard rendered, Review link `aria-current="page"` (group Learn marked) |
 | Pages render without errors | `/discover` (Discovery), `/maps` (Vocabulary maps), `/insights` (Insights), `/bank` (Vocabulary bank) — correct h1/title, no `role="alert"` error |
 
-Not exercised in the browser (integration-tested only, remainder of G-02): audio playback, transcript
-scroll/seek, graph zoom/pan/keyboard.
+Original G-02 remainder (audio, transcript, graph) — **verified in §4d below**.
 
 ### 4c. Real-browser verification — Focus Test & Pomodoro (F-05)
 
@@ -124,12 +123,45 @@ Dev server (`localhost:5173`) + desktop browser, on `/exam`:
 Word-family edge direction (F-06) is server-side prompt content — verified by the maps-ai test
 (§4 targeted suites), not reachable from the browser without an AI key.
 
+### 4d. Real-browser verification — the rest of G-02 (audio, transcript, graph)
+
+Dev server (`localhost:5173`) + desktop browser. Test data created through the API: a Listening source
+(5 timestamped SRT cues) and a semantic map with 3 nodes + 1 edge.
+
+| Checked | Observed |
+| --- | --- |
+| Audio playback | Public MP3 address entered → `paused=false`, `readyState=4`, `currentTime` 0 → 1.38s after 1.5s (playing for real), `error=null` |
+| Transcript seek | Click `Seek to 0:15` → `audio.currentTime = 15` exactly |
+| Highlight follows time | The 0:15 cue carries `aria-current="true"` + accent background before and after the seek; the active cue switched at once |
+| Position persist | Server round-trip: source shows `position: {seconds: 15}` after the seek |
+| Position restore | Reload (the address is an input by design, re-entered) → metadata loads → `currentTime = 15` restored from `position.seconds`, correct cue active, `paused = true` — nothing starts on its own |
+| Transcript scroll | The container is a plain scrolling `<ol>` — **no auto-scroll feature exists** (by design); scroll is native, and it is the *time* position that is restored (above) |
+| Graph render | `/maps?map=<id>` → SVG `role="group"` “Map drawing: 3 items…”, 3 node labels, “Related to” edge row |
+| Graph zoom | Zoom in: viewBox `0 0 640 320` → `0 0 512 256`; two Zoom outs → `0 0 853.33 426.67`; Fit → `0 0 640 320` |
+| Graph pan | Pointer drag on the canvas background: viewBox x/y `0 0` → `-178.77 -133.33` → `-125.14 -100` (pan follows the drag; synthetic pointers only stubbed `setPointerCapture`, which a real mouse drag exercises natively) |
+| Graph keyboard | Focus a node (`tabIndex=0`) + real Enter key → that node `aria-pressed="true"`, the others `false` |
+| Console | 0 errors across the session |
+
+### 4e. Deploy drill (production artifacts, local)
+
+Feasibility check first: `vercel.json` exists (Vite → `dist/`, serverless `api/index.ts`, SPA rewrites),
+but **no CLI** (`vercel`/`netlify`/`docker` not installed), **no credentials** (`VERCEL_TOKEN`/
+`VERCEL_ORG_ID`/`VERCEL_PROJECT_ID` not set, no `.vercel/` link) and **no runtime env** (`SUPABASE_URL`/
+`SUPABASE_ANON_KEY`/`AI_API_KEY` not set — only `.env.example`). A real deploy is therefore **blocked
+on environment**, like G-01; what was executable was drilled against the real build output:
+
+| Drill | Command | Observed |
+| --- | --- | --- |
+| Self-host production boot (mock data) | `NODE_ENV=production DATA_MODE=mock PORT=8123 node dist-server/index.js` | `GET /` → 200 `text/html` 948 B with the SPA root; `GET /review` → 200 SPA fallback (refresh on any path works); `/assets/index-*.js` → 200 `text/javascript` 761,827 B; `GET /api/vocabulary` → 200 JSON |
+| Production with missing Supabase env (the real deploy's day-one state) | `NODE_ENV=production PORT=8124 node dist-server/index.js` (no env) | Boots, serves the SPA; API answers **503** with reasons; startup log prints `setup issue: SUPABASE_URL is not set.` / `SUPABASE_ANON_KEY is not set.` — fail-safe, no crash |
+
 ## 5. Deliberately not verified / not attempted
 
 | Item | Status | Why |
 | --- | --- | --- |
 | Hosted Supabase migrations v13–v19 | **BLOCKED — physically infeasible here** | Feasibility check this task: no hosted credentials, no `supabase` CLI, no `supabase/config.toml` in the environment (register G-01). Approval alone cannot close it — PO must supply hosted access |
-| Real-browser: audio playback, transcript scroll/seek, graph zoom/pan/keyboard | Not exercised in browser | Remaining half of G-02; covered by integration tests, queued for Stage A |
+| Real-browser remainder of G-02 (audio, transcript seek/restore, graph zoom/pan/keyboard) | **CLOSED — verified in §4d** | Was carried as the un-exercised half; now executed in a real browser this task |
+| Hosted deploy (Vercel, per `vercel.json`) | **BLOCKED — physically infeasible here (G-17)** | Feasibility check (§4e): no CLI, no Vercel credentials, no hosted runtime env. Approval alone cannot close it — PO must supply the account/token and hosted Supabase/AI env; the deploy *drill* against production artifacts was executed (§4e) |
 | Paid AI providers / new dependencies | Not evaluated | Approval gate (Blueprint §12) |
 
 ## 6. Reproduction commands
@@ -151,7 +183,9 @@ npm run dev                      # → http://localhost:5173/
 All four local quality gates (types, lint, full test suite, production build) are **green on the post-change tree**,
 and the changed surfaces were verified in a real browser (§4b). Requirement-level results are in the
 [traceability matrix](requirements-traceability.md): **78 PASS_VERIFIED · 9 PARTIAL · 8 MISSING** across 95 rows,
-with G-01 blocked on hosted access and G-02 reduced to its un-exercised remainder. Decisions D-01/D-07/D-10 were
+with G-01 (hosted migrations) and G-17 (hosted deploy) blocked on environment credentials and G-02's
+browser checklist now fully executed (§4b–§4d), plus a local deploy drill against the production
+artifacts (§4e). Decisions D-01/D-07/D-10 were
 decided and implemented under the PO's delegated self-approval; D-02…D-12 carry recorded recommended outcomes the PO
 may revise ([gap register](gap-and-decision-register.md) Part 2). Per Blueprint §14 and the task contract,
 **the product is not claimed complete**: every remaining MISSING/PARTIAL row is itemised in the
