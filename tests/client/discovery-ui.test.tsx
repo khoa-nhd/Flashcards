@@ -211,6 +211,19 @@ describe('listening to a transcript', () => {
     // Opening a source of any kind saves no word by itself.
     expect(app.store).toHaveLength(0);
   });
+
+  it('remembers where the track ended when the audio runs out on its own', async () => {
+    const app = await openTranscript(SRT, 'transcript');
+    const audio = document.querySelector('audio');
+    if (audio === null) throw new Error('the listener has no player');
+    fireEvent.ended(audio);
+    // Pausing, seeking and now reaching the end all remember the moment —
+    // and remembering it writes only the position, never a word.
+    expect(app.api.updateSource).toHaveBeenCalledWith(expect.any(String), {
+      position: { seconds: expect.any(Number) },
+    });
+    expect(app.store).toHaveLength(0);
+  });
 });
 
 describe('a reading drafted from a collection', () => {
@@ -288,5 +301,48 @@ describe('bringing content in', () => {
     const sources = await app.api.listSources();
     expect(sources[0]?.kind).toBe('web');
     expect(sources[0]?.origin).toBe('https://example.com/article');
+  });
+
+  it('fetches a transcript by address and opens it in the listening workspace, not as a page', async () => {
+    const app = await start();
+    await app.user.click(screen.getByRole('link', { name: 'Import' }));
+    app.api.fetchUrl.mockResolvedValueOnce({
+      title: 'Episode 12',
+      text: '1\n00:00:01,000 --> 00:00:03,400\nHello world\n\n2\n00:00:05,000 --> 00:00:08,200\nThe weather is fine today\n',
+      origin: 'https://example.com/episode12.srt',
+    });
+    await app.user.click(screen.getByRole('button', { name: 'From a web address' }));
+    await app.user.type(screen.getByLabelText('Web address'), 'https://example.com/episode12.srt');
+    await app.user.click(screen.getByRole('button', { name: 'Fetch a preview' }));
+    await screen.findByText('Episode 12');
+    // The preview is a transcript by any road, and says so before opening.
+    expect(screen.getByText('Transcript')).toBeTruthy();
+    expect(await app.api.listSources()).toHaveLength(0);
+    await app.user.click(screen.getByRole('button', { name: 'Open in the listening workspace' }));
+    // A timestamped transcript opens on its cues, not as a page of text.
+    await screen.findByRole('button', { name: 'Seek to 0:01' });
+    const sources = await app.api.listSources();
+    expect(sources[0]?.kind).toBe('listening');
+    expect(sources[0]?.contentKind).toBe('transcript');
+    expect(sources[0]?.origin).toBe('https://example.com/episode12.srt');
+  });
+
+  it('opens a transcript file as a listening transcript, keeping its cues', async () => {
+    const app = await start();
+    await app.user.click(screen.getByRole('link', { name: 'Import' }));
+    const file = new File(
+      ['1\n00:00:01,000 --> 00:00:03,400\nHello world\n\n2\n00:00:05,000 --> 00:00:08,200\nThe weather is fine today\n'],
+      'episode12.srt',
+      { type: 'text/plain' },
+    );
+    fireEvent.change(screen.getByLabelText('Choose a text file'), { target: { files: [file] } });
+    await screen.findByText('Transcript');
+    expect(screen.getByRole('button', { name: 'Open in the listening workspace' })).toBeTruthy();
+    await app.user.click(screen.getByRole('button', { name: 'Open in the listening workspace' }));
+    await screen.findByRole('button', { name: 'Seek to 0:01' });
+    const sources = await app.api.listSources();
+    expect(sources[0]?.kind).toBe('listening');
+    expect(sources[0]?.contentKind).toBe('transcript');
+    expect(sources[0]?.origin).toBe('episode12.srt');
   });
 });

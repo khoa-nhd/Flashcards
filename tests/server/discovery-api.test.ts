@@ -156,6 +156,30 @@ describe('sources of every kind a learner may bring in', () => {
     expect(await errorMessageOf(tooMuch)).toContain('excerpt rather than a whole book');
   });
 
+  it('refuses a body past the discovery envelope before the schema ever sees it', async () => {
+    const app = on();
+    // 400 KB is discovery's own cap (source content travels in the request).
+    const huge = await send(app, alice, 'POST', '/api/discovery', {
+      kind: 'text',
+      title: 'Too much',
+      content: 'x'.repeat(401 * 1024),
+      requestId: newId(),
+    });
+    expect(huge.status).toBe(413);
+    expect(await errorCodeOf(huge)).toBe('payload_too_large');
+
+    // Just under that cap, the ordinary reading cap still decides.
+    const overCap = await send(app, alice, 'POST', '/api/discovery', {
+      kind: 'text',
+      title: 'Slightly too much',
+      content: 'x'.repeat(120_001),
+      requestId: newId(),
+    });
+    expect(overCap.status).toBe(400);
+    expect(await errorCodeOf(overCap)).toBe('invalid_request');
+    expect(await listSources(app, alice)).toHaveLength(0);
+  });
+
   it('refuses another account’s source with not_found, on every verb', async () => {
     const app = on();
     const source = await newSource(app, alice);

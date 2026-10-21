@@ -102,13 +102,17 @@ no generated audio anywhere in this feature, and none is promised.
 Three ways in, one preview, one press:
 
 - **File** — `.txt`, `.md`, `.srt`, `.vtt` and `.html`, read as plain text.
-  Binary content and files this app does not read (PDF, Office) are refused
-  by name, with what-to-do-instead. PDF extraction is not built; copy its
-  text into Paste.
+  An `.html` file keeps its markup exactly as it arrives (only a fetched web
+  address comes back stripped of it). Binary content and files this app does
+  not read (PDF, Office, video and audio files) are refused by name, with
+  what-to-do-instead. PDF extraction is not built, and no media file is ever
+  transcribed — audio reaches this feature as a link of your own beside a
+  transcript. Copy PDF text into Paste.
 - **Paste** — up to 120,000 characters, titled by you or by its first line;
   a transcript shape is recognised and opens as listening.
 - **Web address** — fetched **server-side as plain text**: scripts, styles
-  and markup are stripped before anything is shown, and the fetch refuses
+  and markup are stripped before anything is shown, and a transcript shape in
+  what comes back opens as listening, exactly like Paste; the fetch refuses
   private networks, loopback, cloud-metadata addresses, non-http schemes,
   redirects that land there, oversized bodies, slow upstreams and anything
   that is not readable text. No cookies, no logins, no paywall bypass — if
@@ -166,7 +170,8 @@ answers 403 `read_only`, and the pages say so without losing your text).
   or cue, the source's title and kind, its position and your note — the
   source itself stays a source.
 - **Discovery never touches learning.** It writes no review, no FSRS state,
-  no mastery, no practice, no exam, no Error Log entry, and nothing that
+  no mastery, no practice, no exam, no Error Log entry (that log itself is
+  not yet built), and nothing that
   Undo could reach. An explicit save creates one ordinary word, exactly as
   if it had been typed into Add vocabulary.
 - **Imported content cannot act.** It is stored and shown as plain text;

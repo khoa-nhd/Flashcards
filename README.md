@@ -6,7 +6,7 @@ in on.
 
 | Tab | What it does |
 | --- | --- |
-| **Dashboard** | What is ready to review, review activity (today, accuracy, streak, time), summary counts, mastery distribution, additions over time, recent words. |
+| **Home** | The landing page: **Continue** (what is ready to review and the way to continue it), the daily goal, what to do today, review activity, summary counts, mastery distribution, additions over time, recent words, and **Quick actions**. |
 | **Review** | Flashcards: flip, then answer Remember or Not remember. Narrow the queue (weakest, overdue, due today, recently added, one collection). Undo the last answer; a summary of what was saved at the end, with progress against the daily goal. |
 | **Practice** | Other ways to work on words: recognition, recall, typing, fill in the blank, listening, speaking and writing. Recorded for your statistics; never changes mastery or a review date. Holds the link to **Exam** practice. |
 | **Exam** | A test you build yourself: sections of questions (a way of asking, a length, an optional time limit each), one optional clock for the whole exam, free movement between the sections, and a report at the end that scores each section and names the missed words with a drill into Practice. Where a model is configured, it can suggest a structure over your weakest words — as a draft you accept, change or discard. Reached from Practice; recorded like practice, never changes mastery or a review date. |
@@ -491,7 +491,7 @@ config/review.config.ts     The review rules and new-word defaults
 shared/                     Pure logic used by browser and server
   review-logic.ts             Eligibility, ordering, visibility, answers
   vocabulary-status.ts        A word's review state, from the same rules
-  metrics.ts                  Dashboard, insights and calendar numbers
+  metrics.ts                  Home, insights and calendar numbers
   analytics.ts                Review activity from saved answers
   weak-words.ts               Which words need attention, and why
   scheduler/                  FSRS, the rating map, which schedule is in charge, the comparison, the what-if

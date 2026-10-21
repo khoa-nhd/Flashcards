@@ -120,14 +120,12 @@ export function SemanticExperience({ document, onOpenWord }: ExperienceProps) {
 export function WordFamilyExperience({ document, onOpenWord }: ExperienceProps) {
   const familyKinds = new Set(['derivation', 'inflection', 'related_form']);
   const familyEdges = document.edges.filter((edge) => familyKinds.has(edge.kind));
-  // A derivation reads "word → root": what other words were formed from the
-  // root sits at the start of each link, so a root is a node no link starts
-  // from. A word nothing was derived from and that links to nothing is a
-  // family of its own.
-  const derivedFrom = new Set(
-    familyEdges.filter((edge) => edge.kind === 'derivation').map((edge) => edge.fromNodeId),
-  );
-  const roots = document.nodes.filter((node) => !derivedFrom.has(node.id));
+  // A family link reads "form → root": what was derived or inflected sits at
+  // the start of each link, so a root is a node no family link starts from —
+  // an inflected form is shown beneath its root, never as a root of its own.
+  // A word no family link touches at all is a family of its own.
+  const formed = new Set(familyEdges.map((edge) => edge.fromNodeId));
+  const roots = document.nodes.filter((node) => !formed.has(node.id));
   const standalone = roots.filter(
     (root) => !familyEdges.some((edge) => edge.fromNodeId === root.id || edge.toNodeId === root.id),
   );

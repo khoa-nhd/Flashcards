@@ -112,6 +112,29 @@ describe('the card front', () => {
   });
 });
 
+describe('the tab left and returned', () => {
+  it('leaves the card unanswered: coming and going submits, scores and undoes nothing', async () => {
+    const { api } = await renderApp([card(1), card(2)]);
+    await screen.findByTestId('flashcard');
+
+    // Away: the tab goes hidden. The listener does not answer for the learner.
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    fireEvent(document, new Event('visibilitychange'));
+
+    // Back: at most the list is refreshed — never an answer, never a score.
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    fireEvent(document, new Event('visibilitychange'));
+    fireEvent(window, new Event('focus'));
+    delete (document as { visibilityState?: string }).visibilityState;
+
+    expect(api.submitAction).not.toHaveBeenCalled();
+    expect(api.submitPractice).not.toHaveBeenCalled();
+    expect(api.undoAction).not.toHaveBeenCalled();
+    // The same card is still there, exactly as it stood.
+    expect(screen.getByTestId('flashcard')).toBeInstanceOf(HTMLElement);
+  });
+});
+
 describe('flipping', () => {
   it('Space flips the card and reveals the answer', async () => {
     await renderApp();

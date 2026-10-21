@@ -534,7 +534,7 @@ describe('review preferences in Settings', () => {
   });
 });
 
-describe('the daily goal on the Dashboard', () => {
+describe('the daily goal on the Home page', () => {
   const goalRegion = () => screen.findByRole('region', { name: 'Daily goal' });
 
   it('shows progress on each part and what is left', async () => {

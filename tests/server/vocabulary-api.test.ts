@@ -119,6 +119,22 @@ describe('POST /api/vocabulary', () => {
     expect(response.status).toBe(403);
     expect(catalog.created).toEqual([]);
   });
+
+  it('takes a phrase, an idiom, a phrasal verb or an expression pattern as one word', async () => {
+    const { app } = setup();
+    const shapes: ReadonlyArray<readonly [string, string]> = [
+      ['phrase', 'break the ice'],
+      ['idiom', 'bite the bullet'],
+      ['phrasal verb', 'look it up'],
+      ['expression pattern', 'would rather + infinitive'],
+    ];
+    for (const [index, [shape, word]] of shapes.entries()) {
+      const requestId = `11111111-1111-4111-8111-${String(index).padStart(12, '0')}`;
+      const response = await app.request('/api/vocabulary', json('POST', { word, requestId }));
+      expect(response.status, shape).toBe(201);
+      expect(entryResponseSchema.parse(await response.json()).entry.word, shape).toBe(word);
+    }
+  });
 });
 
 describe('PATCH /api/vocabulary/:id', () => {

@@ -82,6 +82,18 @@ describe('Add vocabulary', () => {
     expect(screen.getByLabelText('Date added')).toHaveValue(TODAY);
   });
 
+  it('takes a phrase, an idiom, a phrasal verb or an expression pattern exactly as typed', async () => {
+    const { api, user } = await open('/add');
+    for (const shape of ['break the ice', 'bite the bullet', 'look it up', 'would rather + infinitive']) {
+      await user.type(await screen.findByLabelText(/^Word/), shape);
+      await user.click(addButton());
+      expect(api.createEntry).toHaveBeenLastCalledWith(expect.objectContaining({ word: shape }));
+      // Back where typing starts before the next shape is tried.
+      await waitFor(() => expect(wordField()).toHaveValue(''));
+    }
+    expect(api.createEntry).toHaveBeenCalledTimes(4);
+  });
+
   it('uses the configured defaults, whatever they are', async () => {
     const { api, user } = await open('/add', {
       list: { defaults: { mastery: 0, reviewDate: 'today' } },

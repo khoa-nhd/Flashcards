@@ -100,6 +100,12 @@ references `auth.users` with `on delete cascade`.
 | `deleted_at` | Set when the word is in the trash. |
 | `root_id` | (Version 11.) The word this one was formed from (`decide` → `decision`), or empty for a root of its own. A single-column foreign key to `vocabulary(id)` on purpose: a composite key with `on delete set null` would clear the owner too. A word cannot be its own root, and `update_vocabulary` only accepts a root of the caller's own account. |
 
+**Deliberately absent from `vocabulary`:** no item-type column — a word,
+phrase, idiom, phrasal verb or expression pattern is all ordinary text in
+`word` (the API accepts each shape, pinned by test) — and no tags:
+Collections are the only stored grouping. Both are open product scope, not
+hidden capabilities.
+
 ### `card_states`
 
 | Column | Notes |

@@ -165,6 +165,24 @@ describe('asking for a draft reading', () => {
     expect(await sourcesOf(app, alice)).toEqual([]);
   });
 
+  it('works from a handful of typed words, and those words are what the model hears', async () => {
+    const app = on();
+    const fetchMock = modelReplies(DRAFT);
+    const reply = draftResponseSchema.parse(
+      await (await generate(app, alice, { words: ['candid', 'harbour'], length: 'short' })).json(),
+    );
+    expect(reply.draft.suggestions.length).toBeGreaterThan(0);
+
+    // Words the learner typed — not saved anywhere — cross as plain words.
+    const sent = String(fetchMock.mock.calls[0]?.[1]?.body ?? '');
+    expect(sent).toContain('candid');
+    expect(sent).toContain('harbour');
+
+    // Asking for a draft is not an act of saving: no source, no word.
+    expect(await sourcesOf(app, alice)).toEqual([]);
+    expect(await wordsOf(app, alice)).toEqual([]);
+  });
+
   it('refuses a collection that belongs to somebody else', async () => {
     const app = on();
     const collection = await ok<{ collection: { id: string } }>(

@@ -22,7 +22,7 @@ created, only derived.
 | **Nuance & contrast** | Two expressions side by side with their meanings and the difference spelled out between them; a contrast link *insists* on that note. |
 | **Scenario** | One situation walked through in order: nodes carry a step number, the panel reads as an ordered list, and reordering is an ordinary list action (move earlier / move later), not a drag. |
 | **Communicative function** | Phrases grouped under what the speaker is trying to do (apologising, refusing, …); variants of one intention are listed as *also: …* under the phrase. |
-| **Personal knowledge** | Never stored. Every visit recomputes it from your library: up to 60 of your words, grouped by collection, with the relationships you have drawn among them, plus counts. |
+| **Personal knowledge** | Never stored. Every visit recomputes it from your library: up to 60 of your words — the most recently updated first — grouped under the first of their collections by name, with the relationships you have drawn among them, plus counts. |
 
 Everything is drawn on a hand-rolled SVG canvas — no charting library —
 with zoom and pan, a full keyboard path, and an *Everything on this map*
@@ -48,7 +48,8 @@ list beside the drawing: every item is reachable from either.
   different word (the database enforces the triple `id, vocabulary_id,
   user_id`).
 - **Looking never learns.** No map route reads or writes FSRS state,
-  mastery, review dates, practice results or the Error Log. Reading the
+  mastery, review dates, practice results or an Error Log entry (that log is
+  not yet built). Reading the
   list, a document, the personal view or an unapplied AI expansion leaves
   the word's entry, the card state and the review history byte-identical
   (Journey E asserts exactly that).

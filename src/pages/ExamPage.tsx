@@ -13,6 +13,8 @@ import {
   type StudyMode,
 } from '../../shared/study-modes.js';
 import { useApp, useSettings, useVocabulary } from '../app-context.js';
+import { useFocusMode } from '../components/AppShell.js';
+import { FocusTimer } from '../components/FocusTimer.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { Checking, PracticeCard, Verdict } from '../components/PracticeCards.js';
@@ -112,6 +114,8 @@ export function ExamPage() {
   const { api } = useApp();
   const { speechLang } = useSettings();
   const state = useVocabulary();
+  // Sitting a test is the other place worth studying without the navigation in the way.
+  const focusMode = useFocusMode();
   // Listening sections need the browser to be able to read text aloud. Asked once for the page.
   const [canSpeak] = useState(speechAvailable);
 
@@ -404,11 +408,23 @@ export function ExamPage() {
         title="Exam"
         description="A test you build yourself: sections of questions, each with its own length and an optional time limit, and a report at the end. Answers are recorded for your statistics like practice, and never change mastery or review dates."
         actions={
-          phase === 'run' && (
-            <button type="button" className={BUTTON_PRIMARY} onClick={() => setPhase('report')}>
-              Finish exam
+          <>
+            <button
+              type="button"
+              className={`${BUTTON_SECONDARY} aria-pressed:border-accent aria-pressed:bg-accent-soft aria-pressed:text-accent`}
+              aria-pressed={focusMode.on}
+              title="Hide the navigation and show a timer, for sitting the exam without distractions."
+              onClick={focusMode.toggle}
+            >
+              Focus
             </button>
-          )
+            {focusMode.on && <FocusTimer />}
+            {phase === 'run' && (
+              <button type="button" className={BUTTON_PRIMARY} onClick={() => setPhase('report')}>
+                Finish exam
+              </button>
+            )}
+          </>
         }
       />
 

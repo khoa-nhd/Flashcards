@@ -57,6 +57,17 @@ describe('loadConfig', () => {
     expect(secret.issues.join(' ')).not.toContain('sb_secret_do_not_print_me');
   });
 
+  it('leaves AI unconfigured without a key, and the absence is not a setup failure', () => {
+    const without = loadConfig(supabaseEnv);
+    expect(without.ai).toBeNull();
+    // Basic use must not depend on AI: no issue, no warning, nothing to fix.
+    expect(without.issues.filter((issue) => issue.includes('AI'))).toEqual([]);
+
+    const withKey = loadConfig({ ...supabaseEnv, AI_API_KEY: 'ai_secret_do_not_print_me' });
+    expect(withKey.ai).toMatchObject({ model: 'gemini-2.5-flash' });
+    expect(withKey.issues.join(' ')).not.toContain('ai_secret_do_not_print_me');
+  });
+
   it('flags a data source it does not have, and serves nothing in its place', () => {
     for (const mode of ['live', 'notion']) {
       const config = loadConfig({ ...supabaseEnv, DATA_MODE: mode });

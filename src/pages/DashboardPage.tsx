@@ -56,7 +56,7 @@ export function DashboardPage() {
   return (
     <div className={PAGE}>
       <PageHeader
-        title="Dashboard"
+        title="Home"
         description={today === null ? 'Your vocabulary at a glance.' : `Your vocabulary as of ${formatDate(today)}.`}
         actions={
           <button
@@ -79,28 +79,31 @@ export function DashboardPage() {
       <VocabularyGate state={state}>
         {summary !== null && today !== null && (
           <div className={`flex flex-col gap-6 ${state.refreshing ? 'opacity-70' : ''}`}>
-            {/* Headline: what needs doing now, and the way to do it. */}
-            <section className={`${CARD} flex flex-wrap items-center justify-between gap-4 p-5`}>
-              <div>
-                <p className="text-sm text-muted">Ready to review</p>
-                <p className="text-5xl font-semibold tracking-tight">{ready}</p>
-                <p className="mt-1 text-sm text-muted">
-                  {ready === 0
-                    ? 'Nothing is waiting. New words and due reviews will show up here.'
-                    : `${summary.overdue} overdue, ${summary.dueToday} due today${
-                        summary.unscheduled > 0 && ready > summary.overdue + summary.dueToday
-                          ? `, ${summary.unscheduled} new`
-                          : ''
-                      }.`}
-                </p>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
-                  <Icon name="review" className="size-4" /> Start review
-                </Link>
-                <Link to={ROUTES.add} className={BUTTON_SECONDARY}>
-                  <Icon name="add" className="size-4" /> Add vocabulary
-                </Link>
+            {/* Continue: what is ready now and the way to continue it. */}
+            <section aria-label="Continue" className={`${CARD} p-5`}>
+              <h2 className={SECTION_TITLE}>Continue</h2>
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <p className="text-sm text-muted">Ready to review</p>
+                  <p className="text-5xl font-semibold tracking-tight">{ready}</p>
+                  <p className="mt-1 text-sm text-muted">
+                    {ready === 0
+                      ? 'Nothing is waiting. New words and due reviews will show up here.'
+                      : `${summary.overdue} overdue, ${summary.dueToday} due today${
+                          summary.unscheduled > 0 && ready > summary.overdue + summary.dueToday
+                            ? `, ${summary.unscheduled} new`
+                            : ''
+                        }.`}
+                  </p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
+                    <Icon name="review" className="size-4" /> Start review
+                  </Link>
+                  <Link to={ROUTES.add} className={BUTTON_SECONDARY}>
+                    <Icon name="add" className="size-4" /> Add vocabulary
+                  </Link>
+                </div>
               </div>
             </section>
 
@@ -290,28 +293,31 @@ export function DashboardPage() {
               )}
             </section>
 
-            <section aria-label="Quick links" className="flex flex-wrap gap-2">
-              <Link to={buildHref(ROUTES.bank, { status: 'due_today' })} className={BUTTON_SECONDARY}>
-                View due today
-              </Link>
-              <Link to={buildHref(ROUTES.bank, { status: 'overdue' })} className={BUTTON_SECONDARY}>
-                View overdue
-              </Link>
-              <Link to={buildHref(ROUTES.bank, { status: 'mastered' })} className={BUTTON_SECONDARY}>
-                Browse mastered
-              </Link>
-              <Link
-                to={buildHref(ROUTES.bank, { from: addDays(today, -(RECENT_DAYS - 1)), to: today })}
-                className={BUTTON_SECONDARY}
-              >
-                Added in the last {RECENT_DAYS} days
-              </Link>
-              <Link to={ROUTES.weak} className={BUTTON_SECONDARY}>
-                Weak words
-              </Link>
-              <Link to={ROUTES.insights} className={BUTTON_SECONDARY}>
-                Insights
-              </Link>
+            <section aria-label="Quick actions" className={`${CARD} p-5`}>
+              <h2 className={SECTION_TITLE}>Quick actions</h2>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <Link to={buildHref(ROUTES.bank, { status: 'due_today' })} className={BUTTON_SECONDARY}>
+                  View due today
+                </Link>
+                <Link to={buildHref(ROUTES.bank, { status: 'overdue' })} className={BUTTON_SECONDARY}>
+                  View overdue
+                </Link>
+                <Link to={buildHref(ROUTES.bank, { status: 'mastered' })} className={BUTTON_SECONDARY}>
+                  Browse mastered
+                </Link>
+                <Link
+                  to={buildHref(ROUTES.bank, { from: addDays(today, -(RECENT_DAYS - 1)), to: today })}
+                  className={BUTTON_SECONDARY}
+                >
+                  Added in the last {RECENT_DAYS} days
+                </Link>
+                <Link to={ROUTES.weak} className={BUTTON_SECONDARY}>
+                  Weak words
+                </Link>
+                <Link to={ROUTES.insights} className={BUTTON_SECONDARY}>
+                  Insights
+                </Link>
+              </div>
             </section>
           </div>
         )}

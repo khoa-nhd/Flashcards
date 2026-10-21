@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 
-/** The lengths a focus session can be set to, in minutes. */
-const DURATIONS = [15, 20] as const;
+/** The lengths a focus session can be set to, in minutes. 25 is the Pomodoro length. */
+const DURATIONS = [15, 20, 25] as const;
 /** The rest offered when a block ends: long enough to stand up and look away. */
 const BREAK_MINUTES = 5;
 

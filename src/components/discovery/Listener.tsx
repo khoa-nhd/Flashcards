@@ -365,7 +365,12 @@ export function Listener({ sourceId, onPickAnother }: ListenerProps) {
             setPlaying(false);
             if (element !== null) persist(element.currentTime || 0);
           }}
-          onEnded={() => setPlaying(false)}
+          onEnded={() => {
+            const element = audio.current;
+            setPlaying(false);
+            // The last second listened to is part of where they stopped.
+            persist(element?.currentTime || element?.duration || 0);
+          }}
           onError={() => {
             setPlaying(false);
             setAudioProblem(

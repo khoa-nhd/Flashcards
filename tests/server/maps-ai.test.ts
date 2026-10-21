@@ -181,6 +181,20 @@ describe('generating a map from one of the learner\'s words', () => {
     expect(system).toContain('synonym');
     expect(system).toContain('antonym');
   });
+
+  it('tells the model which way a word-family edge points', async () => {
+    const app = on();
+    const candid = await addWord(app, alice, { word: 'candid' });
+    const fetchMock = modelReplies(DRAFT);
+    await generate(app, alice, { type: 'word_family', vocabularyId: candid.id });
+
+    const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
+    const sent = JSON.parse(String(init.body)) as { messages: Array<{ role: string; content: string }> };
+    const system = sent.messages.find((message) => message.role === 'system')?.content ?? '';
+    // The direction is spelled out, so a derivation is not drawn backwards.
+    expect(system).toContain('FROM the derived or inflected form TO the word it was formed from');
+    expect(system).toContain('decide→decision');
+  });
 });
 
 describe('every way the model draft can fail lands somewhere safe', () => {

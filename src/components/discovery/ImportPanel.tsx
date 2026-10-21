@@ -128,7 +128,8 @@ export function ImportPanel({ onOpened }: ImportPanelProps) {
         title: page.title || 'Fetched page',
         content: page.text,
         origin: page.origin,
-        transcript: false,
+        // A transcript stays a transcript however it arrives: by address, file or paste.
+        transcript: looksLikeTranscript(page.text),
         source: 'url',
       });
     } catch (error) {
@@ -144,7 +145,7 @@ export function ImportPanel({ onOpened }: ImportPanelProps) {
     setBusy('open');
     setFailure(null);
     try {
-      const kind: DiscoverySourceKind = preview.source === 'url' ? 'web' : preview.transcript ? 'listening' : 'imported';
+      const kind: DiscoverySourceKind = preview.transcript ? 'listening' : preview.source === 'url' ? 'web' : 'imported';
       const created = await api.createSource({
         kind,
         title: preview.title,

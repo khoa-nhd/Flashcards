@@ -241,6 +241,29 @@ describe('relationships, by the kind of map that accepts them', () => {
     expect(await errorMessageOf(refused)).toContain('synonym');
   });
 
+  it('refuses a kind from another map’s table on family, theme and function maps', async () => {
+    const app = on();
+    const a = await addWord(app, alice, { word: 'decide' });
+    const b = await addWord(app, alice, { word: 'decision' });
+    const cases = [
+      ['word_family', 'verb_noun', 'inflection'],
+      ['thematic', 'contrast', 'subtopic'],
+      ['function', 'step', 'phrase_variant'],
+    ] as const;
+    for (const [type, wrong, allowed] of cases) {
+      const map = await newMap(app, alice, { type });
+      const one = await addNode(app, alice, map.id, { kind: 'saved', vocabularyId: a.id });
+      const two = await addNode(app, alice, map.id, { kind: 'saved', vocabularyId: b.id });
+      const refused = await send(app, alice, 'POST', `/api/maps/${map.id}/edges`, {
+        fromNodeId: one.id,
+        toNodeId: two.id,
+        kind: wrong,
+      });
+      expect(refused.status, `${type} accepted ${wrong}`).toBe(400);
+      expect(await errorMessageOf(refused)).toContain(allowed);
+    }
+  });
+
   it('stores a collocation as the combination itself, and insists on one', async () => {
     const app = on();
     const a = await addWord(app, alice, { word: 'make' });
@@ -356,6 +379,22 @@ describe('saving a suggestion is the one call that makes a word', () => {
     const second = await send(app, alice, 'POST', `/api/maps/${map.id}/nodes/${node.id}/save`, { requestId: newId() });
     expect(second.status).toBe(400);
     expect(await wordsOf(app, alice)).toHaveLength(before.length + 1);
+  });
+
+  it('refuses a suggestion whose word is already saved, and makes no second copy', async () => {
+    const app = on();
+    await addWord(app, alice, { word: 'candid' });
+    const map = await newMap(app, alice);
+    const node = await addNode(app, alice, map.id, { kind: 'candidate', label: 'candid' });
+    const before = await wordsOf(app, alice);
+    const refused = await send(app, alice, 'POST', `/api/maps/${map.id}/nodes/${node.id}/save`, { requestId: newId() });
+    // The ordinary word path's duplicate refusal reaches the caller unchanged.
+    expect(refused.status).toBe(409);
+    expect(await errorCodeOf(refused)).toBe('duplicate');
+    expect(await wordsOf(app, alice)).toHaveLength(before.length);
+    // And the suggestion stays a suggestion — the learner chooses another path.
+    const document = await documentOf(app, alice, map.id);
+    expect(document.nodes.find((one) => one.id === node.id)?.kind).toBe('candidate');
   });
 
   it('saves the node in place, keeping its relationships', async () => {

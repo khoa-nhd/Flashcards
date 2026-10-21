@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 /**
- * Focus Mode in the browser: the Review and Practice pages can hide the app
- * chrome and show a countdown, and when a block ends the timer offers a
+ * Focus Mode in the browser: the Review, Practice and Exam pages can hide the
+ * app chrome and show a countdown, and when a block ends the timer offers a
  * counted rest before the next block. It is only a view on the page — it
- * never ends a session, answers a card, starts anything on its own or
- * intercepts a review key — so several tests here are about what does NOT
- * happen.
+ * never ends a session, answers a card, finishes an exam, starts anything on
+ * its own or intercepts a review key — so several tests here are about what
+ * does NOT happen.
  */
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -173,5 +173,50 @@ describe('the Focus switch on Practice', () => {
     await user.click(screen.getByRole('button', { name: 'Focus' }));
     expect(chrome()).toBe(2);
     expect(screen.queryByRole('group', { name: 'Focus timer' })).not.toBeInTheDocument();
+  });
+});
+
+describe('the Focus switch on Exam', () => {
+  it('hides the same chrome and shows the timer, leaving the builder untouched', async () => {
+    const { user } = await open('/exam');
+    expect(await screen.findByRole('button', { name: 'Start the exam' })).toBeInTheDocument();
+    expect(chrome()).toBe(2);
+
+    await user.click(screen.getByRole('button', { name: 'Focus' }));
+    expect(chrome()).toBe(0);
+    expect(within(timer()).getByText('15:00')).toBeInTheDocument();
+    // Sitting an exam focused still builds and starts the exam the same way.
+    expect(screen.getByRole('button', { name: 'Start the exam' })).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Focus' }));
+    expect(chrome()).toBe(2);
+  });
+
+  it('never finishes the exam on its own when the timer runs out', async () => {
+    await open('/exam');
+    await screen.findByRole('button', { name: 'Start the exam' });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', { name: 'Focus' }));
+
+    act(() => {
+      vi.advanceTimersByTime(15 * 60 * 1000);
+    });
+    // The block is over; the exam is still the reader's to finish or continue.
+    expect(within(timer()).getByRole('status')).toHaveTextContent('Time is up');
+    expect(screen.getByRole('button', { name: 'Start the exam' })).toBeInTheDocument();
+  });
+});
+
+describe('the session length on the timer', () => {
+  it('offers the Pomodoro length alongside the shorter blocks', async () => {
+    await open('/review', { cards: [card(1)] });
+    await screen.findByTestId('flashcard');
+    fireEvent.click(screen.getByRole('button', { name: 'Focus' }));
+
+    expect(within(timer()).getByRole('button', { name: '25 min' })).toHaveAttribute('aria-pressed', 'false');
+    fireEvent.click(within(timer()).getByRole('button', { name: '25 min' }));
+    expect(within(timer()).getByText('25:00')).toBeInTheDocument();
+    expect(within(timer()).getByRole('button', { name: '25 min' })).toHaveAttribute('aria-pressed', 'true');
+    expect(within(timer()).getByRole('button', { name: '15 min' })).toHaveAttribute('aria-pressed', 'false');
   });
 });

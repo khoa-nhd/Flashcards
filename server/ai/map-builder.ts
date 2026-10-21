@@ -28,7 +28,7 @@ const TYPE_GUIDANCE: Record<Exclude<VocabMapType, 'personal'>, string> = {
   semantic:
     'Connect words whose MEANINGS relate: "synonym" (same meaning), "antonym" (opposite), "hypernym" (the broader category), "hyponym" (a narrower member), "related" (loosely connected), "confused" (often mixed up). Two words are rarely synonyms in every context — when a relationship holds only for one meaning, say so in the note.',
   word_family:
-    'Connect words through how they are formed: "inflection" (the same word in another form: run/running), "derivation" (formed from another word using a prefix, suffix or root change: decide/decision), "related_form" (a looser family link). Never claim a derivation without clear word-forming evidence.',
+    'Connect words through how they are formed: "inflection" (the same word in another form: run/running), "derivation" (formed from another word using a prefix, suffix or root change: decide/decision), "related_form" (a looser family link). Point each edge FROM the derived or inflected form TO the word it was formed from — so decide→decision, never decision→decide. Never claim a derivation without clear word-forming evidence.',
   collocation:
     'Connect words that naturally go together: "verb_noun" (make a decision), "adjective_noun" (heavy rain), "adverb_adjective" (deeply sorry), "collocation" (any other natural pair), "other_pattern" (an expression of your own). For every verb_noun, adjective_noun, adverb_adjective and other_pattern edge, put the combination itself in "pattern".',
   thematic:

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * The "What to do today" card on the Dashboard: a couple of concrete steps
+ * The "What to do today" card on the Home page: a couple of concrete steps
  * worked out from figures the app already has — due cards and high-priority
  * weak words — each linking straight to the page that does it. It suggests
  * and links; it never orders or limits anything.
@@ -42,7 +42,7 @@ describe('the card on its own', () => {
   });
 });
 
-describe('the card on the Dashboard', () => {
+describe('the card on the Home page', () => {
   it('shows the real figures the page already has', async () => {
     window.history.replaceState(null, '', '/');
     const fake = createFakeApi({

@@ -337,7 +337,7 @@ năng hoàn thành hay mọi giai đoạn tự độc lập được):**
 | Mục | Nội dung |
 | --- | --- |
 | **Mục đích** | Đưa Foundation, Maps và Discovery từ "báo cáo PASS cục bộ" thành trạng thái sẵn sàng chấp nhận thực tế. |
-| **Năng lực sản phẩm** | Không thêm tính năng mới:_maps 8 trải nghiệm, Discovery 6 hướng đã được báo cáo làm xong; phần còn lại là xác minh. |
+| **Năng lực sản phẩm** | Không thêm tính năng mới: 8 trải nghiệm, Discovery 6 hướng đã được báo cáo làm xong; phần còn lại là xác minh. |
 | **Phụ thuộc** | Quyền của PO cho migration hosted; môi trường trình duyệt thật; kiểm tra đối chiếu từng yêu cầu Maps/Discovery. |
 | **Giá trị cho người dùng** | Hai lĩnh vực lớn thực sự dùng được trên môi trường thật. |
 | **Rủi ro / câu hỏi** | hosted Supabase chưa xác minh (v13–v19); trình duyệt thật chưa xác minh (audio, cuộn, đồ thị); một hướng Discovery chỉ hỗ trợ một phần (§11). |

@@ -68,6 +68,28 @@ describe('the senses in the word panel', () => {
     expect(within(panel).getByRole('button', { name: 'Move sense 2 down' })).toBeDisabled();
   });
 
+  it('says plainly that a word with no senses is a minimal profile still needing its meanings', async () => {
+    const bare = entry(1, {
+      word: 'lie',
+      meaning: 'nói dối',
+      definition: null,
+      example: null,
+      senses: [],
+      sensesVersion: 1,
+    });
+    const opened = await open(`/bank?word=${pageId(1)}`, [bare]);
+    const panel = await screen.findByRole('dialog');
+    await waitFor(() => expect(opened.api.fetchEntry).toHaveBeenCalledWith(pageId(1)));
+    // The indication of what still needs review, in the panel itself.
+    expect(
+      await within(panel).findByText('This word has no senses yet. Add a meaning to make it reviewable.'),
+    ).toBeInTheDocument();
+    // And the minimal profile beneath it is still a usable profile.
+    expect(within(panel).getByRole('heading', { name: 'lie' })).toBeInTheDocument();
+    expect(within(panel).getByText('nói dối')).toBeInTheDocument();
+    expect(within(panel).queryByRole('heading', { name: 'Senses (0)' })).not.toBeInTheDocument();
+  });
+
   it('adds a sense, and shows it once the server has', async () => {
     const { api, user, panel } = await openPanel();
     await user.click(await within(panel).findByRole('button', { name: 'Add Sense' }));

@@ -1,0 +1,158 @@
+# Verification Record — FC-MGMT-001
+
+> Durable record of what was executed, on which baseline, with which results.
+> Companion to [`requirements-traceability.md`](requirements-traceability.md) and
+> [`gap-and-decision-register.md`](gap-and-decision-register.md).
+
+## 1. Environment
+
+| Item | Value |
+| --- | --- |
+| Machine | Windows (win32), Node/npm on `D:\New folder\` |
+| Repo | `khoa-nhd/Flashcards`, branch `newfeature` |
+| Baseline commit | `3515925`, working tree **clean (0 entries)** at task start; upstream `origin/newfeature` |
+| Test runner | Vitest **v5.0.3** (`npx vitest run`) |
+| Local PostgreSQL | 17.6 @ `127.0.0.1:15432` (`D:\pgrel012\data`, local-only password) for pg-release |
+| Contract constraints honoured | No commit / push / deploy / branch switch / stash / reset / remote migration / hosted access |
+
+## 2. Baseline verification (before any change — all on `3515925`)
+
+| Gate | Command | Result |
+| --- | --- | --- |
+| Types | `npx tsc --noEmit` | **exit 0** |
+| Lint | `npx eslint .` | **exit 0** |
+| Full unit/e2e | `npx vitest run --maxWorkers=4` | **93 files · 1990 passed · 3 skipped · exit 0** |
+| Release suite (real PG) | `npx vitest run --config tests/pg-release/vitest.config.ts` | **5 files · 53 passed · exit 0** |
+
+Notes:
+- A first full-suite attempt run *concurrently* with tsc/eslint produced 4 worker-startup errors with all 89/89
+  executed files passing — classified as **infrastructure contention**, re-run alone → clean baseline above.
+  Lesson recorded: never overlap full vitest with other heavy Node processes.
+- pg-release started the local PostgreSQL, ran migrations + security/recovery suites, stopped it again.
+
+## 3. Changes made in this task (inventory)
+
+**Product code (7 files — register Part 3):**
+- Bug fixes: `src/components/discovery/ImportPanel.tsx` — URL-transcript routes to Listening (F-01);
+  `src/components/discovery/Listener.tsx` — `onEnded` persists final position (F-02);
+  `src/components/maps/MapExperiences.tsx` — family roots exclude all family-link starts (F-03).
+- Self-approved under PO delegation (D-01/D-10/D-07): `src/components/AppShell.tsx` — four-area
+  navigation holding all 13 destinations + Home/phone-bar restructure (F-04); `src/pages/DashboardPage.tsx`
+  — Home with `Continue` / `Quick actions` blocks (F-04); `src/App.tsx` (page title, 404 link),
+  `src/pages/SettingsPage.tsx` (label), `README.md` (tab table).
+- Self-approved feature completion: `src/pages/ExamPage.tsx` — Focus switch + FocusTimer (F-05);
+  `src/components/FocusTimer.tsx` — 25-min Pomodoro block (F-05); `server/ai/map-builder.ts` —
+  word-family edge direction in guidance (F-06).
+
+**Tests (13 modified + 1 new file, +22 tests — register Part 4):**
+`tests/client/discovery-ui.test.tsx`, `tests/server/discovery-api.test.ts`, `tests/server/discovery-ai.test.ts`,
+`tests/server/maps-api.test.ts`, `tests/client/vocab-maps.test.tsx`, `tests/server/vocabulary-api.test.ts`,
+`tests/client/vocabulary-pages.test.tsx`, `tests/client/sense-ui.test.tsx`, `tests/client/app-pages.test.tsx`,
+`tests/client/review-ui.test.tsx`, `tests/server/env.test.ts`, `tests/client/focus-mode.test.tsx`,
+`tests/server/maps-ai.test.ts`,
+**new** `tests/server/cross-domain-journey.test.ts`.
+(Also `tests/client/study-experience.test.tsx` / `tests/client/today-plan.test.tsx` describe/comment renames only.)
+
+**Documentation (4 corrected + 4 created + README):**
+- Corrected: `docs/product-blueprint-v1.0.md` (typo `mới:_maps` at line 340), `docs/discovery.md` (file/media limits,
+  HTML-markup behaviour, web-transcript → listening, Error Log “not yet built”), `docs/vocabulary-maps.md`
+  (personal-map ordering precision, Error Log annotation), `docs/supabase-schema.md` (item types & tags explicitly
+  not modelled).
+- Created: this register's three companion documents + roadmap; all four updated after the self-approved changes.
+- `README.md`: Home tab row + metrics comment.
+
+**Untouched by design:** `shared/*` contracts, `supabase/migrations/*`, Review/FSRS/Undo/Practice code,
+`package.json`, git history (a final commit of this work was authorised by the PO).
+
+## 4. Post-change verification (final gate — after all edits)
+
+| Gate | Command | Result |
+| --- | --- | --- |
+| Types | `npx tsc --noEmit` | **exit 0** |
+| Lint | `npx eslint .` | **exit 0** |
+| Full suite | `npx vitest run --maxWorkers=4` | **94 files · 2012 passed · 3 skipped · exit 0** (baseline 93/1990 → +1 file, +22 tests, **0 regressions**) |
+| Production build | `npm run build` | **exit 0** (client bundle + `dist-server/index.js` 390.4 kB) |
+
+Targeted suites run after their edits (all green):
+
+| Suite | Result |
+| --- | --- |
+| `discovery-api.test.ts` + `discovery-ai.test.ts` | 42 passed |
+| `maps-api.test.ts` | 30 passed |
+| `vocab-maps.test.tsx` | 26 passed |
+| `vocabulary-api.test.ts` + `vocabulary-pages.test.tsx` + `sense-ui.test.tsx` | 73 passed |
+| `env.test.ts` + `review-ui.test.tsx` + `app-pages.test.tsx` | 109 passed |
+| `cross-domain-journey.test.ts` (new) | 1 passed (first run) |
+| `discovery-ui.test.tsx` | 16 passed |
+| `app-pages.test.tsx` (nav/Home restructure) | 39 passed |
+| `focus-mode.test.tsx` + `exam-mode.test.tsx` + `maps-ai.test.ts` (Focus Test/Pomodoro/direction) | 31 passed |
+
+**pg-release (post-change):** not re-run after the self-approved changes — none touched a migration,
+SQL file, or `tests/pg-release/*`; the baseline run (53/53) remains the valid result for those suites.
+
+### 4b. Real-browser verification session (register G-02, surfaces changed this task)
+
+Dev server (`npm run dev`, `localhost:5173`) + desktop browser, exercised by scripted DOM reads and clicks:
+
+| Checked | Observed |
+| --- | --- |
+| Home title & structure | `document.title = "Home · Vocabulary"`; `h1 = Home`; headings: Continue, What to do today, Review activity, Progress to mastery, Recently added, Quick actions |
+| Continue block | Present with “Ready to review”, Start review → `/review`, Add vocabulary → `/add` |
+| Quick actions block | Present: View due today → `/bank?status=due_today`, View overdue, Browse mastered, Added in last 7 days, Weak words → `/weak`, Insights → `/insights` |
+| Approved navigation | Sidebar `nav[aria-label="Main"]` has exactly the four groups — Learn (`/review`,`/practice`,`/weak`), Discover (`/discover`,`/maps`,`/map`), Vocabulary (`/add`,`/bank`,`/collections`), Progress (`/insights`,`/calendar`); Home link `aria-current="page"` |
+| Navigation really works | Clicked Review → `/review`, `Review · Vocabulary`, flashcard rendered, Review link `aria-current="page"` (group Learn marked) |
+| Pages render without errors | `/discover` (Discovery), `/maps` (Vocabulary maps), `/insights` (Insights), `/bank` (Vocabulary bank) — correct h1/title, no `role="alert"` error |
+
+Not exercised in the browser (integration-tested only, remainder of G-02): audio playback, transcript
+scroll/seek, graph zoom/pan/keyboard.
+
+### 4c. Real-browser verification — Focus Test & Pomodoro (F-05)
+
+Dev server (`localhost:5173`) + desktop browser, on `/exam`:
+
+| Checked | Observed |
+| --- | --- |
+| Exam page | `document.title = "Exam · Vocabulary"`; `h1 = Exam`; “Start the exam” present |
+| Focus switch | Button present, `aria-pressed=false` → click → `aria-pressed=true` |
+| Chrome hides | Both `nav[aria-label="Main"]` (sidebar + phone bar) leave the DOM — 2 → 0 |
+| Timer appears | `role="group" aria-label="Focus timer"`; durations **15 min / 20 min / 25 min**; countdown runs |
+| Exam unaffected | “Start the exam” still present in focus — the timer never finishes the exam |
+| Pomodoro length | Click **25 min** → countdown `25:00`, `aria-pressed=true` on 25, `false` on 15/20 |
+| Focus off | Chrome returns (0 → 2 `nav[aria-label="Main"]`), timer removed, builder intact |
+| Console | 0 errors |
+
+Word-family edge direction (F-06) is server-side prompt content — verified by the maps-ai test
+(§4 targeted suites), not reachable from the browser without an AI key.
+
+## 5. Deliberately not verified / not attempted
+
+| Item | Status | Why |
+| --- | --- | --- |
+| Hosted Supabase migrations v13–v19 | **BLOCKED — physically infeasible here** | Feasibility check this task: no hosted credentials, no `supabase` CLI, no `supabase/config.toml` in the environment (register G-01). Approval alone cannot close it — PO must supply hosted access |
+| Real-browser: audio playback, transcript scroll/seek, graph zoom/pan/keyboard | Not exercised in browser | Remaining half of G-02; covered by integration tests, queued for Stage A |
+| Paid AI providers / new dependencies | Not evaluated | Approval gate (Blueprint §12) |
+
+## 6. Reproduction commands
+
+```powershell
+$env:PATH += ";D:\New folder"
+npx tsc --noEmit                 # types
+npx eslint .                     # lint
+npx vitest run --maxWorkers=4    # full suite (~6 min; run ALONE, never concurrently with tsc/eslint)
+npm run build                    # production build
+# release suite (starts local PG on :15432 itself):
+npx vitest run --config tests/pg-release/vitest.config.ts
+# browser session (UI verification of G-02 surfaces):
+npm run dev                      # → http://localhost:5173/
+```
+
+## 7. Sign-off statement
+
+All four local quality gates (types, lint, full test suite, production build) are **green on the post-change tree**,
+and the changed surfaces were verified in a real browser (§4b). Requirement-level results are in the
+[traceability matrix](requirements-traceability.md): **78 PASS_VERIFIED · 9 PARTIAL · 8 MISSING** across 95 rows,
+with G-01 blocked on hosted access and G-02 reduced to its un-exercised remainder. Decisions D-01/D-07/D-10 were
+decided and implemented under the PO's delegated self-approval; D-02…D-12 carry recorded recommended outcomes the PO
+may revise ([gap register](gap-and-decision-register.md) Part 2). Per Blueprint §14 and the task contract,
+**the product is not claimed complete**: every remaining MISSING/PARTIAL row is itemised in the
+[gap register](gap-and-decision-register.md) and sequenced in the [roadmap](execution-roadmap.md).

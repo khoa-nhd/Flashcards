@@ -49,11 +49,51 @@ const tileValue = (label: string) => within(tile(label)).getByText(/^\d+$/).text
 describe('navigation', () => {
   it('offers every page and marks the current one', async () => {
     await open('/');
-    for (const name of ['Dashboard', 'Review', 'Add vocabulary', 'Vocabulary bank', 'Calendar', 'Insights', 'Settings']) {
+    for (const name of ['Home', 'Review', 'Add vocabulary', 'Vocabulary bank', 'Calendar', 'Insights', 'Settings']) {
       expect(nav().getByRole('link', { name: new RegExp(`^${name}`) })).toBeInTheDocument();
     }
-    expect(nav().getByRole('link', { name: /^Dashboard/ })).toHaveAttribute('aria-current', 'page');
+    expect(nav().getByRole('link', { name: /^Home/ })).toHaveAttribute('aria-current', 'page');
     expect(nav().getByRole('link', { name: /^Calendar/ })).not.toHaveAttribute('aria-current');
+  });
+
+  it('groups every destination under the four approved areas', async () => {
+    await open('/');
+    const headings = nav().getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent);
+    expect(headings).toEqual(['Learn', 'Discover', 'Vocabulary', 'Progress']);
+    // Each link sits inside the section its area heading labels.
+    const areaOf = (linkName: RegExp) => {
+      const link = nav().getByRole('link', { name: linkName });
+      const section = link.closest('section')!;
+      return within(section)
+        .getAllByRole('link')
+        .map((item) => item.getAttribute('href'));
+    };
+    expect(areaOf(/^Review/)).toEqual(['/review', '/practice', '/weak']);
+    expect(areaOf(/^Discovery/)).toEqual(['/discover', '/maps', '/map']);
+    expect(areaOf(/^Add vocabulary/)).toEqual(['/add', '/bank', '/collections']);
+    expect(areaOf(/^Insights/)).toEqual(['/insights', '/calendar']);
+  });
+
+  it('lists every destination the sidebar draws, in the order it draws them', async () => {
+    await open('/');
+    const hrefs = nav()
+      .getAllByRole('link')
+      .map((link) => link.getAttribute('href'));
+    expect(hrefs).toEqual([
+      '/',
+      '/review',
+      '/practice',
+      '/weak',
+      '/discover',
+      '/maps',
+      '/map',
+      '/add',
+      '/bank',
+      '/collections',
+      '/insights',
+      '/calendar',
+      '/settings',
+    ]);
   });
 
   it('opens a page directly from its address', async () => {
@@ -83,7 +123,7 @@ describe('navigation', () => {
   it('loads the vocabulary once, however many tabs are visited', async () => {
     const { api, user } = await open('/');
     await screen.findByText('Ready to review');
-    for (const name of ['Vocabulary bank', 'Calendar', 'Insights', 'Settings', 'Add vocabulary', 'Dashboard']) {
+    for (const name of ['Vocabulary bank', 'Calendar', 'Insights', 'Settings', 'Add vocabulary', 'Home']) {
       await user.click(nav().getByRole('link', { name: new RegExp(`^${name}`) }));
     }
     await screen.findByText('Ready to review');
@@ -99,7 +139,7 @@ describe('navigation', () => {
   it('says so for an address that does not exist', async () => {
     await open('/nowhere');
     expect(screen.getByRole('heading', { name: 'Page not found' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Go to the dashboard' })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('link', { name: 'Go to the home page' })).toHaveAttribute('href', '/');
   });
 
   it('reports a refused request as a failure; there is no shared password to ask for', async () => {
@@ -125,7 +165,7 @@ describe('review within the app', () => {
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
     expect(screen.getByText(/Card 2 of 3: word-2\./)).toBeInTheDocument();
 
-    await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
+    await user.click(nav().getByRole('link', { name: /^Home/ }));
     await screen.findByText('Ready to review');
     await user.click(nav().getByRole('link', { name: /^Review/ }));
 
@@ -138,7 +178,7 @@ describe('review within the app', () => {
     const { api, user } = await open('/review', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
     press(' ');
-    await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
+    await user.click(nav().getByRole('link', { name: /^Home/ }));
     await screen.findByText('Ready to review');
     press('ArrowRight');
     press('ArrowLeft');
@@ -156,7 +196,7 @@ describe('review within the app', () => {
     press('ArrowRight');
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
 
-    await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
+    await user.click(nav().getByRole('link', { name: /^Home/ }));
     await waitFor(() => expect(api.fetchVocabulary).toHaveBeenCalledTimes(2));
   });
 
@@ -168,13 +208,13 @@ describe('review within the app', () => {
     await act(async () => saves[0]?.resolve({ outcome: 'applied', state: null }));
     expect(screen.getByRole('heading', { name: 'Review complete' })).toBeInTheDocument();
 
-    await user.click(nav().getByRole('link', { name: /^Dashboard/ }));
+    await user.click(nav().getByRole('link', { name: /^Home/ }));
     await user.click(nav().getByRole('link', { name: /^Review/ }));
     await waitFor(() => expect(api.fetchQueue).toHaveBeenCalledTimes(2));
   });
 });
 
-describe('Dashboard', () => {
+describe('Home', () => {
   it('shows each metric from the real records', async () => {
     await open('/');
     await screen.findByText('Ready to review');
@@ -204,6 +244,24 @@ describe('Dashboard', () => {
     expect(ready).toHaveTextContent('1 overdue, 2 due today.');
     expect(within(ready).getByRole('link', { name: /Start review/ })).toHaveAttribute('href', '/review');
     expect(within(ready).getByRole('link', { name: /Add vocabulary/ })).toHaveAttribute('href', '/add');
+  });
+
+  it('offers the approved Home surfaces: a Continue block and a Quick actions block', async () => {
+    const { user } = await open('/');
+    // Continue: the ready-to-review count and its way onward, under its own label.
+    const continueBlock = (await screen.findByRole('heading', { name: 'Continue' })).closest('section')!;
+    expect(within(continueBlock).getByText('Ready to review')).toBeInTheDocument();
+    expect(within(continueBlock).getByRole('link', { name: /Start review/ })).toHaveAttribute('href', '/review');
+
+    // Quick actions: the shortcuts out to filtered views, under their own label.
+    const actions = (await screen.findByRole('heading', { name: 'Quick actions' })).closest('section')!;
+    expect(within(actions).getByRole('link', { name: 'View due today' })).toHaveAttribute('href', '/bank?status=due_today');
+    expect(within(actions).getByRole('link', { name: 'Weak words' })).toHaveAttribute('href', '/weak');
+    expect(within(actions).getByRole('link', { name: 'Insights' })).toHaveAttribute('href', '/insights');
+
+    // The Continue block is the way in: pressing it really reaches the Review page.
+    await user.click(within(continueBlock).getByRole('link', { name: /Start review/ }));
+    expect(window.location.pathname).toBe('/review');
   });
 
   it('shows progress towards mastering the vocabulary', async () => {

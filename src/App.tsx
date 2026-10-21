@@ -30,7 +30,7 @@ import { SettingsPage } from './pages/SettingsPage.js';
 import { WeakWordsPage } from './pages/WeakWordsPage.js';
 
 const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
-  dashboard: { title: 'Dashboard', render: () => <DashboardPage /> },
+  dashboard: { title: 'Home', render: () => <DashboardPage /> },
   review: { title: 'Review', render: () => <ReviewPage /> },
   add: { title: 'Add vocabulary', render: () => <AddPage /> },
   import: { title: 'Import', render: () => <ImportPage /> },
@@ -285,7 +285,7 @@ function Root() {
             <h1 className="font-serif text-3xl font-semibold">Page not found</h1>
             <p className="text-muted">There is nothing at this address.</p>
             <Link to={ROUTES.dashboard} className={BUTTON_PRIMARY}>
-              Go to the dashboard
+              Go to the home page
             </Link>
           </div>
         ) : (

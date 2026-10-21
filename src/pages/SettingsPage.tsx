@@ -204,7 +204,7 @@ export function SettingsPage() {
         <section className={`${CARD} flex flex-col gap-4 p-5`}>
           <h2 className={SECTION_TITLE}>Display</h2>
           <label className="flex flex-col gap-1.5 text-sm font-medium sm:max-w-xs">
-            Dashboard additions chart
+            Home additions chart
             <select
               className={INPUT}
               value={settings.dashboardDays}

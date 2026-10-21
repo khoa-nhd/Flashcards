@@ -29,24 +29,91 @@ interface NavItem {
   icon: IconName;
 }
 
-const PRIMARY: NavItem[] = [
-  { route: 'dashboard', label: 'Dashboard', short: 'Home', icon: 'dashboard' },
-  { route: 'review', label: 'Review', short: 'Review', icon: 'review' },
-  { route: 'add', label: 'Add vocabulary', short: 'Add', icon: 'add' },
-  { route: 'bank', label: 'Vocabulary bank', short: 'Bank', icon: 'bank' },
-  { route: 'calendar', label: 'Calendar', short: 'Calendar', icon: 'calendar' },
+const HOME: NavItem = { route: 'dashboard', label: 'Home', short: 'Home', icon: 'dashboard' };
+
+/**
+ * The four approved areas (Blueprint §5). Every destination keeps its own
+ * link — the areas group them, they do not hide them behind extra clicks.
+ */
+const GROUPS: Array<{ label: string; items: NavItem[] }> = [
+  {
+    label: 'Learn',
+    items: [
+      { route: 'review', label: 'Review', short: 'Review', icon: 'review' },
+      { route: 'practice', label: 'Practice', short: 'Practice', icon: 'practice' },
+      { route: 'weak', label: 'Weak words', short: 'Weak', icon: 'weak' },
+    ],
+  },
+  {
+    label: 'Discover',
+    items: [
+      { route: 'discover', label: 'Discovery', short: 'Discover', icon: 'search' },
+      { route: 'maps', label: 'Vocabulary maps', short: 'Maps', icon: 'map' },
+      { route: 'map', label: 'Topic map', short: 'Map', icon: 'map' },
+    ],
+  },
+  {
+    label: 'Vocabulary',
+    items: [
+      { route: 'add', label: 'Add vocabulary', short: 'Add', icon: 'add' },
+      { route: 'bank', label: 'Vocabulary bank', short: 'Bank', icon: 'bank' },
+      { route: 'collections', label: 'Collections', short: 'Collections', icon: 'collections' },
+    ],
+  },
+  {
+    label: 'Progress',
+    items: [
+      { route: 'insights', label: 'Insights', short: 'Insights', icon: 'insights' },
+      { route: 'calendar', label: 'Calendar', short: 'Calendar', icon: 'calendar' },
+    ],
+  },
 ];
 
-const SECONDARY: NavItem[] = [
-  { route: 'discover', label: 'Discovery', short: 'Discover', icon: 'search' },
+const UTILITY: NavItem[] = [{ route: 'settings', label: 'Settings', short: 'Settings', icon: 'settings' }];
+
+const ALL_ITEMS: NavItem[] = [HOME, ...GROUPS.flatMap((group) => group.items), ...UTILITY];
+
+/** The phone bottom bar: Home plus one entry per approved area. */
+const BOTTOM: NavItem[] = [
+  HOME,
+  { route: 'review', label: 'Learn', short: 'Learn', icon: 'review' },
+  { route: 'discover', label: 'Discover', short: 'Discover', icon: 'search' },
+  { route: 'bank', label: 'Vocabulary', short: 'Vocabulary', icon: 'bank' },
+  { route: 'insights', label: 'Progress', short: 'Progress', icon: 'insights' },
+];
+
+/** The phone header icons: the destinations the bottom bar does not carry. */
+const HEADER_ICONS: NavItem[] = [
+  { route: 'add', label: 'Add vocabulary', short: 'Add', icon: 'add' },
   { route: 'practice', label: 'Practice', short: 'Practice', icon: 'practice' },
   { route: 'collections', label: 'Collections', short: 'Collections', icon: 'collections' },
   { route: 'maps', label: 'Vocabulary maps', short: 'Maps', icon: 'map' },
   { route: 'map', label: 'Topic map', short: 'Map', icon: 'map' },
   { route: 'weak', label: 'Weak words', short: 'Weak', icon: 'weak' },
-  { route: 'insights', label: 'Insights', short: 'Insights', icon: 'insights' },
+  { route: 'calendar', label: 'Calendar', short: 'Calendar', icon: 'calendar' },
   { route: 'settings', label: 'Settings', short: 'Settings', icon: 'settings' },
 ];
+
+/**
+ * Which bottom-bar area a page belongs to, so the bar marks the whole area
+ * current, not only its leading page. Settings is a utility page, outside the areas.
+ */
+const AREA_OF: Partial<Record<RouteKey, RouteKey>> = {
+  dashboard: 'dashboard',
+  review: 'review',
+  practice: 'review',
+  weak: 'review',
+  exam: 'review',
+  discover: 'discover',
+  maps: 'discover',
+  map: 'discover',
+  add: 'bank',
+  import: 'bank',
+  bank: 'bank',
+  collections: 'bank',
+  insights: 'insights',
+  calendar: 'insights',
+};
 
 export interface AppShellProps {
   /** The page being shown; `null` for an unknown address. */
@@ -105,7 +172,7 @@ export function AppShell({
       ? 'Import'
       : active === 'exam'
         ? 'Exam'
-        : ([...PRIMARY, ...SECONDARY].find((item) => item.route === active)?.label ?? 'Vocabulary');
+        : (ALL_ITEMS.find((item) => item.route === active)?.label ?? 'Vocabulary');
 
   const sideLink = (item: NavItem) => {
     const current = item.route === section;
@@ -155,10 +222,16 @@ export function AppShell({
                 </span>
               </button>
             )}
-            <nav aria-label="Main" className="flex flex-1 flex-col gap-1">
-              {PRIMARY.map(sideLink)}
+            <nav aria-label="Main" className="flex flex-1 flex-col gap-1 overflow-y-auto">
+              {sideLink(HOME)}
+              {GROUPS.map((group) => (
+                <section key={group.label} className="mt-3 first:mt-2">
+                  <h2 className="px-3 pb-1 text-xs font-semibold uppercase tracking-wide text-muted">{group.label}</h2>
+                  {group.items.map(sideLink)}
+                </section>
+              ))}
               <div className="my-2 border-t border-line" />
-              {SECONDARY.map(sideLink)}
+              {UTILITY.map(sideLink)}
             </nav>
             {account !== null && (
               <div className="flex flex-col gap-1 border-t border-line px-3 pt-3 text-xs text-muted">
@@ -199,7 +272,7 @@ export function AppShell({
                   <Icon name="add" />
                 </button>
               )}
-              {SECONDARY.map((item) => (
+              {HEADER_ICONS.map((item) => (
                 <Link
                   key={item.route}
                   to={ROUTES[item.route]}
@@ -259,8 +332,8 @@ export function AppShell({
               aria-label="Main"
               className="grid grid-cols-5 border-t border-line bg-surface pb-[env(safe-area-inset-bottom)] md:hidden"
             >
-              {PRIMARY.map((item) => {
-                const current = item.route === section;
+              {BOTTOM.map((item) => {
+                const current = AREA_OF[section ?? 'dashboard'] === item.route;
                 return (
                   <Link
                     key={item.route}

@@ -358,6 +358,23 @@ describe('every kind of map reads its own way', () => {
     expect(within(panel).getByRole('heading', { name: 'Words on this map' })).toBeInTheDocument();
   });
 
+  it('semantic: a note on a relationship is spelled out beside the link it explains', async () => {
+    const doc = makeDoc({
+      id: pageId(809),
+      type: 'semantic',
+      title: 'Candid and frank',
+      nodes: [
+        savedNode('n1', pageId(1), { senseId: 's1', sense: { id: 's1', meaning: 'thẳng thắn' } }),
+        candidateNode('n2', 'forthright'),
+      ],
+      edges: [edgeOf('e1', 'n1', 'n2', 'synonym', { note: 'same meaning, more formal' })],
+    });
+    await open(`/maps?map=${doc.id}`, { maps: [doc] });
+    await screen.findByRole('heading', { name: 'Meanings on this map' });
+    const panel = experience('semantic');
+    expect(panel).toHaveTextContent('Synonym of: candid → forthright — same meaning, more formal');
+  });
+
   it('word family: the root with what was formed from it, and the words standing alone', async () => {
     const doc = makeDoc({
       id: pageId(806),
@@ -376,6 +393,27 @@ describe('every kind of map reads its own way', () => {
     expect(within(section).getByText('lone')).toBeInTheDocument();
     // The derived word is not presented as a root of anything.
     expect(within(section).queryByRole('heading', { name: 'Root: decision' })).not.toBeInTheDocument();
+  });
+
+  it('word family: an inflected form hangs under its root in its own words, and is no root itself', async () => {
+    const doc = makeDoc({
+      id: pageId(807),
+      type: 'word_family',
+      title: 'The decide family',
+      nodes: [savedNode('n1', pageId(3)), savedNode('n2', pageId(4)), candidateNode('n4', 'decided')],
+      // decision → decide (derived) and decided → decide (inflected): the root sits at the receiving end.
+      edges: [edgeOf('e1', 'n2', 'n1', 'derivation'), edgeOf('e2', 'n4', 'n1', 'inflection')],
+    });
+    await open(`/maps?map=${doc.id}`, { maps: [doc] });
+    const panel = await screen.findByText(/Every root below is a word other words were formed from/);
+    const section = panel.closest('div') as HTMLElement;
+    // Both forms hang under the one root, each spelled in its own way.
+    expect(section).toHaveTextContent('└─ Derived from: decision');
+    expect(section).toHaveTextContent('└─ Inflected form of: decided');
+    // The two are told apart in words, as promised on the panel.
+    expect(within(section).getByText(/“inflected form” shows the same word in another shape/)).toBeInTheDocument();
+    // And the inflected form is not presented as a root of anything either.
+    expect(within(section).queryByRole('heading', { name: 'Root: decided' })).not.toBeInTheDocument();
   });
 
   it('collocation: the combinations as a table with the combination itself', async () => {
