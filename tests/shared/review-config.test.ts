@@ -24,7 +24,7 @@ const dueForReview = (mastery: number, reviewDate: string | null) =>
 
 describe('queue rules', () => {
   it('starts a new word at mastery 1 with no review date, so it is due at once', () => {
-    expect(newWordDefaults).toEqual({ mastery: 1, reviewDate: 'empty' });
+    expect(newWordDefaults).toEqual({ mastery: 1, reviewDate: 'empty', dueOn: 'today', newWordsPerDay: 20 });
     expect(dueForReview(newWordDefaults.mastery, null)).toBe(true);
   });
 

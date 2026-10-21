@@ -23,7 +23,7 @@ import {
 import { DEFAULT_FSRS_SETTINGS, FSRS_ENGINE, fsrsDueDay, fsrsReview } from '../../shared/scheduler/fsrs.js';
 import { NOW, TIME_ZONE, TODAY } from '../helpers/fixtures.js';
 import { call, createSupabaseTestApp, createTestUser, newId, type TestApp, type TestUser } from '../helpers/supabase-app.js';
-import { createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
+import { MASTERY_ERA_MIGRATIONS, createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
 
 const DAY_MS = 86_400_000;
 /** The same time of day, `days` later. TIME_ZONE has no daylight saving, so the calendar day moves with it. */
@@ -36,7 +36,7 @@ let clock: Date;
 let app: TestApp;
 
 beforeAll(async () => {
-  db = await createTestDatabase();
+  db = await createTestDatabase({ migrations: MASTERY_ERA_MIGRATIONS });
 }, 60_000);
 
 afterAll(async () => {

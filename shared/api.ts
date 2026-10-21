@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { isIsoDate, isValidTimeZone } from './dates.js';
 import { LIBRARY_LIMITS, RELATION_KINDS } from './library.js';
 import { DEFAULT_SCHEDULER, SCHEDULERS } from './scheduler/active.js';
+import { fsrsStateSchema } from './scheduler/fsrs.js';
 import { PRACTICE_MASTERY_MAX, STUDY_MODES } from './study-modes.js';
 
 export const isoDateSchema = z.string().refine(isIsoDate, 'Expected a YYYY-MM-DD calendar date');
@@ -15,9 +16,39 @@ export const reviewActionSchema = z.enum(['remember', 'not_remember']);
 /** Where the data comes from. Shown to the user so sample data is never mistaken for their own. */
 export const dataModeSchema = z.enum(['mock', 'supabase']);
 
+/**
+ * The display scale derived from FSRS stability. It is never used to decide
+ * when a word is due.
+ */
+export const memoryStrengthSchema = z.object({
+  level: z.number().int().min(1).max(10),
+  label: z.enum(['New', 'Learning', 'Familiar', 'Strong', 'Master']),
+  percent: z.number().min(0).max(100),
+  stabilityDays: z.number().nullable(),
+  difficulty: z.number().nullable(),
+  reps: z.number().int().min(0),
+  lapses: z.number().int().min(0),
+  lastReview: z.string().nullable(),
+  retrievability: z.number().min(0).max(1).nullable(),
+  nextIntervalDays: z.number().int().nullable(),
+});
+
+export type MemoryStrength = z.infer<typeof memoryStrengthSchema>;
+
+/**
+ * The state a review changes. `mastery` and `nextReview` are the display
+ * mirror kept for older clients and rollback; scheduling reads only FSRS.
+ */
 export const reviewStateSchema = z.object({
   mastery: z.number(),
   nextReview: isoDateSchema.nullable(),
+  /** The FSRS state after this answer, where FSRS has seen the word. */
+  fsrs: fsrsStateSchema.nullable().optional(),
+  fsrsEngine: z.string().optional(),
+  /** A fallback due day for a word FSRS has never seen. */
+  dueOn: isoDateSchema.nullable().optional(),
+  revision: z.number().int().min(0).optional(),
+  suspended: z.boolean().optional(),
 });
 
 const UUID_PATTERN = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
@@ -61,11 +92,19 @@ export const reviewCardSchema = z.object({
    * not the mastery review date above: FSRS is in charge and has seen the word.
    */
   dueOn: isoDateSchema.optional(),
+  /** The FSRS-derived strength shown to the reviewer. */
+  memory: memoryStrengthSchema.optional(),
+  /** True when the answer details start folded away (strength level 6 and above). */
+  detailCollapsed: z.boolean().default(false),
+  /** The stored revision this card was read at, where the database keeps one. */
+  revision: z.number().int().min(0).optional(),
+  /** Archived words never appear in a review queue. */
+  suspended: z.boolean().default(false),
   /** Metadata safe to show before the card is flipped. */
   front: z.array(cardFieldSchema),
-  /** Answer fields the current mastery permits. Withheld fields are never sent. */
+  /** Answer fields. Detail fields may start folded, but are never withheld. */
   back: z.array(cardFieldSchema),
-  /** True when the mastery rule withheld detail fields from `back`. */
+  /** True when the mastery rule withheld detail fields from `back` (legacy mode only). */
   detailsHidden: z.boolean(),
   /** How far this word is from leaving the weak list, where it is on that list. */
   recovery: weakRecoverySchema.optional(),
@@ -101,6 +140,11 @@ export const capabilitiesSchema = z.object({
   aiChat: z.boolean().default(false),
   /** A weak word's recovery is worked out from saved answers. */
   weakRecovery: z.boolean().default(false),
+  /**
+   * FSRS is the only schedule: answers are saved with a revision guard, words
+   * can be archived, and mastery is no longer written (schema version 15).
+   */
+  fsrsOnly: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -116,6 +160,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   library: false,
   aiChat: false,
   weakRecovery: false,
+  fsrsOnly: false,
 };
 
 /**
@@ -146,6 +191,8 @@ export const queueResponseSchema = z.object({
   capabilities: capabilitiesSchema.default(NO_CAPABILITIES),
   /** The schedule that decided what is in this queue. */
   scheduler: schedulerIdSchema.default(DEFAULT_SCHEDULER),
+  /** True when FSRS is the only scheduler: the UI then never offers a choice. */
+  fsrsOnly: z.boolean().default(false),
   /** Set when the queue was narrowed on request. `weak` is ordered weakest first. */
   focus: reviewFocusSchema.nullable().default(null),
   /**
@@ -212,11 +259,14 @@ export const reviewActionRequestSchema = z.strictObject({
   allowNotDue: z.boolean().optional(),
   /**
    * Whether this answer moves the word. False records the answer but leaves
-   * mastery, the review date and the FSRS state exactly as they were. The
-   * reviewer chooses this beside the words being reviewed. Absent means it
-   * counts, which is what every review did before the choice existed.
+   * the FSRS state and due day exactly as they were. The reviewer chooses this
+   * beside the words being reviewed. Absent means it counts.
    */
+  countsTowardSchedule: z.boolean().optional(),
+  /** The name used by older clients; treated exactly like `countsTowardSchedule`. */
   countsTowardMastery: z.boolean().optional(),
+  /** The revision the browser was shown, where the store keeps one. */
+  expectedRevision: z.number().int().min(0).optional(),
 });
 
 export const reviewActionResponseSchema = z.object({
@@ -267,6 +317,8 @@ export const schedulerChoiceRequestSchema = z.strictObject({ scheduler: schedule
  */
 export const schedulerReportSchema = z.object({
   active: schedulerIdSchema,
+  /** True when FSRS is the only schedule; Settings then hides the choice. */
+  fsrsOnly: z.boolean().default(false),
   /** False where the choice cannot be stored yet, or FSRS is not being calculated. */
   switchable: z.boolean().default(false),
   today: isoDateSchema,
@@ -302,6 +354,8 @@ export const schedulerReportSchema = z.object({
     }),
   ),
   workload: z.array(z.object({ date: isoDateSchema, legacy: z.number().int(), fsrs: z.number().int() })),
+  /** How many live words sit at each strength level, 1 to 10. */
+  strengthDistribution: z.array(z.number().int()).length(10).optional(),
 });
 
 // ---- Simulation ----
@@ -680,11 +734,13 @@ export const weakWordsResponseSchema = z.object({
 // ---- Vocabulary bank ----
 
 export const reviewStatusSchema = z.enum([
-  'mastered',
+  'new',
   'overdue',
   'due_today',
   'unscheduled',
   'upcoming',
+  'suspended',
+  'mastered',
   'invalid',
 ]);
 
@@ -701,6 +757,14 @@ export const vocabularyEntrySchema = z.object({
   mastery: z.number().nullable(),
   /** The day the word is next due under the schedule in charge. */
   reviewDate: isoDateSchema.nullable(),
+  /** Alias of `reviewDate` with the FSRS-first naming. */
+  dueDate: isoDateSchema.nullable().optional(),
+  /** The FSRS-derived strength, present wherever FSRS state is available. */
+  memory: memoryStrengthSchema.optional(),
+  /** True when the word has been archived from the review queue. */
+  suspended: z.boolean().default(false),
+  /** Increments on every saved answer; used to detect stale writes. */
+  revision: z.number().int().min(0).default(0),
   /**
    * Sent as `fsrs` when FSRS, not the mastery schedule, set the date above.
    * Such a date is FSRS's own and cannot be edited by hand.
@@ -724,7 +788,13 @@ export const vocabularyListResponseSchema = z.object({
   writesEnabled: z.boolean(),
   skipped: z.array(skippedRecordSchema),
   /** What a new word starts with, so the Add form can show it rather than hide it. */
-  defaults: z.object({ mastery: z.number(), reviewDate: z.enum(['empty', 'today']) }),
+  defaults: z.object({
+    mastery: z.number(),
+    reviewDate: z.enum(['empty', 'today']),
+    /** FSRS-first defaults. A new word is due on the day it is added. */
+    dueOn: z.literal('today').optional(),
+    newWordsPerDay: z.number().int().min(1).max(1000).optional(),
+  }),
 });
 
 export const entryResponseSchema = z.object({ entry: vocabularyEntrySchema });
@@ -753,10 +823,12 @@ export const createEntryRequestSchema = z.strictObject({
   example: textSchema.optional(),
   /** Defaults to today in the review time zone. */
   dateAdded: isoDateSchema.optional(),
-  /** Defaults to the configured starting mastery. */
+  /** Defaults to the configured starting mastery. Ignored by an FSRS-only store. */
   mastery: masterySchema.optional(),
   /** `null` means no review date. Omitted means the configured default. */
   reviewDate: isoDateSchema.nullable().optional(),
+  /** FSRS-first fallback due day for a word with no state yet. */
+  dueOn: isoDateSchema.optional(),
   /** Set after the user has seen a duplicate warning and chosen to continue. */
   allowDuplicate: z.boolean().optional(),
   /** Identifies one submission, so a repeated request cannot create a second record. */
@@ -785,6 +857,11 @@ export const importItemSchema = z.strictObject({
 /** Rows are checked one by one on the server, so a bad one does not sink the rest. */
 export const importRequestSchema = z.strictObject({
   items: z.array(z.unknown()).min(1).max(IMPORT_BATCH_MAX),
+  /**
+   * Optional spreading for a large import: the first N words are due today,
+   * the next N tomorrow, and so on. Omitted means every word is due today.
+   */
+  wordsPerDay: z.number().int().min(1).max(1000).optional(),
 });
 
 export const importResponseSchema = z.object({
@@ -842,6 +919,58 @@ const timeZoneSchema = z
   .max(64)
   .refine(isValidTimeZone, 'Expected an IANA time zone such as "Asia/Ho_Chi_Minh"');
 
+// ---- FSRS-only goals and archive ----
+
+export const uiLanguageSchema = z.enum(['vi', 'en']);
+export type UiLanguage = z.infer<typeof uiLanguageSchema>;
+
+/** The two daily goals. They drive the streak only; a review session never stops for them. */
+export const studyGoalsSchema = z.object({
+  newWords: z.number().int().min(0).max(1000),
+  reviews: z.number().int().min(0).max(1000),
+  maintenanceMode: z.boolean().default(false),
+});
+
+export const updateStudyGoalsRequestSchema = z
+  .strictObject({
+    newWords: z.number().int().min(0).max(1000).optional(),
+    reviews: z.number().int().min(0).max(1000).optional(),
+    maintenanceMode: z.boolean().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, 'Nothing to change');
+
+const goalPartProgressSchema = z.object({
+  target: z.number().int(),
+  done: z.number().int(),
+  remaining: z.number().int(),
+  met: z.boolean(),
+  /** True when no more words of this kind are available, so the goal stays open. */
+  exhausted: z.boolean(),
+});
+
+/** Today's two goals, their progress, and the streak that needs both. */
+export const studyGoalsResponseSchema = z.object({
+  available: z.boolean(),
+  today: isoDateSchema,
+  timeZone: z.string(),
+  goals: studyGoalsSchema,
+  newWords: goalPartProgressSchema,
+  reviews: goalPartProgressSchema,
+  due: z.object({ total: z.number().int(), overdue: z.number().int() }),
+  streak: z.object({ current: z.number().int(), longest: z.number().int(), metToday: z.boolean() }),
+});
+
+/** Bulk archive or resume. Words are archived, never deleted. */
+export const archiveEntriesRequestSchema = z.strictObject({
+  ids: z.array(pageIdSchema).min(1).max(500),
+  archived: z.boolean(),
+});
+
+export const archiveEntriesResponseSchema = z.object({
+  archived: z.number().int(),
+  entries: z.array(vocabularyEntrySchema),
+});
+
 export const accountSettingsSchema = z.object({
   /** Decides which calendar day counts as "today" for due dates. */
   timeZone: z.string(),
@@ -858,6 +987,16 @@ export const accountSettingsSchema = z.object({
   fsrsRetention: z.number().nullable().default(null),
   /** Whether a review moves a word by default, and the value the switch starts on. */
   countReviewsTowardMastery: z.boolean().default(true),
+  /** The FSRS-first name for the same setting. */
+  countReviewsTowardSchedule: z.boolean().optional(),
+  /** True when FSRS is the only scheduler. */
+  fsrsOnly: z.boolean().default(false),
+  /** The two daily goals, where the account can keep them. */
+  goals: studyGoalsSchema.nullable().default(null),
+  /** The most reviews offered in one day; `null` means show everything due. */
+  maxReviewsPerDay: z.number().int().min(1).max(1000).nullable().default(null),
+  /** The interface language. Word meanings stay Vietnamese. */
+  uiLanguage: uiLanguageSchema.default('vi'),
 });
 
 export const updateSettingsRequestSchema = z
@@ -865,12 +1004,18 @@ export const updateSettingsRequestSchema = z
     timeZone: timeZoneSchema.optional(),
     fsrsRetention: z.number().min(0.7).max(0.97).optional(),
     countReviewsTowardMastery: z.boolean().optional(),
+    countReviewsTowardSchedule: z.boolean().optional(),
+    maxReviewsPerDay: z.number().int().min(1).max(1000).nullable().optional(),
+    uiLanguage: uiLanguageSchema.optional(),
   })
   .refine(
     (value) =>
       value.timeZone !== undefined ||
       value.fsrsRetention !== undefined ||
-      value.countReviewsTowardMastery !== undefined,
+      value.countReviewsTowardMastery !== undefined ||
+      value.countReviewsTowardSchedule !== undefined ||
+      value.maxReviewsPerDay !== undefined ||
+      value.uiLanguage !== undefined,
     'Nothing to change',
   );
 
@@ -917,6 +1062,9 @@ export type UpdateEntryRequest = z.infer<typeof updateEntryRequestSchema>;
 export type UpdateEntryInput = z.input<typeof updateEntryRequestSchema>;
 export type AppConfigResponse = z.infer<typeof appConfigResponseSchema>;
 export type AccountSettings = z.infer<typeof accountSettingsSchema>;
+export type StudyGoals = z.infer<typeof studyGoalsSchema>;
+export type StudyGoalsResponse = z.infer<typeof studyGoalsResponseSchema>;
+export type ArchiveEntriesRequest = z.infer<typeof archiveEntriesRequestSchema>;
 
 // ---- AI Chat ----
 

@@ -32,8 +32,10 @@ export const fsrsRatingMap: RatingMap = assertRatingMap({
  * Both can be changed per word in the Add form.
  */
 export const newWordDefaults: NewWordDefaults = {
-  mastery: 1, // VERIFIED from the original new-word template; no word has ever been below 1
-  reviewDate: 'empty', // VERIFIED from the same template
+  mastery: 1, // legacy display mirror; FSRS-only stores ignore it
+  reviewDate: 'empty', // legacy default; an FSRS-only store sets the fallback due day to today
+  dueOn: 'today',
+  newWordsPerDay: 20,
 };
 
 export const cardFields: CardFieldConfig[] = [

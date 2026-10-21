@@ -13,6 +13,10 @@ import type { StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
 import type {
   ConfidenceStat,
+  FsrsCardState,
+  FsrsReviewResult,
+  FsrsReviewWrite,
+  FsrsUndoResult,
   PracticeDailyStat,
   PracticeHistoryRow,
   PracticeWrite,
@@ -29,6 +33,7 @@ import type {
 } from '../vocabulary-repository.js';
 import {
   LATEST_SCHEMA_VERSION,
+  fsrsFromJson,
   fsrsOfCard,
   fsrsStateToRow,
   type CardPatch,
@@ -49,6 +54,21 @@ function toEntry(row: CardRow): EntryData {
     dateAdded: row.date_added,
     createdTime: row.created_at,
     lastEditedTime: row.updated_at,
+    fsrs: storedFsrs(row),
+    dueOn: row.due_on ?? null,
+    revision: row.revision ?? 0,
+    suspended: row.suspended_at != null,
+  };
+}
+
+/** A card's place under FSRS alone, as a version 15 function reports it. */
+function fsrsCardState(row: { revision: number | null; due_on: IsoDate | null; fsrs: unknown }): FsrsCardState | null {
+  if (row.revision === null) return null;
+  const found = fsrsFromJson(row.fsrs);
+  return {
+    fsrs: found === null ? null : { state: found.state, engine: found.version },
+    dueOn: row.due_on,
+    revision: row.revision,
   };
 }
 
@@ -61,6 +81,9 @@ function toRecord(row: CardRow): VocabularyRecord {
     nextReview: row.review_date,
     fields: { meaning: row.meaning, definition: row.definition, example: row.example },
     fsrs: storedFsrs(row),
+    dueOn: row.due_on ?? null,
+    revision: row.revision ?? 0,
+    suspended: row.suspended_at != null,
   };
 }
 
@@ -83,6 +106,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     practiceHistory: schemaVersion >= 9,
     aiChat: schemaVersion >= 10,
     weakRecovery: schemaVersion >= 14,
+    fsrsOnly: schemaVersion >= 15,
   };
 }
 
@@ -328,6 +352,56 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     }
     if (state === null) return { outcome: 'not_found' };
     return { outcome: result.outcome, id: result.vocabulary_id, state };
+  }
+
+  async applyFsrsReview(write: FsrsReviewWrite): Promise<FsrsReviewResult> {
+    const record = this.database.recordFsrsReview;
+    if (!this.capabilities.fsrsOnly || record === undefined) {
+      throw new Error('This database cannot save answers under FSRS alone.');
+    }
+    const result = await record.call(this.database, {
+      id: write.id,
+      requestId: write.requestId,
+      sessionId: write.sessionId,
+      action: write.action,
+      expectedRevision: write.expectedRevision,
+      countsTowardSchedule: write.countsTowardSchedule,
+      rating: write.rating,
+      version: write.engine,
+      after: write.after === null || write.engine === null ? null : fsrsStateToRow(write.after, write.engine),
+      reviewedOn: write.reviewedOn,
+      reviewedAt: write.answeredAt,
+      durationMs: write.durationMs,
+      confidence: write.confidence,
+    });
+    if (result.outcome === 'not_found') return { outcome: 'not_found' };
+    const state = fsrsCardState(result);
+    if (result.outcome === 'applied' || result.outcome === 'already_applied') {
+      if (state === null) throw new Error('The database confirmed the answer without the card’s new state.');
+      return { outcome: result.outcome, state };
+    }
+    return { outcome: result.outcome, state };
+  }
+
+  async undoFsrsReview(input: { reviewRequestId: string; requestId: string }): Promise<FsrsUndoResult> {
+    const undo = this.database.undoFsrsReview;
+    if (!this.capabilities.fsrsOnly || undo === undefined) {
+      throw new Error('This database cannot take answers back under FSRS alone.');
+    }
+    const result = await undo.call(this.database, input);
+    if (result.outcome === 'not_found' || result.vocabulary_id === null) return { outcome: 'not_found' };
+    const state = fsrsCardState(result);
+    if (result.outcome === 'not_latest' || result.outcome === 'conflict') {
+      return { outcome: result.outcome, id: result.vocabulary_id, state };
+    }
+    if (state === null) return { outcome: 'not_found' };
+    return { outcome: result.outcome, id: result.vocabulary_id, state };
+  }
+
+  async setEntriesSuspended(ids: readonly string[], suspended: boolean): Promise<EntryData[]> {
+    const set = this.database.setCardsSuspended;
+    if (!this.capabilities.fsrsOnly || set === undefined) return [];
+    return (await set.call(this.database, ids, suspended)).map(toEntry);
   }
 
   async sessionSummary(sessionId: string): Promise<SessionSummary | null> {

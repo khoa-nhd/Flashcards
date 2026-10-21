@@ -136,6 +136,10 @@ describe('with accounts', () => {
       database: { version: 13, latest: 13 },
       fsrsRetention: 0.9,
       countReviewsTowardMastery: true,
+      fsrsOnly: false,
+      goals: null,
+      maxReviewsPerDay: null,
+      uiLanguage: 'vi',
     };
     const calls = stubFetch(ok(settings), ok({ ...settings, timeZone: 'Asia/Tokyo' }), ok({ entries: [] }));
     const api = createAppApi(signedIn(['a.b.c', 'a.b.c', 'a.b.c']));

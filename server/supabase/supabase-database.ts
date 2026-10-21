@@ -9,6 +9,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { isIsoDate, type IsoDate } from '../../shared/dates.js';
+import type { ReviewAction } from '../../shared/review-logic.js';
 import { DEFAULT_SCHEDULER, isSchedulerId, type SchedulerId } from '../../shared/scheduler/active.js';
 import { fsrsStateSchema, type FsrsState } from '../../shared/scheduler/fsrs.js';
 import type { DailyGoal } from '../../shared/session-planner.js';
@@ -40,6 +41,11 @@ export const cardRowSchema = z.object({
   fsrs_scheduled_days: z.number().int().nullable().optional(),
   fsrs_learning_steps: z.number().int().nullable().optional(),
   fsrs_version: z.string().nullable().optional(),
+  // From schema version 15. The fallback due day, revision and archive state.
+  due_on: dateSchema.optional(),
+  revision: z.number().int().min(0).nullable().optional(),
+  suspended_at: z.string().nullable().optional(),
+  suspended_reason: z.string().nullable().optional(),
 });
 
 export type CardRow = z.infer<typeof cardRowSchema>;
@@ -50,9 +56,16 @@ export const CARD_COLUMNS =
 const FSRS_COLUMNS =
   'fsrs_due, fsrs_stability, fsrs_difficulty, fsrs_last_review, fsrs_reps, fsrs_lapses, fsrs_state, fsrs_scheduled_days, fsrs_learning_steps, fsrs_version';
 
+/** Columns added with the FSRS-only phase. */
+export const CARD_COLUMNS_V15 = 'due_on, revision, suspended_at, suspended_reason';
+
 /** The columns a card is read with, which depends on what the database has. */
 export const cardColumns = (schemaVersion: number): string =>
-  schemaVersion >= 3 ? `${CARD_COLUMNS}, ${FSRS_COLUMNS}` : CARD_COLUMNS;
+  [
+    CARD_COLUMNS,
+    ...(schemaVersion >= 3 ? [FSRS_COLUMNS] : []),
+    ...(schemaVersion >= 15 ? [CARD_COLUMNS_V15] : []),
+  ].join(', ');
 
 /** An FSRS state as the database stores it, with the engine that produced it. */
 export interface FsrsRow {
@@ -101,6 +114,68 @@ export function fsrsOfCard(row: CardRow): { state: FsrsState; version: string } 
   return parsed.success ? { state: parsed.data, version: row.fsrs_version ?? '' } : null;
 }
 
+/**
+ * An FSRS state as the version 15 functions return it (the card's columns as
+ * JSON), or `null` when there is none or it is not a complete state.
+ */
+export function fsrsFromJson(value: unknown): { state: FsrsState; version: string } | null {
+  if (value === null || typeof value !== 'object') return null;
+  const json = value as Record<string, unknown>;
+  const at = (raw: unknown) => (typeof raw === 'string' && !Number.isNaN(Date.parse(raw)) ? new Date(raw).toISOString() : null);
+  const due = at(json.due);
+  if (due === null) return null;
+  const parsed = fsrsStateSchema.safeParse({
+    due,
+    stability: json.stability,
+    difficulty: json.difficulty,
+    scheduledDays: json.scheduled_days ?? 0,
+    learningSteps: json.learning_steps ?? 0,
+    reps: json.reps ?? 0,
+    lapses: json.lapses ?? 0,
+    state: json.state ?? 2,
+    lastReview: at(json.last_review),
+  });
+  return parsed.success ? { state: parsed.data, version: typeof json.version === 'string' ? json.version : '' } : null;
+}
+
+/** What `record_fsrs_review` reports (schema version 15). */
+export const fsrsReviewRowSchema = z.object({
+  outcome: z.enum(['applied', 'already_applied', 'undone', 'conflict', 'suspended', 'not_found']),
+  revision: z.coerce.number().int().min(0).nullable(),
+  due_on: dateSchema,
+  fsrs: z.unknown().nullable(),
+});
+
+export type FsrsReviewRow = z.infer<typeof fsrsReviewRowSchema>;
+
+/** What `undo_fsrs_review` reports (schema version 15). */
+export const fsrsUndoRowSchema = z.object({
+  outcome: z.enum(['undone', 'already_undone', 'not_latest', 'conflict', 'not_found']),
+  vocabulary_id: z.string().nullable(),
+  revision: z.coerce.number().int().min(0).nullable(),
+  due_on: dateSchema,
+  fsrs: z.unknown().nullable(),
+});
+
+export type FsrsUndoRow = z.infer<typeof fsrsUndoRowSchema>;
+
+/** One answer as `record_fsrs_review` takes it. */
+export interface FsrsReviewArgs {
+  id: string;
+  requestId: string;
+  sessionId: string | null;
+  action: ReviewAction;
+  expectedRevision: number;
+  countsTowardSchedule: boolean;
+  rating: number | null;
+  version: string | null;
+  after: FsrsRow | null;
+  reviewedOn: IsoDate;
+  reviewedAt: string | null;
+  durationMs: number | null;
+  confidence: number | null;
+}
+
 export interface NewCard {
   word: string;
   wordKey: string;
@@ -110,6 +185,8 @@ export interface NewCard {
   example: string | null;
   dateAdded: IsoDate | null;
   reviewDate: IsoDate | null;
+  /** Fallback due day for a word FSRS has never seen. */
+  dueOn?: IsoDate | null;
   requestId: string | null;
   external?: { source: string; id: string; createdAt: string | null };
 }
@@ -140,6 +217,10 @@ export interface StoredSettings {
   scheduler: SchedulerId | null;
   /** Whether a review moves a word; `null` on a database that cannot keep the choice yet. */
   countReviewsTowardMastery: boolean | null;
+  /** FSRS-first goals, where the database keeps them. */
+  studyGoals: { newWords: number; reviews: number; maintenanceMode: boolean } | null;
+  maxReviewsPerDay: number | null;
+  uiLanguage: 'vi' | 'en';
 }
 
 export const reviewWriteResultSchema = z.object({
@@ -154,7 +235,15 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 14;
+export const LATEST_SCHEMA_VERSION = 15;
+
+/**
+ * The newest migration Settings asks the owner to run. Version 15 makes FSRS
+ * the only schedule and converts the data for it; it is held back until the
+ * screens for it exist (docs/fsrs-only-progress.md), so the app does not ask
+ * for it yet. Raise this to LATEST_SCHEMA_VERSION when they do.
+ */
+export const RECOMMENDED_SCHEMA_VERSION = 14;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -419,6 +508,12 @@ export interface VocabularyDatabase {
   createCard(card: NewCard): Promise<{ id: string; created: boolean }>;
   /** False when there is no such live word. */
   updateCard(id: string, patch: CardPatch): Promise<boolean>;
+  /** Archives or resumes words in bulk. Returns the words that changed, as they now are. Needs schema version 15. */
+  setCardsSuspended?(ids: readonly string[], suspended: boolean): Promise<CardRow[]>;
+  /** Saves an answer under FSRS alone. Needs schema version 15. */
+  recordFsrsReview?(args: FsrsReviewArgs): Promise<FsrsReviewRow>;
+  /** Takes an answer back under FSRS alone. Needs schema version 15. */
+  undoFsrsReview?(args: { reviewRequestId: string; requestId: string }): Promise<FsrsUndoRow>;
   setCardTrashed(id: string, trashed: boolean): Promise<boolean>;
   applyReview(args: ReviewWriteArgs): Promise<ReviewWriteRow>;
   findReviewByRequestId(requestId: string): Promise<{ mastery: number; reviewDate: IsoDate | null } | null>;
@@ -505,6 +600,16 @@ export interface VocabularyDatabase {
   saveScheduler(value: SchedulerId): Promise<SchedulerId>;
   /** Needs schema version 13. */
   saveCountReviewsTowardMastery(value: boolean): Promise<boolean>;
+  /** Needs schema version 15. */
+  saveStudyGoals?(goal: { newWords: number; reviews: number; maintenanceMode: boolean }): Promise<{
+    newWords: number;
+    reviews: number;
+    maintenanceMode: boolean;
+  }>;
+  /** Needs schema version 15. */
+  saveMaxReviewsPerDay?(value: number | null): Promise<number | null>;
+  /** Needs schema version 15. */
+  saveUiLanguage?(value: 'vi' | 'en'): Promise<'vi' | 'en'>;
   getTimeZone(): Promise<string | null>;
   /** Stores the zone only if the user has none yet; returns the one in effect. */
   ensureTimeZone(timeZone: string): Promise<string>;
@@ -561,6 +666,12 @@ export interface SettingsRow {
   scheduler?: string | null;
   /** From schema version 13. */
   count_reviews_toward_mastery?: boolean | null;
+  /** From schema version 15. */
+  study_goal_new_words?: number | null;
+  study_goal_reviews?: number | null;
+  maintenance_mode?: boolean | null;
+  max_reviews_per_day?: number | null;
+  ui_language?: string | null;
 }
 
 /** The settings columns a database at this version has. */
@@ -571,20 +682,48 @@ export const settingsColumns = (schemaVersion: number): string =>
     ...(schemaVersion >= 5 ? ['daily_goal_reviews', 'daily_goal_minutes'] : []),
     ...(schemaVersion >= 8 ? ['scheduler'] : []),
     ...(schemaVersion >= 13 ? ['count_reviews_toward_mastery'] : []),
+    ...(schemaVersion >= 15
+      ? [
+          'study_goal_new_words',
+          'study_goal_reviews',
+          'maintenance_mode',
+          'max_reviews_per_day',
+          'ui_language',
+        ]
+      : []),
   ].join(', ');
 
 export function settingsFromRow(row: SettingsRow, schemaVersion: number): StoredSettings {
   const retention = row.fsrs_request_retention == null ? null : Number(row.fsrs_request_retention);
+  const language = row.ui_language === 'en' ? 'en' : 'vi';
   return {
     timeZone: row.time_zone,
     fsrsRetention: retention !== null && Number.isFinite(retention) ? retention : null,
     dailyGoal:
       schemaVersion >= 5 ? { reviews: row.daily_goal_reviews ?? null, minutes: row.daily_goal_minutes ?? null } : null,
-    // Anything unrecognised is read as the default: the mastery schedule is never left by accident.
-    scheduler: schemaVersion >= 8 ? (isSchedulerId(row.scheduler) ? row.scheduler : DEFAULT_SCHEDULER) : null,
+    // From version 15 the stored choice is migrated to FSRS. An older database
+    // still reads as the legacy schedule so nothing is silently switched.
+    scheduler:
+      schemaVersion >= 15
+        ? 'fsrs'
+        : schemaVersion >= 8
+          ? isSchedulerId(row.scheduler)
+            ? row.scheduler
+            : DEFAULT_SCHEDULER
+          : null,
     // A database that cannot keep the choice counts every review, as it always did.
-    countReviewsTowardMastery:
-      schemaVersion >= 13 ? row.count_reviews_toward_mastery !== false : null,
+    // From version 15 the same choice decides whether an answer moves the FSRS schedule.
+    countReviewsTowardMastery: schemaVersion >= 13 ? row.count_reviews_toward_mastery !== false : null,
+    studyGoals:
+      schemaVersion >= 15
+        ? {
+            newWords: row.study_goal_new_words ?? 10,
+            reviews: row.study_goal_reviews ?? 30,
+            maintenanceMode: row.maintenance_mode === true,
+          }
+        : null,
+    maxReviewsPerDay: schemaVersion >= 15 ? (row.max_reviews_per_day ?? null) : null,
+    uiLanguage: schemaVersion >= 15 ? language : 'vi',
   };
 }
 
@@ -799,7 +938,24 @@ export function createSupabaseDatabase(
       if (!row.success || row.data[0] === undefined) {
         throw new DatabaseError('unavailable', 'The database did not confirm the new word.');
       }
+      // From version 15 a trigger copies the review date into `due_on`, the day the word first comes up.
       return row.data[0];
+    },
+
+    async setCardsSuspended(ids, suspended) {
+      if (schemaVersion < 15) return [];
+      const { data, error, status } = await client.rpc('set_cards_suspended', { p_ids: [...ids], p_suspended: suspended });
+      if (error) throw toDatabaseError(error, status);
+      const parsed = z.array(z.object({ vocabulary_id: z.string() })).safeParse(data ?? []);
+      if (!parsed.success) throw new DatabaseError('unavailable', 'The database did not confirm the archive.');
+      const changed = new Set(parsed.data.map((row) => row.vocabulary_id));
+      if (changed.size === 0) return [];
+      const { data: rows, error: readError, status: readStatus } = await client
+        .from('vocabulary_cards')
+        .select(columns)
+        .in('id', [...changed]);
+      if (readError) throw toDatabaseError(readError, readStatus);
+      return parseRows(rows ?? []);
     },
 
     async updateCard(id, patch) {
@@ -1325,11 +1481,107 @@ export function createSupabaseDatabase(
     async saveCountReviewsTowardMastery(value) {
       const { data, error, status } = await client
         .from('user_settings')
-        .upsert({ count_reviews_toward_mastery: value }, { onConflict: 'user_id' })
+        .upsert(
+          {
+            count_reviews_toward_mastery: value,
+          },
+          { onConflict: 'user_id' },
+        )
         .select('count_reviews_toward_mastery')
         .single();
       if (error) throw toDatabaseError(error, status);
       return data.count_reviews_toward_mastery === true;
+    },
+
+    async saveStudyGoals(goal) {
+      if (schemaVersion < 15) {
+        throw new DatabaseError('schema_missing', 'This database cannot keep study goals yet.');
+      }
+      const { data, error, status } = await client
+        .from('user_settings')
+        .upsert(
+          {
+            study_goal_new_words: goal.newWords,
+            study_goal_reviews: goal.reviews,
+            maintenance_mode: goal.maintenanceMode,
+          },
+          { onConflict: 'user_id' },
+        )
+        .select('study_goal_new_words, study_goal_reviews, maintenance_mode')
+        .single();
+      if (error) throw toDatabaseError(error, status);
+      return {
+        newWords: data.study_goal_new_words ?? 10,
+        reviews: data.study_goal_reviews ?? 30,
+        maintenanceMode: data.maintenance_mode === true,
+      };
+    },
+
+    async saveMaxReviewsPerDay(value) {
+      if (schemaVersion < 15) {
+        throw new DatabaseError('schema_missing', 'This database cannot keep a review limit yet.');
+      }
+      const { data, error, status } = await client
+        .from('user_settings')
+        .upsert({ max_reviews_per_day: value }, { onConflict: 'user_id' })
+        .select('max_reviews_per_day')
+        .single();
+      if (error) throw toDatabaseError(error, status);
+      return data.max_reviews_per_day ?? null;
+    },
+
+    async saveUiLanguage(value) {
+      if (schemaVersion < 15) {
+        throw new DatabaseError('schema_missing', 'This database cannot keep an interface language yet.');
+      }
+      const { data, error, status } = await client
+        .from('user_settings')
+        .upsert({ ui_language: value }, { onConflict: 'user_id' })
+        .select('ui_language')
+        .single();
+      if (error) throw toDatabaseError(error, status);
+      return data.ui_language === 'en' ? 'en' : 'vi';
+    },
+
+    async recordFsrsReview(args) {
+      if (schemaVersion < 15) throw new DatabaseError('schema_missing', 'This database cannot save answers under FSRS alone yet.');
+      const { data, error, status } = await client.rpc('record_fsrs_review', {
+        p_event: {
+          vocabulary_id: args.id,
+          request_id: args.requestId,
+          session_id: args.sessionId,
+          action: args.action,
+          expected_revision: args.expectedRevision,
+          counts_toward_schedule: args.countsTowardSchedule,
+          reviewed_on: args.reviewedOn,
+          duration_ms: args.durationMs,
+          ...(args.reviewedAt === null ? {} : { reviewed_at: args.reviewedAt }),
+          ...(args.rating === null ? {} : { rating: args.rating }),
+          ...(args.version === null ? {} : { version: args.version }),
+          ...(args.after === null ? {} : { after: args.after }),
+          ...(args.confidence === null ? {} : { confidence: args.confidence }),
+        },
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(fsrsReviewRowSchema).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not confirm the review.');
+      }
+      return rows.data[0];
+    },
+
+    async undoFsrsReview(args) {
+      if (schemaVersion < 15) throw new DatabaseError('schema_missing', 'This database cannot take answers back under FSRS alone yet.');
+      const { data, error, status } = await client.rpc('undo_fsrs_review', {
+        p_review_request_id: args.reviewRequestId,
+        p_request_id: args.requestId,
+      });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(fsrsUndoRowSchema).safeParse(data);
+      if (!rows.success || rows.data[0] === undefined) {
+        throw new DatabaseError('unavailable', 'The database did not confirm the undo.');
+      }
+      return rows.data[0];
     },
 
     async undoReview(args) {

@@ -23,6 +23,7 @@ import { VocabularyService } from '../vocabulary-service.js';
 import {
   DatabaseError,
   LATEST_SCHEMA_VERSION,
+  RECOMMENDED_SCHEMA_VERSION,
   createSupabaseDatabase,
   createUserClient,
   type StoredSettings,
@@ -175,7 +176,16 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         // A brand-new account now has a zone; remember it is set, so the next
         // request reads it instead of writing it again.
         settingsCache.set(account.id, {
-          value: { timeZone, fsrsRetention: null, dailyGoal: null, scheduler: null, countReviewsTowardMastery: null },
+          value: {
+            timeZone,
+            fsrsRetention: null,
+            dailyGoal: null,
+            scheduler: null,
+            countReviewsTowardMastery: null,
+            studyGoals: null,
+            maxReviewsPerDay: null,
+            uiLanguage: 'vi',
+          },
           at: (now ?? (() => new Date()))().getTime(),
         });
       }
@@ -216,14 +226,20 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
               return database.saveScheduler(next);
             })
           : MASTERY_ONLY;
+      // FSRS-only: once the database is at v15, FSRS is the only scheduler.
+      const fsrsOnly = repository.capabilities.fsrsOnly;
       return {
         account,
         timeZone,
-        database: { version: schemaVersion, latest: LATEST_SCHEMA_VERSION },
+        database: { version: schemaVersion, latest: RECOMMENDED_SCHEMA_VERSION },
         fsrsRetention,
         countReviewsTowardMastery,
+        fsrsOnly,
+        goals: settings?.studyGoals ?? null,
+        maxReviewsPerDay: settings?.maxReviewsPerDay ?? null,
+        uiLanguage: settings?.uiLanguage ?? 'vi',
         review: new ReviewService({ repository, rules, cardFields, timeZone, writesRequested, fsrs, scheduler, now }),
-        vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, now }),
+        vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, fsrsOnly, now }),
         analytics: new AnalyticsService({
           repository,
           catalog: repository,

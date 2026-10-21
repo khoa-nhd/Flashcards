@@ -17,7 +17,8 @@ const REVIEW_DAY = '2026-10-10';
 function start(state: ReviewState, overrides: Partial<ReviewServiceOptions> = {}) {
   const repository = new FakeRepository([
     record(1, {
-      ...state,
+      mastery: state.mastery,
+      nextReview: state.nextReview,
       fields: { meaning: 'tình cờ may mắn', definition: 'a happy accident', example: 'What luck!' },
     }),
   ]);

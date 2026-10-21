@@ -17,14 +17,14 @@ import { classifyReviewStatus } from '../../shared/vocabulary-status.js';
 import { NOW, TODAY } from '../helpers/fixtures.js';
 import { createPgVocabularyDatabase } from '../helpers/pg-vocabulary-database.js';
 import { call, createSupabaseTestApp, createTestUser, newId, type TestUser } from '../helpers/supabase-app.js';
-import { createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
+import { MASTERY_ERA_MIGRATIONS, MASTERY_ERA_SCHEMA_VERSION, createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
 
 let db: TestDatabase;
 let owner: TestUser;
 let other: TestUser;
 
 beforeAll(async () => {
-  db = await createTestDatabase();
+  db = await createTestDatabase({ migrations: MASTERY_ERA_MIGRATIONS });
 }, 60_000);
 
 afterAll(async () => {
@@ -70,7 +70,7 @@ async function backupOf(entries: BackupEntry[], overrides: Partial<Backup> = {})
   });
 }
 
-const databaseOf = (user: TestUser) => createPgVocabularyDatabase(db, user.id);
+const databaseOf = (user: TestUser) => createPgVocabularyDatabase(db, user.id, MASTERY_ERA_SCHEMA_VERSION);
 
 async function importAll(user: TestUser, backup: Backup) {
   const database = databaseOf(user);

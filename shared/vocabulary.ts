@@ -5,14 +5,23 @@ import type { FsrsState } from './scheduler/fsrs.js';
 export interface VocabularyRecord {
   id: string;
   word: string;
-  /** `null` when no mastery is stored. */
+  /**
+   * The display mirror of FSRS strength, kept for older callers and rollback.
+   * Scheduling never reads it.
+   */
   mastery: number | null;
-  /** `null` when the due date is empty or unreadable. */
+  /** The due day mirror. FSRS sets it from its own state. */
   nextReview: IsoDate | null;
   /** Display fields keyed by `CardFieldConfig.key`; `null` when empty. */
   fields: Record<string, string | null>;
-  /** The card's FSRS state, where one is kept and the card has one. It never decides what is due. */
+  /** The card's FSRS state, where one is kept and the card has one. This decides what is due. */
   fsrs?: StoredFsrs | null;
+  /** A fallback due day for a word FSRS has never seen. */
+  dueOn?: IsoDate | null;
+  /** Increments on every saved answer. */
+  revision?: number;
+  /** Archived words stay stored but leave the queue and dashboard. */
+  suspended?: boolean;
 }
 
 /** An FSRS state together with the engine that produced it. */
@@ -27,20 +36,35 @@ export type TextFieldKey = (typeof TEXT_FIELD_KEYS)[number];
 
 /** What a newly created word starts with when the form does not say otherwise. */
 export interface NewWordDefaults {
+  /** Legacy display mirror. An FSRS-only store ignores it. */
   mastery: number;
   /** `empty` leaves the review date blank, which the queue rule treats as due now. */
   reviewDate: 'empty' | 'today';
+  /** FSRS-first fallback due day for a new word. */
+  dueOn?: 'today';
+  /** How many new words a large import offers to spread per day. */
+  newWordsPerDay?: number;
 }
 
 /**
- * Where a word stands in the review cycle. Exactly one applies to every entry:
- * - `mastered`: mastery has reached the completion level.
+ * Where a word stands in the review cycle.
+ * - `new`: no FSRS state yet and due now.
  * - `overdue` / `due_today`: reviewable now, scheduled before today / today.
- * - `unscheduled`: not mastered and no review date.
+ * - `unscheduled`: no usable due day.
  * - `upcoming`: scheduled for a later day.
- * - `invalid`: mastery is empty or not a usable number, so it cannot be scheduled.
+ * - `suspended`: archived by hand; never in the queue.
+ * - `invalid`: no FSRS state and no usable due day.
+ * - `mastered`: legacy display only; FSRS-only mode never emits it.
  */
-export type ReviewStatus = 'mastered' | 'overdue' | 'due_today' | 'unscheduled' | 'upcoming' | 'invalid';
+export type ReviewStatus =
+  | 'new'
+  | 'overdue'
+  | 'due_today'
+  | 'unscheduled'
+  | 'upcoming'
+  | 'suspended'
+  | 'mastered'
+  | 'invalid';
 
 /** One optional piece of card content and where it may appear. */
 export interface CardFieldConfig {

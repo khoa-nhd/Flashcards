@@ -11,6 +11,8 @@ const STATUS_TEXT: Record<ReviewStatus, string> = {
   unscheduled: 'No review date',
   upcoming: 'Upcoming',
   invalid: 'Needs a mastery',
+  new: 'New',
+  suspended: 'Archived',
 };
 
 /* State reads in stroke and weight; colour is kept for answers, not labels. */
@@ -21,6 +23,8 @@ const STATUS_TONE: Record<ReviewStatus, string> = {
   unscheduled: 'border border-line text-faint',
   upcoming: 'border border-line text-faint',
   invalid: 'border border-line-strong text-ink',
+  new: 'border border-line text-ink',
+  suspended: 'border border-line text-faint',
 };
 
 /** Where a word stands in the review cycle, always as words and never as colour alone. */

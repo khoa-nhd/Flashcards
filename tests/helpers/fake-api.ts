@@ -42,6 +42,8 @@ export function entry(n: number, overrides: Partial<VocabularyEntry> = {}): Voca
     reviewable: true,
     createdTime: '2026-10-01T02:00:00.000Z',
     lastEditedTime: '2026-10-05T02:00:00.000Z',
+    suspended: false,
+    revision: 0,
     ...overrides,
   };
 }
@@ -132,6 +134,7 @@ export function simulationResponse(overrides: Partial<SimulationResponse> = {}):
 export function schedulerReport(overrides: Partial<SchedulerReport> = {}): SchedulerReport {
   return {
     active: 'mastery_v1',
+    fsrsOnly: false,
     switchable: false,
     today: TODAY,
     timeZone: TIME_ZONE,
@@ -259,6 +262,10 @@ export function createFakeApi({
     database: null,
     fsrsRetention: null,
     countReviewsTowardMastery: true,
+    fsrsOnly: false,
+    goals: null,
+    maxReviewsPerDay: null,
+    uiLanguage: 'vi',
     ...account,
   };
   let nextId = 500;
@@ -536,10 +543,13 @@ export function createFakeApi({
       goal = next;
       return dayPlan({ ...planFigures, goal });
     }),
-    saveSettings: vi.fn<AppApi['saveSettings']>(async ({ timeZone, fsrsRetention, countReviewsTowardMastery }) => {
+    saveSettings: vi.fn<AppApi['saveSettings']>(async ({ timeZone, fsrsRetention, countReviewsTowardMastery, countReviewsTowardSchedule, maxReviewsPerDay, uiLanguage }) => {
       if (timeZone !== undefined) settings.timeZone = timeZone;
       if (fsrsRetention !== undefined) settings.fsrsRetention = fsrsRetention;
       if (countReviewsTowardMastery !== undefined) settings.countReviewsTowardMastery = countReviewsTowardMastery;
+      if (countReviewsTowardSchedule !== undefined) settings.countReviewsTowardSchedule = countReviewsTowardSchedule;
+      if (maxReviewsPerDay !== undefined) settings.maxReviewsPerDay = maxReviewsPerDay;
+      if (uiLanguage !== undefined) settings.uiLanguage = uiLanguage;
       return { ...settings };
     }),
 

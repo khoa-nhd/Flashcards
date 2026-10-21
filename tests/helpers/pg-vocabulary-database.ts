@@ -27,6 +27,8 @@ import {
   confidenceStatRowSchema,
   dailyStatRowSchema,
   cardRowSchema,
+  fsrsReviewRowSchema,
+  fsrsUndoRowSchema,
   practiceEvent,
   practiceOutcomeSchema,
   practiceStatRowSchema,
@@ -263,6 +265,54 @@ export function createPgVocabularyDatabase(
         ),
       );
       return undoResultSchema.parse(rows[0]);
+    },
+
+    async recordFsrsReview(args) {
+      const rows = await run((session) =>
+        session.query<Row>(
+          `select outcome, revision, due_on::text as due_on, fsrs from public.record_fsrs_review($1::jsonb)`,
+          [
+            JSON.stringify({
+              vocabulary_id: args.id,
+              request_id: args.requestId,
+              session_id: args.sessionId,
+              action: args.action,
+              expected_revision: args.expectedRevision,
+              counts_toward_schedule: args.countsTowardSchedule,
+              reviewed_on: args.reviewedOn,
+              duration_ms: args.durationMs,
+              ...(args.reviewedAt === null ? {} : { reviewed_at: args.reviewedAt }),
+              ...(args.rating === null ? {} : { rating: args.rating }),
+              ...(args.version === null ? {} : { version: args.version }),
+              ...(args.after === null ? {} : { after: args.after }),
+              ...(args.confidence === null ? {} : { confidence: args.confidence }),
+            }),
+          ],
+        ),
+      );
+      return fsrsReviewRowSchema.parse(rows[0]);
+    },
+
+    async undoFsrsReview(args) {
+      const rows = await run((session) =>
+        session.query<Row>(
+          `select outcome, vocabulary_id, revision, due_on::text as due_on, fsrs
+             from public.undo_fsrs_review($1::uuid, $2::uuid)`,
+          [args.reviewRequestId, args.requestId],
+        ),
+      );
+      return fsrsUndoRowSchema.parse(rows[0]);
+    },
+
+    async setCardsSuspended(ids, suspended) {
+      const changed = await run((session) =>
+        session.query<{ vocabulary_id: string }>(
+          `select vocabulary_id from public.set_cards_suspended($1::uuid[], $2)`,
+          [[...ids], suspended],
+        ),
+      );
+      if (changed.length === 0) return [];
+      return cards('id = any($1::uuid[])', 'id', [changed.map((row) => row.vocabulary_id)]);
     },
 
     async sessionSummary(sessionId) {

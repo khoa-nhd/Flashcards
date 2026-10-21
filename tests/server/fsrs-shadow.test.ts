@@ -7,7 +7,7 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vites
 import { fsrsRatingMap } from '../../config/review.config.js';
 import { sampleRules } from '../../server/mock/sample-rules.js';
 import { ReviewService } from '../../server/review-service.js';
-import { LATEST_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
+import { RECOMMENDED_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
 import {
   NO_CAPABILITIES,
   accountSettingsSchema,
@@ -22,7 +22,7 @@ import { addDays } from '../../shared/dates.js';
 import { FSRS_ENGINE, fsrsDueDay, fsrsReview, type FsrsState } from '../../shared/scheduler/fsrs.js';
 import { FakeRepository, NOW, TEST_FIELDS, TIME_ZONE, TODAY, pageId, record } from '../helpers/fixtures.js';
 import { call, createSupabaseTestApp, createTestUser, newId, type TestApp, type TestUser } from '../helpers/supabase-app.js';
-import { createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
+import { MASTERY_ERA_MIGRATIONS, createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
 
 let db: TestDatabase;
 let alice: TestUser;
@@ -30,7 +30,7 @@ let bob: TestUser;
 let app: TestApp;
 
 beforeAll(async () => {
-  db = await createTestDatabase();
+  db = await createTestDatabase({ migrations: MASTERY_ERA_MIGRATIONS });
 }, 60_000);
 
 afterAll(async () => {
@@ -425,7 +425,7 @@ describe('a database one migration behind (version 2)', () => {
     const report = schedulerReportSchema.parse(await (await call(legacy, owner, '/api/scheduler')).json());
     expect(report).toMatchObject({ active: 'mastery_v1', fsrs: { available: false }, comparable: 0, cards: [] });
     const settings = accountSettingsSchema.parse(await (await call(legacy, owner, '/api/settings')).json());
-    expect(settings).toMatchObject({ fsrsRetention: null, database: { version: 2, latest: LATEST_SCHEMA_VERSION } });
+    expect(settings).toMatchObject({ fsrsRetention: null, database: { version: 2, latest: RECOMMENDED_SCHEMA_VERSION } });
     const save = await call(legacy, owner, '/api/settings', { method: 'PUT', body: { fsrsRetention: 0.9 } });
     expect(save.status).toBe(400);
   });

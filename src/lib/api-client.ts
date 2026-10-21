@@ -105,7 +105,14 @@ export interface VocabularyApi {
 
 export interface AccountApi {
   fetchSettings(): Promise<AccountSettings>;
-  saveSettings(input: { timeZone?: string; fsrsRetention?: number; countReviewsTowardMastery?: boolean }): Promise<AccountSettings>;
+  saveSettings(input: {
+    timeZone?: string;
+    fsrsRetention?: number;
+    countReviewsTowardMastery?: boolean;
+    countReviewsTowardSchedule?: boolean;
+    maxReviewsPerDay?: number | null;
+    uiLanguage?: 'vi' | 'en';
+  }): Promise<AccountSettings>;
   /** The two schedules side by side, and which of them is in charge. */
   fetchScheduler(): Promise<SchedulerReport>;
   /** Puts one schedule in charge of what is due, and returns the report as it now stands. */

@@ -15,14 +15,14 @@ import { EXPORT_FORMAT, EXPORT_VERSION, type AccountExport } from '../../shared/
 import { checkRows, guessMapping, parseImportText, toImportRows } from '../../shared/import.js';
 import { toCsv } from '../../src/lib/export.js';
 import { call, createSupabaseTestApp, createTestUser, newId, type TestApp, type TestUser } from '../helpers/supabase-app.js';
-import { createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
+import { MASTERY_ERA_MIGRATIONS, createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
 
 let db: TestDatabase;
 let alice: TestUser;
 let bob: TestUser;
 
 beforeAll(async () => {
-  db = await createTestDatabase();
+  db = await createTestDatabase({ migrations: MASTERY_ERA_MIGRATIONS });
 }, 60_000);
 
 afterAll(async () => {

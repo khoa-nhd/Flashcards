@@ -21,8 +21,10 @@ import {
   applyAction,
   areDetailsVisible,
   areWriteRulesConfirmed,
+  buildFsrsQueue,
   buildQueue,
   checkEligibility,
+  checkFsrsEligibility,
   isSameState,
   reconcile,
   resolveMastery,
@@ -38,20 +40,23 @@ import {
   FSRS_ENGINE,
   FSRS_RATING_NAMES,
   FSRS_RETENTION,
+  fsrsDueDay,
   fsrsRetrievability,
   fsrsReview,
   isValidRetention,
   type FsrsSettings,
+  type FsrsState,
 } from '../shared/scheduler/fsrs.js';
 import { DEFAULT_RATING_MAP, ratingFor, type RatingMap } from '../shared/scheduler/rating-map.js';
+import { isDetailCollapsed, memoryStrength, strengthLevelOf } from '../shared/scheduler/strength.js';
 import { simulate } from '../shared/scheduler/simulation.js';
 import { PRACTICE_MASTERY_MAX, STUDY_MODES, judge, practiceMasteryOf, type PracticeWord } from '../shared/study-modes.js';
-import type { CardFieldConfig, VocabularyRecord } from '../shared/vocabulary.js';
+import type { CardFieldConfig, StoredFsrs, VocabularyRecord } from '../shared/vocabulary.js';
 import type { WeakRecoveryView } from '../shared/api.js';
 import { HttpError } from './errors.js';
 import { KeyedMutex } from './keyed-mutex.js';
 import { MASTERY_ONLY, type SchedulerStore } from './scheduler-store.js';
-import type { FsrsWrite, VocabularyRepository } from './vocabulary-repository.js';
+import type { FsrsCardState, FsrsWrite, VocabularyRepository } from './vocabulary-repository.js';
 
 export interface ReviewServiceOptions {
   repository: VocabularyRepository;
@@ -104,18 +109,37 @@ export class ReviewService {
     this.scheduler = options.scheduler ?? MASTERY_ONLY;
   }
 
-  /** Whether FSRS is being calculated and stored at all, which it must be before it can be put in charge. */
+  /** Whether FSRS is being calculated and stored at all. */
   private fsrsRunning(): boolean {
     return this.options.fsrs != null && this.options.repository.capabilities.fsrs;
   }
 
-  /** The schedule in charge right now. FSRS only where it is actually running; otherwise the mastery schedule. */
+  /**
+   * FSRS is the only schedule once the store is at schema version 15. Before
+   * that, mastery is what the store writes, whichever schedule the account
+   * reads its due days from, so nothing here may treat FSRS as the only one.
+   */
+  private fsrsMode(): boolean {
+    return this.fsrsRunning() && this.options.repository.capabilities.fsrsOnly === true;
+  }
+
+  /**
+   * The schedule in charge right now: FSRS alone from version 15; before that,
+   * FSRS where the account chose it and it is actually running, otherwise mastery.
+   */
   private activeScheduler(): SchedulerId {
+    if (this.fsrsMode()) return 'fsrs';
     return this.scheduler.get() === 'fsrs' && this.fsrsRunning() ? 'fsrs' : DEFAULT_SCHEDULER;
   }
 
   /** The day a word is next due under `scheduler`. */
   private dueDate(record: VocabularyRecord, scheduler: SchedulerId): IsoDate | null {
+    if (scheduler === 'fsrs' && this.fsrsMode()) {
+      const state = record.fsrs?.state ?? null;
+      if (state !== null) return fsrsDueDay(state, this.options.timeZone);
+      // A word FSRS has not seen comes up on its fallback day; with none at all it is new and due now.
+      return record.dueOn ?? record.nextReview ?? this.today();
+    }
     return dueDateUnder(
       scheduler,
       { reviewDate: record.nextReview, fsrsDue: record.fsrs?.state.due ?? null },
@@ -153,7 +177,8 @@ export class ReviewService {
 
   private async writesEnabled(): Promise<boolean> {
     const { repository, rules, writesRequested } = this.options;
-    if (!writesRequested || !areWriteRulesConfirmed(rules)) return false;
+    if (!writesRequested) return false;
+    if (!this.fsrsMode() && !areWriteRulesConfirmed(rules)) return false;
     return (await repository.checkSetup()).writeIssues.length === 0;
   }
 
@@ -167,6 +192,8 @@ export class ReviewService {
     if (setup.readIssues.length > 0) {
       throw new HttpError(503, 'setup_incomplete', setup.readIssues.join(' '));
     }
+
+    if (this.fsrsMode()) return this.getFsrsQueue(focus);
 
     const today = this.today();
     const scheduler = this.activeScheduler();
@@ -223,11 +250,73 @@ export class ReviewService {
       writesEnabled: await this.writesEnabled(),
       capabilities: repository.capabilities,
       scheduler,
+      fsrsOnly: false,
       focus: focus?.kind === 'weak' ? 'weak' : null,
       selection: focus?.kind === 'selection',
       skipped,
       // Only worth asking when there is nothing to review. A narrowed queue being empty says nothing about the rest.
       vocabulary: queue.length > 0 || focus !== null ? 'in_progress' : await repository.vocabularyStatus(),
+    };
+  }
+
+  /**
+   * The FSRS-only queue: every live, non-archived word whose due day is today
+   * or earlier, earliest first. A narrowed queue may take words early.
+   */
+  private async getFsrsQueue(focus: QueueFocus | null): Promise<QueueResponse> {
+    const { repository, timeZone } = this.options;
+    const today = this.today();
+    const { records, invalid } = await repository.listLiveRecords();
+    const candidates = records.map((record) => ({
+      ...record,
+      storedReview: record.nextReview,
+      dueOn: this.dueDate(record, 'fsrs'),
+    }));
+    const built = buildFsrsQueue(candidates, today, { allowNotDue: focus !== null });
+    let { queue } = built;
+    if (focus !== null) {
+      const rank = new Map(focus.ids.map((id, position) => [id, position]));
+      queue = queue.filter((item) => rank.has(item.id));
+      queue.sort((a, b) => (rank.get(a.id) ?? 0) - (rank.get(b.id) ?? 0));
+    }
+
+    const skipped = [...invalid];
+    for (const { record, reason } of built.excluded) {
+      if (reason === 'missing_due_date') {
+        skipped.push({ id: record.id, word: record.word, reason: 'This word has no due date.' });
+      } else if (reason === 'suspended') {
+        skipped.push({ id: record.id, word: record.word, reason: 'This word is archived.' });
+      }
+    }
+
+    const live = records.filter((record) => record.suspended !== true).length;
+    return {
+      cards: queue.map((record) => {
+        const card = this.toCard(record);
+        const recovery = focus?.kind === 'weak' ? focus.recovery?.get(card.id) : undefined;
+        return recovery === undefined
+          ? card
+          : {
+              ...card,
+              recovery: {
+                points: recovery.points,
+                threshold: recovery.threshold,
+                recovered: recovery.recovered,
+                lastRememberedOn: recovery.lastRememberedOn,
+              },
+            };
+      }),
+      today,
+      timeZone,
+      mode: repository.mode,
+      writesEnabled: await this.writesEnabled(),
+      capabilities: repository.capabilities,
+      scheduler: 'fsrs',
+      fsrsOnly: true,
+      focus: focus?.kind === 'weak' ? 'weak' : null,
+      selection: focus?.kind === 'selection',
+      skipped,
+      vocabulary: queue.length > 0 || focus !== null ? 'in_progress' : live > 0 ? 'in_progress' : 'empty',
     };
   }
 
@@ -240,7 +329,141 @@ export class ReviewService {
    */
   submitAction(request: ReviewSubmission): Promise<ReviewActionResponse> {
     const pageId = normalizeId(request.pageId);
-    return this.locks.run(pageId, () => this.applyDecision(pageId, request));
+    return this.locks.run(pageId, () =>
+      this.fsrsMode() ? this.applyFsrsDecision(pageId, request) : this.applyDecision(pageId, request),
+    );
+  }
+
+  /**
+   * An answer under FSRS alone. FSRS works the new state out here; the store
+   * saves it only while the card is still at the revision the reviewer saw,
+   * and recognises a repeated request id. Mastery and the review date are no
+   * longer written.
+   */
+  private async applyFsrsDecision(pageId: string, request: ReviewSubmission): Promise<ReviewActionResponse> {
+    const { action } = request;
+    const requestId = request.requestId ?? randomUUID();
+    const { repository, timeZone, fsrs } = this.options;
+    const apply = repository.applyFsrsReview;
+    if (fsrs == null || apply === undefined) {
+      throw new HttpError(500, 'scheduler_failed', 'FSRS is not available, so nothing was saved.');
+    }
+    const answeredAt = this.answeredInstant(request.answeredAt);
+    const today = calendarDateInTimeZone(answeredAt, timeZone);
+
+    const record = await repository.getRecord(pageId);
+    if (record === null) throw new HttpError(404, 'not_found', 'That card is not in your vocabulary.');
+    const current = this.fsrsStateOf(record);
+    const refuse = (state: ReviewState | null, message: string) =>
+      new HttpError(409, 'conflict', message, { body: state === null ? {} : { current: state } });
+    const CHANGED = 'This card was changed after it was loaded, so nothing was saved.';
+
+    // The revision the reviewer saw. A page from before revisions existed sends the day it was
+    // shown instead, which stands for the current revision only while that day still matches.
+    const expectedRevision =
+      request.expectedRevision ?? (request.expected.nextReview === current.nextReview ? (current.revision ?? 0) : -1);
+
+    // Whether the card may be answered now is only asked of the card the reviewer saw. A changed
+    // card goes to the store anyway, which tells a repeat of a saved answer from a stale one.
+    if (expectedRevision === current.revision) {
+      const eligibility = checkFsrsEligibility(
+        { id: record.id, dueOn: current.nextReview, suspended: record.suspended === true },
+        today,
+        { allowNotDue: request.allowNotDue === true },
+      );
+      if (!eligibility.eligible) {
+        const why = {
+          not_due: 'This word is not due for review yet',
+          missing_due_date: 'This word has no due date',
+          suspended: 'This word is archived',
+        } as const;
+        throw refuse(current, `${why[eligibility.reason]}, so nothing was saved.`);
+      }
+    }
+
+    // The reviewer's own choice: an answer that does not count is recorded and moves nothing.
+    const counts = request.countsTowardSchedule !== false && request.countsTowardMastery !== false;
+    const rating = ratingFor(action, fsrs.ratingMap);
+    let after: FsrsState | null = null;
+    if (counts) {
+      try {
+        after = fsrsReview(record.fsrs?.state ?? null, rating, answeredAt, fsrs.settings);
+      } catch (error) {
+        console.error('FSRS calculation failed:', error instanceof Error ? error.message : 'unknown error');
+        throw new HttpError(500, 'scheduler_failed', 'The next review could not be worked out, so nothing was saved. Try again.');
+      }
+    }
+    if (!(await this.writesEnabled())) {
+      const preview =
+        after === null
+          ? current
+          : this.fsrsReviewState({ fsrs: { state: after, engine: FSRS_ENGINE }, dueOn: null, revision: (current.revision ?? 0) + 1 });
+      return { outcome: 'dry_run', state: preview };
+    }
+
+    const result = await apply.call(repository, {
+      id: pageId,
+      requestId,
+      action,
+      expectedRevision,
+      countsTowardSchedule: counts,
+      rating,
+      engine: after === null ? null : FSRS_ENGINE,
+      after,
+      reviewedOn: today,
+      answeredAt: request.answeredAt ?? null,
+      durationMs: request.durationMs ?? null,
+      sessionId: request.sessionId ?? null,
+      confidence: request.confidence ?? null,
+    });
+    switch (result.outcome) {
+      case 'applied': {
+        const saved = this.fsrsReviewState(result.state);
+        // The store reports what it holds now; an answer that counted must have left exactly FSRS's result.
+        if (after !== null && (saved.fsrs == null || Date.parse(saved.fsrs.due) !== Date.parse(after.due))) {
+          throw new HttpError(
+            502,
+            'unconfirmed_write',
+            'The update was accepted but the stored values are not the expected ones. Check this word.',
+          );
+        }
+        return { outcome: 'applied', state: saved };
+      }
+      case 'already_applied':
+        return { outcome: 'already_applied', state: this.fsrsReviewState(result.state) };
+      case 'not_found':
+        throw new HttpError(404, 'not_found', 'That card is not in your vocabulary.');
+      case 'suspended':
+        throw refuse(result.state === null ? null : this.fsrsReviewState(result.state, true), 'This word is archived, so nothing was saved.');
+      case 'undone':
+        throw refuse(
+          result.state === null ? null : this.fsrsReviewState(result.state),
+          'That answer was taken back with Undo, so it was not saved again.',
+        );
+      case 'conflict':
+        throw refuse(result.state === null ? null : this.fsrsReviewState(result.state), CHANGED);
+    }
+  }
+
+  /** Where a card stands under FSRS alone, as the browser is told. `mastery` is the strength level, for display only. */
+  private fsrsReviewState(card: { fsrs: StoredFsrs | null; dueOn: IsoDate | null; revision: number }, suspended = false): ReviewState {
+    const state = card.fsrs?.state ?? null;
+    return {
+      mastery: strengthLevelOf(state?.stability ?? null),
+      nextReview: state !== null ? fsrsDueDay(state, this.options.timeZone) : (card.dueOn ?? this.today()),
+      fsrs: state,
+      ...(card.fsrs == null ? {} : { fsrsEngine: card.fsrs.engine }),
+      dueOn: state === null ? card.dueOn : null,
+      revision: card.revision,
+      suspended,
+    };
+  }
+
+  private fsrsStateOf(record: VocabularyRecord): ReviewState {
+    return this.fsrsReviewState(
+      { fsrs: record.fsrs ?? null, dueOn: record.dueOn ?? record.nextReview ?? null, revision: record.revision ?? 0 },
+      record.suspended === true,
+    );
   }
 
   private async applyDecision(pageId: string, request: ReviewSubmission): Promise<ReviewActionResponse> {
@@ -453,6 +676,29 @@ export class ReviewService {
     if (!(await this.writesEnabled())) {
       throw new HttpError(403, 'read_only', 'Saving is switched off, so nothing was changed.');
     }
+    const undoFsrs = this.options.repository.undoFsrsReview;
+    if (this.fsrsMode() && undoFsrs !== undefined) {
+      const result = await undoFsrs.call(this.options.repository, request);
+      const shown = (state: FsrsCardState | null) => (state === null ? {} : { current: this.fsrsReviewState(state) });
+      switch (result.outcome) {
+        case 'undone':
+        case 'already_undone':
+          return { outcome: result.outcome, pageId: result.id, state: this.fsrsReviewState(result.state) };
+        case 'not_found':
+          throw new HttpError(404, 'not_found', 'There is no saved answer to undo.');
+        case 'not_latest':
+          throw new HttpError(
+            409,
+            'conflict',
+            'This card has been reviewed again since then, so that answer can no longer be undone.',
+            { body: shown(result.state) },
+          );
+        case 'conflict':
+          throw new HttpError(409, 'conflict', 'This card was changed after that answer, so it was left as it is.', {
+            body: shown(result.state),
+          });
+      }
+    }
     const result = await this.options.repository.undoReview(request);
     switch (result.outcome) {
       case 'undone':
@@ -518,9 +764,18 @@ export class ReviewService {
     const states = new Map(schedules.map((card) => [card.id, card.fsrs]));
     const settings = fsrs?.settings ?? DEFAULT_FSRS_SETTINGS;
     const map = fsrs?.ratingMap ?? DEFAULT_RATING_MAP;
+    const strengthDistribution = Array.from({ length: 10 }, () => 0);
+    if (this.fsrsMode()) {
+      for (const card of schedules) {
+        if (card.fsrs === null) continue;
+        const index = strengthLevelOf(card.fsrs.stability) - 1;
+        strengthDistribution[index] = (strengthDistribution[index] ?? 0) + 1;
+      }
+    }
     return {
       active: this.activeScheduler(),
-      switchable: available && this.scheduler.available,
+      fsrsOnly: this.fsrsMode(),
+      switchable: !this.fsrsMode() && available && this.scheduler.available,
       today,
       timeZone,
       fsrs: {
@@ -535,6 +790,7 @@ export class ReviewService {
         ...card,
         recall: fsrsRetrievability(states.get(card.id) ?? null, now, settings),
       })),
+      ...(this.fsrsMode() ? { strengthDistribution } : {}),
     };
   }
 
@@ -544,6 +800,9 @@ export class ReviewService {
    * read from now on, and choosing again reads the first one back.
    */
   async chooseScheduler(next: SchedulerId): Promise<SchedulerReport> {
+    if (this.fsrsMode()) {
+      throw new HttpError(409, 'not_supported', 'FSRS is the only scheduler in this account.');
+    }
     if (!this.scheduler.available) {
       throw new HttpError(409, 'not_supported', 'The schedule cannot be changed yet: the database needs its latest update.');
     }
@@ -594,16 +853,48 @@ export class ReviewService {
   }
 
   private stateOf(record: VocabularyRecord): ReviewState | null {
+    if (this.fsrsMode()) return this.fsrsStateOf(record);
     const mastery = resolveMastery(record.mastery, this.options.rules);
     return mastery === null ? null : { mastery, nextReview: record.nextReview };
   }
 
   /**
-   * Shapes a record for the browser. Fields the mastery rule withholds are
-   * never included. The card carries the stored mastery date, which comes back
-   * with the answer; where another date decided it is due, that goes beside it.
+   * Shapes a word for the FSRS-only card. All content is sent; a high
+   * strength level only tells the browser to start with details folded.
    */
+  private toFsrsCard(record: Candidate): ReviewCard {
+    const { cardFields } = this.options;
+    const state = record.fsrs?.state ?? null;
+    const settings = this.options.fsrs?.settings ?? DEFAULT_FSRS_SETTINGS;
+    const memory = memoryStrength(state, {
+      retrievability: fsrsRetrievability(state, this.now(), settings),
+    });
+    const front: CardField[] = [];
+    const back: CardField[] = [];
+    for (const field of cardFields) {
+      const value = record.fields[field.key];
+      if (value === null || value === undefined) continue;
+      (field.side === 'front' ? front : back).push({ key: field.key, label: field.label, value });
+    }
+    return {
+      id: record.id,
+      word: record.word,
+      mastery: memory.level,
+      nextReview: record.dueOn ?? record.nextReview,
+      dueOn: record.dueOn ?? undefined,
+      memory,
+      detailCollapsed: isDetailCollapsed(memory.level),
+      revision: record.revision ?? 0,
+      suspended: record.suspended === true,
+      front,
+      back,
+      detailsHidden: false,
+    };
+  }
+
+  /** Shapes a record for the browser in the legacy mastery path. */
   private toCard(record: Candidate): ReviewCard {
+    if (this.fsrsMode()) return this.toFsrsCard(record);
     const { rules, cardFields } = this.options;
     const mastery = resolveMastery(record.mastery, rules) ?? 0;
     const detailsVisible = areDetailsVisible(mastery, rules);
@@ -630,6 +921,8 @@ export class ReviewService {
       front,
       back,
       detailsHidden,
+      detailCollapsed: false,
+      suspended: false,
     };
   }
 }

@@ -48,6 +48,8 @@ export function card(n: number, overrides: Partial<ReviewCard> = {}): ReviewCard
     front: [{ key: 'partOfSpeech', label: 'Part of speech', value: 'noun' }],
     back: [{ key: 'definition', label: 'Definition', value: `definition of word-${n}` }],
     detailsHidden: false,
+    detailCollapsed: false,
+    suspended: false,
     ...overrides,
   };
 }
@@ -62,6 +64,7 @@ export function queueResponse(cards: ReviewCard[], overrides: Partial<QueueRespo
     // Off unless a test asks: most tests are about the review itself.
     capabilities: NO_CAPABILITIES,
     scheduler: 'mastery_v1',
+    fsrsOnly: false,
     focus: null,
     selection: false,
     skipped: [],
@@ -141,7 +144,7 @@ export class FakeRepository implements VocabularyRepository {
   }
 
   /** The single place a write lands, so a test can make it fail or misreport. */
-  async updateReviewState(id: string, changes: Partial<ReviewState>) {
+  async updateReviewState(id: string, changes: Partial<Pick<ReviewState, 'mastery' | 'nextReview'>>) {
     const existing = this.records.get(id);
     if (!existing) throw new Error('unknown record');
     this.updates.push({ pageId: id, changes });

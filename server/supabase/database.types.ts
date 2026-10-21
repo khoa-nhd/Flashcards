@@ -58,9 +58,30 @@ export interface Database {
           review_date: string | null;
           scheduler: string;
           updated_at: string;
+          /** From schema version 15. */
+          due_on?: string | null;
+          revision?: number;
+          suspended_at?: string | null;
+          suspended_reason?: string | null;
         };
-        Insert: { vocabulary_id: string; user_id?: string; mastery: number; review_date?: string | null };
-        Update: { mastery?: number; review_date?: string | null };
+        Insert: {
+          vocabulary_id: string;
+          user_id?: string;
+          mastery: number;
+          review_date?: string | null;
+          due_on?: string | null;
+          revision?: number;
+          suspended_at?: string | null;
+          suspended_reason?: string | null;
+        };
+        Update: {
+          mastery?: number;
+          review_date?: string | null;
+          due_on?: string | null;
+          revision?: number;
+          suspended_at?: string | null;
+          suspended_reason?: string | null;
+        };
         Relationships: [];
       };
       review_logs: {
@@ -119,6 +140,12 @@ export interface Database {
           scheduler: 'mastery_v1' | 'fsrs';
           /** From schema version 13. Whether a review moves a word's mastery. */
           count_reviews_toward_mastery: boolean;
+          /** From schema version 15. The two daily goals, the review limit and the interface language. */
+          study_goal_new_words?: number | null;
+          study_goal_reviews?: number | null;
+          maintenance_mode?: boolean;
+          max_reviews_per_day?: number | null;
+          ui_language?: 'vi' | 'en' | null;
         };
         Insert: {
           user_id?: string;
@@ -128,6 +155,11 @@ export interface Database {
           daily_goal_minutes?: number | null;
           scheduler?: 'mastery_v1' | 'fsrs';
           count_reviews_toward_mastery?: boolean;
+          study_goal_new_words?: number | null;
+          study_goal_reviews?: number | null;
+          maintenance_mode?: boolean;
+          max_reviews_per_day?: number | null;
+          ui_language?: 'vi' | 'en' | null;
         };
         Update: {
           time_zone?: string;
@@ -136,6 +168,11 @@ export interface Database {
           daily_goal_minutes?: number | null;
           scheduler?: 'mastery_v1' | 'fsrs';
           count_reviews_toward_mastery?: boolean;
+          study_goal_new_words?: number | null;
+          study_goal_reviews?: number | null;
+          maintenance_mode?: boolean;
+          max_reviews_per_day?: number | null;
+          ui_language?: 'vi' | 'en' | null;
         };
         Relationships: [];
       };
@@ -334,6 +371,21 @@ export interface Database {
       record_review: {
         Args: { p_event: Record<string, unknown> };
         Returns: Array<{ outcome: string; mastery: number | null; review_date: string | null }>;
+      };
+      /** From schema version 15. */
+      record_fsrs_review: {
+        Args: { p_event: Record<string, unknown> };
+        Returns: Array<{ outcome: string; revision: number | null; due_on: string | null; fsrs: unknown }>;
+      };
+      /** From schema version 15. */
+      undo_fsrs_review: {
+        Args: { p_review_request_id: string; p_request_id: string };
+        Returns: Array<{ outcome: string; vocabulary_id: string | null; revision: number | null; due_on: string | null; fsrs: unknown }>;
+      };
+      /** From schema version 15. */
+      set_cards_suspended: {
+        Args: { p_ids: string[]; p_suspended: boolean };
+        Returns: Array<{ vocabulary_id: string }>;
       };
       undo_review: {
         Args: { p_review_request_id: string; p_request_id: string };

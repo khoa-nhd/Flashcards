@@ -4,7 +4,7 @@
  * migration, which must keep saving reviews exactly as before.
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { LATEST_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
+import { LATEST_SCHEMA_VERSION, RECOMMENDED_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
 import { capabilitiesAt } from '../../server/supabase/supabase-repository.js';
 import {
   NO_CAPABILITIES,
@@ -21,7 +21,7 @@ import {
 import { TODAY } from '../helpers/fixtures.js';
 import { createPgVocabularyDatabase } from '../helpers/pg-vocabulary-database.js';
 import { call, createSupabaseTestApp, createTestUser, newId, type TestApp, type TestUser } from '../helpers/supabase-app.js';
-import { createTestDatabase, readMigrations, type TestDatabase } from '../helpers/test-database.js';
+import { MASTERY_ERA_MIGRATIONS, MASTERY_ERA_SCHEMA_VERSION, createTestDatabase, readMigrations, type TestDatabase } from '../helpers/test-database.js';
 
 let db: TestDatabase;
 let alice: TestUser;
@@ -29,7 +29,7 @@ let bob: TestUser;
 let app: TestApp;
 
 beforeAll(async () => {
-  db = await createTestDatabase();
+  db = await createTestDatabase({ migrations: MASTERY_ERA_MIGRATIONS });
 }, 60_000);
 
 afterAll(async () => {
@@ -92,14 +92,14 @@ const errorOf = async (response: Response) => apiErrorSchema.parse(await respons
 describe('the schema version', () => {
   it('matches the newest migration file, so the server and the SQL cannot drift apart', async () => {
     expect(readMigrations()).toHaveLength(LATEST_SCHEMA_VERSION);
-    expect(await createPgVocabularyDatabase(db, alice.id).schemaVersion()).toBe(LATEST_SCHEMA_VERSION);
+    expect(await createPgVocabularyDatabase(db, alice.id).schemaVersion()).toBe(MASTERY_ERA_SCHEMA_VERSION);
   });
 
   it('is reported to the signed-in user, and switches the new features on', async () => {
     const settings = accountSettingsSchema.parse(await (await call(app, alice, '/api/settings')).json());
-    expect(settings.database).toEqual({ version: LATEST_SCHEMA_VERSION, latest: LATEST_SCHEMA_VERSION });
+    expect(settings.database).toEqual({ version: MASTERY_ERA_SCHEMA_VERSION, latest: RECOMMENDED_SCHEMA_VERSION });
     const queue = queueResponseSchema.parse(await (await call(app, alice, '/api/review-queue')).json());
-    expect(queue.capabilities).toEqual(capabilitiesAt(LATEST_SCHEMA_VERSION));
+    expect(queue.capabilities).toEqual(capabilitiesAt(MASTERY_ERA_SCHEMA_VERSION));
   });
 });
 
@@ -387,7 +387,7 @@ describe('a database that has not had this migration yet', () => {
 
   it('says so, and keeps the new features off', async () => {
     const settings = accountSettingsSchema.parse(await (await call(legacy, owner, '/api/settings')).json());
-    expect(settings.database).toEqual({ version: 1, latest: LATEST_SCHEMA_VERSION });
+    expect(settings.database).toEqual({ version: 1, latest: RECOMMENDED_SCHEMA_VERSION });
     const queue = queueResponseSchema.parse(await (await call(legacy, owner, '/api/review-queue')).json());
     expect(queue.capabilities).toEqual(NO_CAPABILITIES);
   });

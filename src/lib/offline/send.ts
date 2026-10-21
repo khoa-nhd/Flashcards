@@ -21,6 +21,7 @@ export function createSender(api: AppApi, resolveId: IdResolver): Sender {
           pageId: resolveId(payload.pageId),
           action: payload.action,
           expected: payload.expected,
+          ...(payload.expectedRevision === undefined ? {} : { expectedRevision: payload.expectedRevision }),
           requestId: op.id,
           durationMs: payload.durationMs ?? undefined,
           sessionId: payload.sessionId ?? undefined,

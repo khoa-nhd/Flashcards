@@ -13,7 +13,7 @@ import {
 import { addDays } from '../../shared/dates.js';
 import { NOW, TODAY } from '../helpers/fixtures.js';
 import { call, createSupabaseTestApp, createTestUser, newId, type TestApp, type TestUser } from '../helpers/supabase-app.js';
-import { createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
+import { MASTERY_ERA_MIGRATIONS, createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
 
 const DAY_MS = 86_400_000;
 const later = (days: number) => new Date(NOW.getTime() + days * DAY_MS);
@@ -25,7 +25,7 @@ let clock: Date;
 let app: TestApp;
 
 beforeAll(async () => {
-  db = await createTestDatabase();
+  db = await createTestDatabase({ migrations: MASTERY_ERA_MIGRATIONS });
 }, 60_000);
 
 afterAll(async () => {

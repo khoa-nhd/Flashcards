@@ -12,6 +12,7 @@ import {
   createRelationRequestSchema,
   dailyGoalSchema,
   importRequestSchema,
+  archiveEntriesRequestSchema,
   isoDateSchema,
   membershipRequestSchema,
   normalizeId,
@@ -428,6 +429,10 @@ export function createApp({
         database: session.database,
         fsrsRetention: session.fsrsRetention,
         countReviewsTowardMastery: session.countReviewsTowardMastery,
+        fsrsOnly: session.fsrsOnly ?? false,
+        goals: session.goals ?? null,
+        maxReviewsPerDay: session.maxReviewsPerDay ?? null,
+        uiLanguage: session.uiLanguage ?? 'vi',
       };
     }
     if (config.timeZone === null) throw notConfigured();
@@ -439,6 +444,10 @@ export function createApp({
       fsrsRetention: null,
       // Nothing keeps a choice without an account, so a review counts by default.
       countReviewsTowardMastery: true,
+      fsrsOnly: false,
+      goals: null,
+      maxReviewsPerDay: null,
+      uiLanguage: 'vi',
     };
   };
 
@@ -460,6 +469,10 @@ export function createApp({
         countReviewsTowardMastery === undefined
           ? session.countReviewsTowardMastery
           : await session.saveCountReviewsTowardMastery(countReviewsTowardMastery),
+      fsrsOnly: session.fsrsOnly ?? false,
+      goals: session.goals ?? null,
+      maxReviewsPerDay: session.maxReviewsPerDay ?? null,
+      uiLanguage: session.uiLanguage ?? 'vi',
     };
     return c.json(body);
   });
@@ -496,8 +509,15 @@ export function createApp({
 
   // A batch of new words, each created exactly as the Add form would create it.
   app.post('/api/vocabulary/import', async (c) => {
-    const { items } = await parseBody(c, importRequestSchema);
-    return c.json(await requireVocabulary(c).importBatch(items));
+    const { items, wordsPerDay } = await parseBody(c, importRequestSchema);
+    return c.json(await requireVocabulary(c).importBatch(items, wordsPerDay));
+  });
+
+  // Archives or resumes words in bulk. They stay in the Bank; archived ones leave the review queue.
+  app.post('/api/vocabulary/archive', async (c) => {
+    const { ids, archived } = await parseBody(c, archiveEntriesRequestSchema);
+    const entries = await requireVocabulary(c).setArchived(ids, archived);
+    return c.json({ archived: entries.length, entries });
   });
 
   // Everything the caller can read about their own account, in one document. Reads only.

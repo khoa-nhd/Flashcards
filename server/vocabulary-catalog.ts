@@ -1,15 +1,23 @@
 import type { SkippedRecord, VocabularyEntry } from '../shared/api.js';
 import type { IsoDate } from '../shared/dates.js';
+import type { StoredFsrs } from '../shared/vocabulary.js';
 import type { DataMode, SetupReport } from './vocabulary-repository.js';
 
 /**
  * A stored entry before the service adds its review status. `reviewDate` is
  * the mastery schedule's date as stored; `fsrsDue` is the instant FSRS has the
  * word due, where it has been answered since FSRS started being calculated.
- * Which of the two the reviewer sees is decided by the service, not here.
+ * `dueOn` is the fallback for a word FSRS has never seen.
  */
-export type EntryData = Omit<VocabularyEntry, 'reviewStatus' | 'reviewable' | 'scheduledBy'> & {
+export type EntryData = Omit<
+  VocabularyEntry,
+  'reviewStatus' | 'reviewable' | 'scheduledBy' | 'revision' | 'suspended' | 'memory' | 'dueDate'
+> & {
   fsrsDue?: string | null;
+  fsrs?: StoredFsrs | null;
+  dueOn?: IsoDate | null;
+  revision?: number;
+  suspended?: boolean;
 };
 
 /** Everything needed to create a row. Defaults have already been applied. */
@@ -21,6 +29,8 @@ export interface NewEntry {
   dateAdded: IsoDate | null;
   mastery: number;
   reviewDate: IsoDate | null;
+  /** FSRS-first fallback due day, where the store keeps one. */
+  dueOn?: IsoDate | null;
   /** Identifies the submission, for stores that can refuse to create the same one twice. */
   requestId?: string;
 }
@@ -34,6 +44,7 @@ export interface EntryChanges {
   dateAdded?: IsoDate | null;
   mastery?: number;
   reviewDate?: IsoDate | null;
+  dueOn?: IsoDate | null;
 }
 
 /**
@@ -60,4 +71,6 @@ export interface VocabularyCatalog {
   trashEntry(id: string): Promise<boolean>;
   /** Takes a row back out of the trash, or returns `null` if it is not one of ours. */
   restoreEntry(id: string): Promise<EntryData | null>;
+  /** Archives or resumes words in bulk. Returns the words confirmed after the change. */
+  setEntriesSuspended?(ids: readonly string[], suspended: boolean): Promise<EntryData[]>;
 }

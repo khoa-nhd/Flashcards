@@ -60,6 +60,46 @@ export interface ReviewWrite {
   scheduler?: SchedulerId;
 }
 
+/** Where a card stands under FSRS alone: its state, its fallback due day and its revision. */
+export interface FsrsCardState {
+  fsrs: StoredFsrs | null;
+  /** The day a word FSRS has not seen yet first comes up; `null` once FSRS has a state. */
+  dueOn: IsoDate | null;
+  revision: number;
+}
+
+/** One answer under FSRS alone. The new state has been worked out already; the store only saves it. */
+export interface FsrsReviewWrite {
+  id: string;
+  requestId: string;
+  action: ReviewAction;
+  /** The revision the reviewer saw. The store refuses the answer if the card has moved on. */
+  expectedRevision: number;
+  /** False saves the answer but leaves the card exactly as it is. */
+  countsTowardSchedule: boolean;
+  /** Required when the answer counts. */
+  rating: FsrsRating | null;
+  engine: string | null;
+  after: FsrsState | null;
+  reviewedOn: IsoDate;
+  /** When the answer was given, where it waited offline before being sent. */
+  answeredAt: string | null;
+  durationMs: number | null;
+  sessionId: string | null;
+  confidence: Confidence | null;
+}
+
+export type FsrsReviewResult =
+  | { outcome: 'applied' | 'already_applied'; state: FsrsCardState }
+  /** `undone`: this answer was saved and then taken back. `suspended`: the word is archived. */
+  | { outcome: 'conflict' | 'suspended' | 'undone'; state: FsrsCardState | null }
+  | { outcome: 'not_found' };
+
+export type FsrsUndoResult =
+  | { outcome: 'undone' | 'already_undone'; id: string; state: FsrsCardState }
+  | { outcome: 'not_latest' | 'conflict'; id: string; state: FsrsCardState | null }
+  | { outcome: 'not_found' };
+
 /** One answer given in a practice mode. Recording it never changes the word's schedule. */
 export interface PracticeWrite {
   id: string;
@@ -161,6 +201,10 @@ export interface VocabularyRepository {
   findReview(requestId: string): Promise<ReviewState | null>;
   /** Takes back one saved answer and restores the state before it, or explains why not. */
   undoReview(input: { reviewRequestId: string; requestId: string }): Promise<UndoResult>;
+  /** Saves one answer under FSRS alone. Only where `capabilities.fsrsOnly`. */
+  applyFsrsReview?(write: FsrsReviewWrite): Promise<FsrsReviewResult>;
+  /** Takes back one answer under FSRS alone. Only where `capabilities.fsrsOnly`. */
+  undoFsrsReview?(input: { reviewRequestId: string; requestId: string }): Promise<FsrsUndoResult>;
   /** What a session saved; `null` if there is no such session or the store keeps none. */
   sessionSummary(sessionId: string): Promise<SessionSummary | null>;
   /** Every live word with both of its schedules, for comparing them. */

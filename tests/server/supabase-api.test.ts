@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildApp } from '../../server/bootstrap.js';
-import { DatabaseError, LATEST_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
+import { DatabaseError, RECOMMENDED_SCHEMA_VERSION } from '../../server/supabase/supabase-database.js';
 import {
   accountSettingsSchema,
   apiErrorSchema,
@@ -27,7 +27,7 @@ import {
   type TestApp,
   type TestUser,
 } from '../helpers/supabase-app.js';
-import { createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
+import { MASTERY_ERA_MIGRATIONS, MASTERY_ERA_SCHEMA_VERSION, createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
 
 let db: TestDatabase;
 let alice: TestUser;
@@ -35,7 +35,7 @@ let bob: TestUser;
 let app: TestApp;
 
 beforeAll(async () => {
-  db = await createTestDatabase();
+  db = await createTestDatabase({ migrations: MASTERY_ERA_MIGRATIONS });
 }, 60_000);
 
 afterAll(async () => {
@@ -141,7 +141,7 @@ describe('a new account', () => {
   it('starts empty, in the time zone its first device reports', async () => {
     const list = await listOf(alice);
     expect(list).toMatchObject({ entries: [], mode: 'supabase', writesEnabled: true, timeZone: 'Asia/Ho_Chi_Minh', today: TODAY });
-    expect(list.defaults).toEqual({ mastery: 1, reviewDate: 'empty' });
+    expect(list.defaults).toEqual({ mastery: 1, reviewDate: 'empty', dueOn: 'today', newWordsPerDay: 20 });
     expect(await queueOf(alice)).toMatchObject({ cards: [], vocabulary: 'empty', mode: 'supabase' });
   });
 
@@ -152,9 +152,13 @@ describe('a new account', () => {
       timeZone: 'Asia/Ho_Chi_Minh',
       timeZoneEditable: true,
       email: alice.email,
-      database: { version: LATEST_SCHEMA_VERSION, latest: LATEST_SCHEMA_VERSION },
+      database: { version: MASTERY_ERA_SCHEMA_VERSION, latest: RECOMMENDED_SCHEMA_VERSION },
       fsrsRetention: 0.9,
       countReviewsTowardMastery: true,
+      fsrsOnly: false,
+      goals: null,
+      maxReviewsPerDay: null,
+      uiLanguage: 'vi',
     });
   });
 

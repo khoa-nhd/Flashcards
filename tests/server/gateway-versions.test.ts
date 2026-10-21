@@ -209,6 +209,39 @@ async function askedAt(version: number): Promise<Asked[]> {
       confidence: 2,
     })
     .catch(() => undefined);
+  // From version 15 an answer, its Undo and an archive go through the FSRS-only functions.
+  fake.during('saving an answer under FSRS alone');
+  await repository
+    .applyFsrsReview({
+      id: WORD,
+      requestId: newId(),
+      action: 'remember',
+      expectedRevision: 0,
+      countsTowardSchedule: true,
+      rating: 3,
+      engine: 'test',
+      after: {
+        due: '2026-10-20T00:00:00.000Z',
+        stability: 3,
+        difficulty: 5,
+        scheduledDays: 3,
+        learningSteps: 0,
+        reps: 1,
+        lapses: 0,
+        state: 2,
+        lastReview: '2026-10-17T00:00:00.000Z',
+      },
+      reviewedOn: TODAY,
+      answeredAt: null,
+      durationMs: null,
+      sessionId: newId(),
+      confidence: null,
+    })
+    .catch(() => undefined);
+  fake.during('taking an answer back under FSRS alone');
+  await repository.undoFsrsReview({ reviewRequestId: newId(), requestId: newId() }).catch(() => undefined);
+  fake.during('archiving words');
+  await repository.setEntriesSuspended([WORD], true).catch(() => undefined);
   fake.during('recording practice');
   await repository
     .recordPractice({
@@ -290,6 +323,14 @@ describe.each(Array.from({ length: LATEST_SCHEMA_VERSION }, (_, index) => index 
     expect(used).toEqual([version >= 2 ? 'record_review' : 'apply_review']);
   });
 
+  it('saves, takes back and archives under FSRS alone only from version 15', () => {
+    const used = (label: string) => asked.filter((item) => item.during === label).map((item) => item.name);
+    expect(used('saving an answer under FSRS alone')).toEqual(version >= 15 ? ['record_fsrs_review'] : []);
+    expect(used('taking an answer back under FSRS alone')).toEqual(version >= 15 ? ['undo_fsrs_review'] : []);
+    // The recorder reports no word as changed, so nothing is read back after it.
+    expect(used('archiving words')).toEqual(version >= 15 ? ['set_cards_suspended'] : []);
+  });
+
   it('marks a reply added only where the link can be kept', () => {
     const used = asked.filter((item) => item.during === 'marking a reply added').map((item) => item.name);
     expect(used).toEqual(version >= 12 ? ['mark_ai_message_saved'] : []);
@@ -307,7 +348,9 @@ describe('the recording itself', () => {
       'vocabulary_examples',
       'vocabulary_relations',
       'record_review',
-      'undo_review',
+      'record_fsrs_review',
+      'undo_fsrs_review',
+      'set_cards_suspended',
       'session_summary',
       'review_daily_stats',
       'weak_word_days',

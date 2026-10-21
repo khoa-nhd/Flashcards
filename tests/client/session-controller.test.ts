@@ -377,6 +377,40 @@ describe('undoing the last answer', () => {
     expect(onSaved).toHaveBeenCalledTimes(2);
   });
 
+  it('answers the card again at the revision the Undo left it at, where the server keeps revisions', async () => {
+    const context = setup(3, WITH_UNDO);
+    context.api.fetchQueue.mockImplementation(async () =>
+      queueResponse([card(1, { revision: 4 }), card(2, { revision: 0 })], WITH_UNDO),
+    );
+    const { api, session, saves, undos } = context;
+    await session.load();
+    session.flip();
+    session.grade('remember');
+    await waitFor(() => saves.length === 1);
+    expect(api.submitAction.mock.calls[0]?.[0]).toMatchObject({ expectedRevision: 4 });
+    saves[0]?.resolve({ outcome: 'applied', state: { mastery: 2, nextReview: '2026-10-12', revision: 5 } });
+    await waitFor(() => session.getState().lastSaved !== null);
+
+    session.undo();
+    undos[0]?.resolve({ outcome: 'undone', pageId: card(1).id, state: { mastery: 1, nextReview: card(1).nextReview, revision: 6 } });
+    await waitFor(() => session.getState().undoing === false && session.getState().lastSaved === null);
+    expect(currentCard(session.getState())).toMatchObject({ word: 'word-1', revision: 6 });
+
+    session.flip();
+    session.grade('not_remember');
+    await waitFor(() => saves.length === 2);
+    expect(api.submitAction.mock.calls[1]?.[0]).toMatchObject({ expectedRevision: 6, action: 'not_remember' });
+  });
+
+  it('sends no revision for a card that has none', async () => {
+    const { api, session, saves } = setup(1);
+    await session.load();
+    session.flip();
+    session.grade('remember');
+    await waitFor(() => saves.length === 1);
+    expect(api.submitAction.mock.calls[0]?.[0]).not.toHaveProperty('expectedRevision');
+  });
+
   it('cannot be started twice, and blocks answering while it is in flight', async () => {
     const { api, session, undos } = await answered();
     session.undo();

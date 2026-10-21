@@ -26,6 +26,14 @@ export interface AccountSession {
    */
   countReviewsTowardMastery: boolean;
   saveCountReviewsTowardMastery(value: boolean): Promise<boolean>;
+  /** True when FSRS is the only scheduler. */
+  fsrsOnly: boolean;
+  /** The two daily goals, where the account can keep them. */
+  goals: { newWords: number; reviews: number; maintenanceMode: boolean } | null;
+  /** The most reviews offered in one day; `null` means show everything due. */
+  maxReviewsPerDay: number | null;
+  /** The interface language. Word meanings stay Vietnamese. */
+  uiLanguage: 'vi' | 'en';
   review: ReviewService;
   vocabulary: VocabularyService;
   analytics: AnalyticsService;

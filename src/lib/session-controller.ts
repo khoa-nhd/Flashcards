@@ -292,8 +292,9 @@ export function createSessionController(options: SessionControllerOptions): Sess
   const runUndo = async (reviewRequestId: string) => {
     if (undoRequest?.of !== reviewRequestId) undoRequest = { of: reviewRequestId, requestId: newRequestId() };
     try {
-      await api.undoAction({ reviewRequestId, requestId: undoRequest.requestId });
-      dispatch({ type: 'UNDO_SUCCEEDED' });
+      const response = await api.undoAction({ reviewRequestId, requestId: undoRequest.requestId });
+      // Undo moves a card's revision on, so the card shown again must carry the new one.
+      dispatch({ type: 'UNDO_SUCCEEDED', revision: response.state?.revision });
       onSaved();
     } catch (error) {
       const final = error instanceof ApiError && UNDO_IS_OVER.has(error.code);
@@ -467,6 +468,7 @@ export function createSessionController(options: SessionControllerOptions): Sess
         pageId: card.id,
         action,
         expected: { mastery: card.mastery, nextReview: card.nextReview },
+        ...(card.revision === undefined ? {} : { expectedRevision: card.revision }),
         sessionId,
         durationMs,
         allowNotDue: allowsEarly(scope),

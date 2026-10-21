@@ -285,6 +285,8 @@ describe('a round trip through this app’s own exports', () => {
       reviewable: false,
       createdTime: null,
       lastEditedTime: null,
+      suspended: false,
+      revision: 0,
     },
     {
       id: '00000000-0000-4000-8000-000000000002',
@@ -299,6 +301,8 @@ describe('a round trip through this app’s own exports', () => {
       reviewable: true,
       createdTime: null,
       lastEditedTime: null,
+      suspended: false,
+      revision: 0,
     },
   ];
 

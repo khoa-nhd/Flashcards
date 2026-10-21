@@ -79,6 +79,8 @@ interface StoredWord {
   lastEditedTime: string;
   /** Kept beside the mastery schedule, as in the real store. */
   fsrs?: StoredFsrs | null;
+  revision: number;
+  suspended: boolean;
 }
 
 interface MockLog {
@@ -121,6 +123,8 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     library: true,
     aiChat: true,
     weakRecovery: true,
+    // The sample words keep the mastery schedule until the FSRS-only screens exist.
+    fsrsOnly: false,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
@@ -156,6 +160,8 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         trashed: false,
         createdTime: `${dateAdded}T09:00:00.000Z`,
         lastEditedTime: `${dateAdded}T09:00:00.000Z`,
+        revision: 0,
+        suspended: false,
       });
     });
   }
@@ -632,6 +638,8 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       trashed: false,
       createdTime: timestamp,
       lastEditedTime: timestamp,
+      revision: 0,
+      suspended: false,
     };
     this.words.set(id, word);
     return { entry: toEntry(word), created: true };
@@ -833,5 +841,7 @@ function toEntry(word: StoredWord): EntryData {
     dateAdded: word.dateAdded,
     createdTime: word.createdTime,
     lastEditedTime: word.lastEditedTime,
+    revision: word.revision ?? 0,
+    suspended: word.suspended ?? false,
   };
 }

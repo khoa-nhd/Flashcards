@@ -121,7 +121,8 @@ export type SessionEvent =
   /** Gives up on a refused answer for good. */
   | { type: 'DISMISS_REFUSAL'; requestId: string }
   | { type: 'UNDO' }
-  | { type: 'UNDO_SUCCEEDED' }
+  /** `revision`: where the server keeps revisions, the one the card is at after the Undo. */
+  | { type: 'UNDO_SUCCEEDED'; revision?: number }
   /** `final` when the answer can no longer be undone at all, so the offer is withdrawn. */
   | { type: 'UNDO_FAILED'; message: string; final: boolean };
 
@@ -338,8 +339,14 @@ export function transition(state: SessionState, event: SessionEvent): SessionSta
     case 'UNDO_SUCCEEDED': {
       if (!state.undoing || state.lastSaved === null) return state;
       const key = tallyKey(state.lastSaved.action);
+      const back = state.lastSaved.index;
+      const revision = event.revision;
       return {
         ...state,
+        cards:
+          revision === undefined
+            ? state.cards
+            : state.cards.map((card, index) => (index === back ? { ...card, revision } : card)),
         // Back on the card that was answered, unflipped, as if it had just come up.
         status: 'ready',
         index: state.lastSaved.index,

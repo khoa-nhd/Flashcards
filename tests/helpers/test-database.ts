@@ -45,6 +45,16 @@ export function readMigrations(): Array<{ name: string; sql: string }> {
     .map((name) => ({ name, sql: readFileSync(join(MIGRATIONS_DIR, name), 'utf8') }));
 }
 
+/**
+ * How many migration files come before version 15, where FSRS becomes the only
+ * schedule. Tests of the mastery schedule run on a database stopped there:
+ * until the owner runs version 15, that is what production has.
+ */
+export const MASTERY_ERA_MIGRATIONS = readMigrations().findIndex((migration) => migration.name.endsWith('_fsrs_only.sql'));
+
+/** The schema version a database stopped at `MASTERY_ERA_MIGRATIONS` reports. */
+export const MASTERY_ERA_SCHEMA_VERSION = 14;
+
 export type Row = Record<string, unknown>;
 
 export interface Session {

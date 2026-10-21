@@ -25,6 +25,12 @@ export type ReviewActionPayload = {
   action: ReviewAction;
   /** The state the card was shown in; the server's own precondition. */
   expected: ReviewState;
+  /**
+   * The revision the card was shown at, where the server keeps revisions (FSRS
+   * as the only schedule). The stronger precondition: the answer is refused
+   * if the card has moved on since.
+   */
+  expectedRevision?: number;
   /** The sitting the answer belongs to. */
   sessionId: string | null;
   durationMs: number | null;
@@ -195,6 +201,8 @@ export function optimisticCreate(
     reviewable: isReviewable(reviewStatus),
     createdTime: null,
     lastEditedTime: null,
+    suspended: false,
+    revision: 0,
   };
 }
 

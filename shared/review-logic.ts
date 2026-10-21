@@ -12,10 +12,21 @@ export type ReviewAction = 'remember' | 'not_remember';
 
 export const REVIEW_ACTIONS: readonly ReviewAction[] = ['remember', 'not_remember'];
 
-/** The part of a vocabulary record that a review action changes. */
+/**
+ * The part of a vocabulary record that a review action changes. In FSRS-only
+ * mode `fsrs`, `dueOn` and `revision` are authoritative; `mastery` and
+ * `nextReview` remain the display mirror for older clients and rollback.
+ */
 export interface ReviewState {
   mastery: number;
   nextReview: IsoDate | null;
+  /** The FSRS state after this answer, where FSRS has seen the word. */
+  fsrs?: import('./scheduler/fsrs.js').FsrsState | null;
+  /** The engine that produced the FSRS state. */
+  fsrsEngine?: string;
+  dueOn?: IsoDate | null;
+  revision?: number;
+  suspended?: boolean;
 }
 
 export interface ScheduleRule {
@@ -228,4 +239,68 @@ export function reconcile(
     // An unusable expected state cannot prove the action landed.
   }
   return 'conflict';
+}
+
+// ---- FSRS-only queue rules ----
+
+export type FsrsIneligibleReason = 'not_due' | 'missing_due_date' | 'suspended';
+
+export interface FsrsQueueCandidate {
+  id: string;
+  /** The day FSRS (or the fallback) has the word due. */
+  dueOn: IsoDate | null;
+  suspended?: boolean;
+}
+
+export type FsrsEligibility = { eligible: true } | { eligible: false; reason: FsrsIneligibleReason };
+
+export interface FsrsQueueResult<T> {
+  queue: T[];
+  excluded: Array<{ record: T; reason: FsrsIneligibleReason | 'duplicate' }>;
+}
+
+/**
+ * FSRS eligibility is deliberately small: archived words never enter, every
+ * other word enters once its due day is today or earlier. A narrow review may
+ * take a word early with `allowNotDue`.
+ */
+export function checkFsrsEligibility(
+  record: FsrsQueueCandidate,
+  today: IsoDate,
+  options: EligibilityOptions = {},
+): FsrsEligibility {
+  if (record.suspended === true) return { eligible: false, reason: 'suspended' };
+  if (record.dueOn === null || !isIsoDate(record.dueOn)) return { eligible: false, reason: 'missing_due_date' };
+  if (compareDates(record.dueOn, today) <= 0 || options.allowNotDue === true) return { eligible: true };
+  return { eligible: false, reason: 'not_due' };
+}
+
+/** Builds the FSRS queue, earliest due first and stable for equal days. */
+export function buildFsrsQueue<T extends FsrsQueueCandidate>(
+  records: readonly T[],
+  today: IsoDate,
+  options: EligibilityOptions = {},
+): FsrsQueueResult<T> {
+  const seen = new Set<string>();
+  const queue: T[] = [];
+  const excluded: FsrsQueueResult<T>['excluded'] = [];
+
+  for (const record of records) {
+    if (seen.has(record.id)) {
+      excluded.push({ record, reason: 'duplicate' });
+      continue;
+    }
+    seen.add(record.id);
+    const eligibility = checkFsrsEligibility(record, today, options);
+    if (eligibility.eligible) queue.push(record);
+    else excluded.push({ record, reason: eligibility.reason });
+  }
+
+  queue.sort((a, b) => {
+    if (a.dueOn === null || b.dueOn === null) {
+      return a.dueOn === b.dueOn ? 0 : a.dueOn === null ? 1 : -1;
+    }
+    return compareDates(a.dueOn, b.dueOn);
+  });
+  return { queue, excluded };
 }

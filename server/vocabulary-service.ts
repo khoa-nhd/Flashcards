@@ -7,12 +7,14 @@ import {
   type VocabularyEntry,
   type VocabularyListResponse,
 } from '../shared/api.js';
-import { calendarDateInTimeZone, type IsoDate } from '../shared/dates.js';
+import { addDays, calendarDateInTimeZone, type IsoDate } from '../shared/dates.js';
 import type { ReviewRules } from '../shared/review-logic.js';
 import { dueDateUnder, isScheduledByFsrs } from '../shared/scheduler/active.js';
+import { fsrsDueDay } from '../shared/scheduler/fsrs.js';
+import { memoryStrength } from '../shared/scheduler/strength.js';
 import { normalizeWord } from '../shared/text.js';
 import { TEXT_FIELD_KEYS, type NewWordDefaults } from '../shared/vocabulary.js';
-import { classifyReviewStatus, isReviewableNow } from '../shared/vocabulary-status.js';
+import { classifyFsrsStatus, classifyReviewStatus, isFsrsReviewable, isReviewableNow } from '../shared/vocabulary-status.js';
 import { HttpError } from './errors.js';
 import { KeyedMutex } from './keyed-mutex.js';
 import { MASTERY_ONLY, type SchedulerStore } from './scheduler-store.js';
@@ -27,6 +29,12 @@ export interface VocabularyServiceOptions {
   writesRequested: boolean;
   /** Which schedule decides when a word is due. Without one, the mastery schedule. */
   scheduler?: SchedulerStore;
+  /**
+   * FSRS is the only schedule (the database is at schema version 15). Never
+   * inferred from the old schedule choice: before version 15 mastery is still
+   * what the store writes.
+   */
+  fsrsOnly?: boolean;
   now?: () => Date;
 }
 
@@ -57,20 +65,51 @@ export class VocabularyService {
     return calendarDateInTimeZone(this.now(), this.options.timeZone);
   }
 
+  /** True when FSRS is the only scheduler for this account. */
+  private fsrsMode(): boolean {
+    return this.options.fsrsOnly === true;
+  }
+
   /**
-   * An entry as the reviewer sees it. Its review date, and with it the status,
-   * is the one under the schedule in charge; the stored mastery date is
-   * untouched underneath.
+   * An entry as the reviewer sees it. In FSRS mode the due day comes from the
+   * FSRS state, or from `dueOn` for a word FSRS has never seen. The mastery
+   * values below are display mirrors only.
    */
   private decorate(entry: EntryData, today: IsoDate): VocabularyEntry {
     const { rules, timeZone } = this.options;
-    const scheduler = this.scheduler.get();
-    const stored = { ...entry };
+    // Internal scheduling values stay on the server; the browser gets the day and the strength.
+    const { fsrs, dueOn, revision, suspended, ...stored } = entry;
     delete stored.fsrsDue;
+    if (this.fsrsMode()) {
+      const state = fsrs?.state ?? null;
+      // A word FSRS has not seen comes up on its fallback day; with none at all it is new and due now.
+      const dueDate = state !== null ? fsrsDueDay(state, timeZone) : (dueOn ?? entry.reviewDate ?? today);
+      const memory = memoryStrength(state);
+      const reviewStatus = classifyFsrsStatus(
+        { dueOn: dueDate, hasFsrs: state !== null, suspended: suspended === true },
+        today,
+      );
+      return {
+        ...stored,
+        mastery: memory.level,
+        reviewDate: dueDate,
+        dueDate,
+        memory,
+        suspended: suspended === true,
+        revision: revision ?? 0,
+        reviewStatus,
+        reviewable: isFsrsReviewable(reviewStatus),
+        scheduledBy: 'fsrs',
+      };
+    }
+
+    const scheduler = this.scheduler.get();
     const reviewDate = dueDateUnder(scheduler, entry, timeZone);
     const reviewStatus = classifyReviewStatus({ mastery: entry.mastery, reviewDate }, today, rules);
     return {
       ...stored,
+      revision: revision ?? 0,
+      suspended: suspended === true,
       reviewDate,
       ...(isScheduledByFsrs(scheduler, entry) ? { scheduledBy: 'fsrs' as const } : {}),
       reviewStatus,
@@ -154,9 +193,18 @@ export class VocabularyService {
         definition: emptyToNull(request.definition) ?? null,
         example: emptyToNull(request.example) ?? null,
         dateAdded: request.dateAdded ?? today,
-        mastery: request.mastery ?? defaults.mastery,
-        reviewDate:
-          request.reviewDate !== undefined ? request.reviewDate : defaults.reviewDate === 'today' ? today : null,
+        // Under FSRS alone a new word is new: no mastery is taken from the request, and it first
+        // comes up on the day asked for (a spread-out import) or today. The store copies that day
+        // into its fallback due day.
+        mastery: this.fsrsMode() ? defaults.mastery : (request.mastery ?? defaults.mastery),
+        reviewDate: this.fsrsMode()
+          ? (request.dueOn ?? today)
+          : request.reviewDate !== undefined
+            ? request.reviewDate
+            : defaults.reviewDate === 'today'
+              ? today
+              : null,
+        dueOn: this.fsrsMode() ? (request.dueOn ?? today) : undefined,
       });
       this.rememberCreate(request.requestId, entry);
       return { entry: this.decorate(entry, today), created };
@@ -172,9 +220,10 @@ export class VocabularyService {
    * reported with where it stopped; sending the same batch again finishes it
    * without creating anything twice.
    */
-  async importBatch(items: readonly unknown[]): Promise<ImportResponse> {
+  async importBatch(items: readonly unknown[], wordsPerDay?: number): Promise<ImportResponse> {
     await this.requireWrites();
     const results: ImportResponse['results'] = [];
+    const start = this.today();
     for (const [index, raw] of items.entries()) {
       const parsed = importItemSchema.safeParse(raw);
       if (!parsed.success) {
@@ -183,7 +232,11 @@ export class VocabularyService {
         continue;
       }
       try {
-        const { entry, created } = await this.create(parsed.data);
+        const spreadDay =
+          wordsPerDay === undefined ? undefined : addDays(start, Math.floor(index / wordsPerDay));
+        const { entry, created } = await this.create(
+          spreadDay === undefined ? parsed.data : { ...parsed.data, dueOn: spreadDay },
+        );
         results.push({ outcome: created ? 'imported' : 'already_imported', entry, message: null });
       } catch (error) {
         if (error instanceof HttpError && error.code === 'duplicate') {
@@ -220,7 +273,7 @@ export class VocabularyService {
       if (request.dateAdded !== undefined && request.dateAdded !== current.dateAdded) {
         changes.dateAdded = request.dateAdded;
       }
-      if (request.schedule !== undefined) {
+      if (request.schedule !== undefined && !this.fsrsMode()) {
         if (request.schedule.mastery !== current.mastery) changes.mastery = request.schedule.mastery;
         // Compared with the date the form was shown, which is the one under the schedule in charge.
         const scheduler = this.scheduler.get();
@@ -231,7 +284,7 @@ export class VocabularyService {
             throw new HttpError(
               409,
               'not_editable',
-              'FSRS sets this word’s review date from your answers, so it cannot be changed by hand. To set dates yourself, switch back to the mastery schedule in Settings.',
+              'FSRS sets this word’s review date from your answers, so it cannot be changed by hand.',
             );
           }
           changes.reviewDate = request.schedule.reviewDate;
@@ -279,6 +332,22 @@ export class VocabularyService {
     const entry = await this.options.catalog.restoreEntry(normalizeId(id));
     if (entry === null) throw notFound();
     return this.decorate(entry, this.today());
+  }
+
+  /**
+   * Bulk archive or resume. Archived words stay in the Bank under the Archived
+   * filter but leave the review queue and dashboard counts.
+   */
+  async setArchived(ids: readonly string[], archived: boolean): Promise<VocabularyEntry[]> {
+    await this.requireWrites();
+    const setSuspended = this.options.catalog.setEntriesSuspended;
+    if (setSuspended === undefined) {
+      throw new HttpError(409, 'not_supported', 'Archiving is not available yet: the database needs its latest update.');
+    }
+    const unique = [...new Set(ids.map((id) => normalizeId(id)))];
+    const entries = await setSuspended.call(this.options.catalog, unique, archived);
+    const today = this.today();
+    return entries.map((entry) => this.decorate(entry, today));
   }
 
   private recallCreate(requestId: string): EntryData | null {
