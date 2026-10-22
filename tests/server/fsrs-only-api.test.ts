@@ -15,6 +15,7 @@ import {
   reviewUndoResponseSchema,
   studyGoalsResponseSchema,
   vocabularyListResponseSchema,
+  weakWordsResponseSchema,
   type VocabularyEntry,
 } from '../../shared/api.js';
 import { TODAY } from '../helpers/fixtures.js';
@@ -487,5 +488,42 @@ describe('the daily review limit', () => {
     const later = await queueOf(alice);
     expect(later.cards.map((card) => card.word)).toEqual(['second', 'brand-new']);
     expect(later.heldBack).toBe(1);
+  });
+});
+
+describe('weak words under FSRS alone', () => {
+  /** Gives a word an FSRS state directly: last reviewed `daysAgo` before now, with this stability and lapses. */
+  async function setState(id: string, stability: number, daysAgo: number, lapses = 0) {
+    const last = new Date(Date.parse('2026-10-09T05:00:00Z') - daysAgo * 86_400_000).toISOString();
+    const due = new Date(Date.parse(last) + stability * 86_400_000).toISOString();
+    await db.admin(
+      `update public.card_states set fsrs_due = $2, fsrs_stability = $3, fsrs_difficulty = 5, fsrs_state = 2, fsrs_reps = 3,
+         fsrs_lapses = $4, fsrs_scheduled_days = $5, fsrs_learning_steps = 0, fsrs_last_review = $6, fsrs_version = 'test',
+         due_on = null where vocabulary_id = $1`,
+      [id, due, stability, lapses, Math.round(stability), last],
+    );
+  }
+
+  it('lists the lowest estimated recall first, gives strength not mastery, and leaves archived words out', async () => {
+    // Words added with a meaning only, so each has something against it (no definition or example).
+    const fresh = await addWord(alice, 'fresh');
+    const fading = await addWord(alice, 'fading');
+    const lapsed = await addWord(alice, 'lapsed');
+    const archived = await addWord(alice, 'archived');
+    await addWord(alice, 'unseen');
+    await setState(fresh.id, 30, 1);
+    await setState(fading.id, 3, 20);
+    await setState(lapsed.id, 30, 1, 4);
+    await setState(archived.id, 2, 40);
+    await call(app, alice, '/api/vocabulary/archive', { method: 'POST', body: { ids: [archived.id], archived: true } });
+
+    const weak = weakWordsResponseSchema.parse(await (await call(app, alice, '/api/weak-words')).json());
+    // fresh and lapsed have the same recall: the one that lapsed more comes first. unseen has no estimate.
+    expect(weak.words.map((word) => word.word)).toEqual(['fading', 'lapsed', 'fresh', 'unseen']);
+    expect(weak.words.find((word) => word.word === 'fresh')?.mastery).toBe(6);
+
+    // The weakest-words review takes them in the same order.
+    const queue = queueResponseSchema.parse(await (await call(app, alice, '/api/review-queue?focus=weak')).json());
+    expect(queue.cards.map((card) => card.word)).toEqual(['fading', 'lapsed', 'fresh', 'unseen']);
   });
 });

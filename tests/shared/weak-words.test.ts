@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_WEAK_WORD_WEIGHTS,
   rankWeakWords,
+  rankWeakWordsByRecall,
   scoreWeakWord,
   type CardHistory,
   type WeakWordInput,
@@ -195,5 +196,47 @@ describe('ranking', () => {
 
   it('shows no recent performance for a word with no saved reviews', () => {
     expect(score(word('late', { reviewDate: '2026-09-01' }))?.recent).toBeNull();
+  });
+});
+
+describe('under FSRS alone', () => {
+  // Every one of these has something against it (a missing example), so all are on the list.
+  const fsrs = (name: string, recall: number | null, lapses: number, reviewDate: string, mastery = 3) =>
+    word(name, { example: null, scale: 'strength', recall, lapses, reviewDate, mastery });
+  const order = (inputs: WeakWordInput[]) => rankWeakWordsByRecall(inputs, TODAY).map((item) => item.word);
+
+  it('puts the lowest estimated recall first, whatever the strength level', () => {
+    expect(order([fsrs('strong', 0.3, 0, TODAY, 9), fsrs('fresh', 0.95, 0, TODAY, 2), fsrs('middle', 0.6, 0, TODAY, 5)])).toEqual([
+      'strong',
+      'middle',
+      'fresh',
+    ]);
+  });
+
+  it('breaks a tie by more lapses, then by the longest due, then by word', () => {
+    expect(
+      order([
+        fsrs('b-once', 0.5, 1, '2026-10-05'),
+        fsrs('a-twice', 0.5, 2, '2026-10-08'),
+        fsrs('c-older', 0.5, 1, '2026-09-20'),
+        fsrs('d-same', 0.5, 1, '2026-09-20'),
+      ]),
+    ).toEqual(['a-twice', 'c-older', 'd-same', 'b-once']);
+  });
+
+  it('puts a word FSRS has not seen after every word it has an estimate for', () => {
+    expect(order([fsrs('unseen', null, 0, TODAY), fsrs('seen', 0.99, 0, TODAY)])).toEqual(['seen', 'unseen']);
+  });
+
+  it('keeps only words with something against them, as before', () => {
+    const fine = word('fine', { scale: 'strength', recall: 0.1, lapses: 0 });
+    expect(order([fine])).toEqual([]);
+  });
+
+  it('speaks of memory strength, not mastery, when a strong word slips', () => {
+    const slipped = score(
+      word('slipped', { scale: 'strength', mastery: 7, history: history({ lastAction: 'not_remember', recentFailures: 1, failedDays: 1 }) }),
+    );
+    expect(slipped?.reasons.map((reason) => reason.detail)).toContain('At memory strength 7 of 10, but not remembered at the latest review.');
   });
 });

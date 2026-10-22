@@ -11,8 +11,16 @@ import { addDays, calendarDateInTimeZone, compareDates, daysBetween, type IsoDat
 import type { ReviewRules } from '../shared/review-logic.js';
 import { dueDateUnder } from '../shared/scheduler/active.js';
 import { goalProblem, planDay, type DailyGoal } from '../shared/session-planner.js';
-import { classifyReviewStatus, isReviewableNow } from '../shared/vocabulary-status.js';
-import { WEAK_WORD_WINDOW_DAYS, rankWeakWords, scoreWeakWord, type WeakWordInput } from '../shared/weak-words.js';
+import { classifyFsrsStatus, classifyReviewStatus, isFsrsReviewable, isReviewableNow } from '../shared/vocabulary-status.js';
+import {
+  WEAK_WORD_WINDOW_DAYS,
+  rankWeakWords,
+  rankWeakWordsByRecall,
+  scoreWeakWord,
+  type WeakWordInput,
+} from '../shared/weak-words.js';
+import { fsrsDueDay, fsrsRecallForOrdering } from '../shared/scheduler/fsrs.js';
+import { strengthLevelOf } from '../shared/scheduler/strength.js';
 import {
   cardHistoryFromDays,
   computeRecovery,
@@ -226,23 +234,35 @@ export class AnalyticsService {
     const since = addDays(today, -(WEAK_WORD_WINDOW_DAYS - 1));
     const reviewable = new Map<string, boolean>();
     const recoveryById = new Map<string, RecoveryProgress>();
-    const inputs: WeakWordInput[] = entries.map((entry) => {
-      const scheduled = this.scheduled(entry);
-      const status = classifyReviewStatus(scheduled, today, rules);
-      reviewable.set(entry.id, isReviewableNow(status, rules));
+    // Under FSRS alone a word is judged by its FSRS state; an archived word leaves the list.
+    const fsrsOnly = repository.capabilities.fsrsOnly === true;
+    const now = this.now();
+    const studied = fsrsOnly ? entries.filter((entry) => entry.suspended !== true) : entries;
+    const inputs: WeakWordInput[] = studied.map((entry) => {
       const days = daysById.get(entry.id) ?? [];
       const history = days.length === 0 ? null : cardHistoryFromDays(days, { since, lastGraduatedOn: null });
-      const base: WeakWordInput = {
-        id: entry.id,
-        word: entry.word,
-        mastery: entry.mastery,
-        reviewDate: scheduled.reviewDate,
-        retired: status === 'mastered',
-        meaning: entry.meaning,
-        definition: entry.definition,
-        example: entry.example,
-        history,
-      };
+      const content = { id: entry.id, word: entry.word, meaning: entry.meaning, definition: entry.definition, example: entry.example, history };
+      let base: WeakWordInput;
+      if (fsrsOnly) {
+        const state = entry.fsrs?.state ?? null;
+        const due = state !== null ? fsrsDueDay(state, this.options.timeZone) : (entry.dueOn ?? entry.reviewDate ?? today);
+        reviewable.set(entry.id, isFsrsReviewable(classifyFsrsStatus({ dueOn: due, hasFsrs: state !== null }, today)));
+        base = {
+          ...content,
+          mastery: strengthLevelOf(state?.stability ?? null),
+          scale: 'strength',
+          reviewDate: due,
+          // Nothing retires under FSRS alone.
+          retired: false,
+          recall: fsrsRecallForOrdering(state, now),
+          lapses: state?.lapses ?? 0,
+        };
+      } else {
+        const scheduled = this.scheduled(entry);
+        const status = classifyReviewStatus(scheduled, today, rules);
+        reviewable.set(entry.id, isReviewableNow(status, rules));
+        base = { ...content, mastery: entry.mastery, reviewDate: scheduled.reviewDate, retired: status === 'mastered' };
+      }
       // The requirement is fixed by how heavy the word is before recovery: the
       // clean slate changes the score, not how many points the word needs.
       const provisional = scoreWeakWord(base, today);
@@ -256,7 +276,7 @@ export class AnalyticsService {
       };
     });
 
-    const ranked = rankWeakWords(inputs, today);
+    const ranked = fsrsOnly ? rankWeakWordsByRecall(inputs, today) : rankWeakWords(inputs, today);
     return {
       historyAvailable,
       today,

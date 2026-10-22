@@ -42,6 +42,15 @@ export interface WeakWordInput {
    * that has the recovery history; `false` when there is none.
    */
   overdueForgiven?: boolean;
+  /**
+   * What `mastery` holds: the mastery schedule's level, or under FSRS alone the
+   * memory strength level (1 to 10, display only). Mastery when absent.
+   */
+  scale?: 'mastery' | 'strength';
+  /** Under FSRS alone: FSRS's estimate of recall now (0 to 1), `null` for a word it has not seen. */
+  recall?: number | null;
+  /** Under FSRS alone: how many times the word has lapsed. */
+  lapses?: number;
 }
 
 export type WeakReasonCode =
@@ -179,7 +188,9 @@ export function scoreWeakWord(
       add(
         'slipped_after_progress',
         weights.slippedAfterProgress,
-        `At mastery ${input.mastery}, but not remembered at the latest review.`,
+        input.scale === 'strength'
+          ? `At memory strength ${input.mastery} of 10, but not remembered at the latest review.`
+          : `At mastery ${input.mastery}, but not remembered at the latest review.`,
       );
     }
   }
@@ -224,6 +235,46 @@ export function scoreWeakWord(
         : { reviews: history.recentReviews, remembered: history.recentReviews - history.recentFailures },
     action: ACTIONS[main.code],
   };
+}
+
+/**
+ * Under FSRS alone, the same words in the order the owner chose (2026-10-21):
+ * the lowest estimated recall now first; on a tie, the word that has lapsed
+ * more often; then the one that has been due longest. A word FSRS has not
+ * seen has no estimate and comes after those that have one. Ties after that
+ * go by word, so the order is stable.
+ */
+export function rankWeakWordsByRecall(
+  inputs: readonly WeakWordInput[],
+  today: IsoDate,
+  weights: WeakWordWeights = DEFAULT_WEAK_WORD_WEIGHTS,
+): WeakWord[] {
+  const byId = new Map(inputs.map((input) => [input.id, input]));
+  const recall = (word: WeakWord) => byId.get(word.id)?.recall ?? null;
+  const lapses = (word: WeakWord) => byId.get(word.id)?.lapses ?? 0;
+  const due = (word: WeakWord) => byId.get(word.id)?.reviewDate ?? null;
+  return inputs
+    .map((input) => scoreWeakWord(input, today, weights))
+    .filter((word): word is WeakWord => word !== null)
+    .sort((a, b) => {
+      const ra = recall(a);
+      const rb = recall(b);
+      if (ra !== rb) {
+        if (ra === null) return 1;
+        if (rb === null) return -1;
+        return ra - rb;
+      }
+      const lapsed = lapses(b) - lapses(a);
+      if (lapsed !== 0) return lapsed;
+      const da = due(a);
+      const db = due(b);
+      if (da !== db) {
+        if (da === null) return 1;
+        if (db === null) return -1;
+        return da < db ? -1 : 1;
+      }
+      return a.word.localeCompare(b.word);
+    });
 }
 
 /** Every word with something against it, sorted by mastery then by weakness. Ties are broken by word so the order is stable. */

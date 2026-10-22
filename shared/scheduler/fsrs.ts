@@ -122,6 +122,23 @@ export function fsrsDueDay(state: FsrsState, timeZone: string): IsoDate {
   return calendarDateInTimeZone(new Date(state.due), timeZone);
 }
 
+/**
+ * FSRS's estimate of the chance a word would be recalled at `now`, for putting
+ * words in order only. Unlike `fsrsRetrievability` it does not wait for a few
+ * answers: a state estimated from mastery has a stability of its own to go by,
+ * and an order needs a number for every word that has one. Never shown as a
+ * percentage. `null` for a word FSRS has not seen.
+ */
+export function fsrsRecallForOrdering(
+  state: FsrsState | null,
+  now: Date,
+  settings: FsrsSettings = DEFAULT_FSRS_SETTINGS,
+): number | null {
+  if (state === null || state.state === 0 || state.lastReview === null) return null;
+  const value = schedulerFor(settings).get_retrievability(toCard(state), now, false);
+  return Number.isFinite(value) ? Math.min(1, Math.max(0, value)) : null;
+}
+
 /** Below this many answers FSRS has too little to go on for its estimate to be worth a percentage. */
 export const MIN_REVIEWS_FOR_ESTIMATE = 2;
 
