@@ -155,6 +155,20 @@ on environment**, like G-01; what was executable was drilled against the real bu
 | Self-host production boot (mock data) | `NODE_ENV=production DATA_MODE=mock PORT=8123 node dist-server/index.js` | `GET /` → 200 `text/html` 948 B with the SPA root; `GET /review` → 200 SPA fallback (refresh on any path works); `/assets/index-*.js` → 200 `text/javascript` 761,827 B; `GET /api/vocabulary` → 200 JSON |
 | Production with missing Supabase env (the real deploy's day-one state) | `NODE_ENV=production PORT=8124 node dist-server/index.js` (no env) | Boots, serves the SPA; API answers **503** with reasons; startup log prints `setup issue: SUPABASE_URL is not set.` / `SUPABASE_ANON_KEY is not set.` — fail-safe, no crash |
 
+### 4f. Product completeness audit → Settings copy defect (G-18)
+
+A **read-only** product completeness audit (99 requirements + 14 invariants; no files touched
+during the audit itself) was delivered 2026-10-22 — result **87 PASS_VERIFIED · 22 PARTIAL ·
+4 MISSING · 0 UNVERIFIED**. Its single *confirmed defect* (everything else listed was missing
+verification, not broken behaviour) was stale in-app copy, fixed and re-verified in the same task:
+
+| Check | Observed |
+| --- | --- |
+| Defect | `src/pages/SettingsPage.tsx` said *"Two features can ask an AI model… both features stay off"* while `docs/ai-features.md:3,30` documents **eight** AI features (grep: no test or doc pinned the stale text) |
+| Fix | Copy rewritten to the accurate eight-feature description: names all eight, states each request carries only that feature's own payload (never whole library/history/settings/other accounts), keeps the provider-retention warning and the no-key behaviour |
+| Browser (`/settings`, real Chrome) | Paragraph reads *"Eight features can ask an AI model for a draft: Smart Reader, the Writing Challenge coach, word families, example sentences, exam plans, vocabulary maps, and Discovery's Explain…"* — "Two features" absent from the DOM; **0 console errors** |
+| Gates re-run after all edits | `tsc --noEmit` **0** · `eslint .` **0** · `smart-reader-ui` **5/5** · full suite **94 files / 2012 passed / 3 skipped** |
+
 ## 5. Deliberately not verified / not attempted
 
 | Item | Status | Why |

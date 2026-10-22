@@ -37,6 +37,7 @@ Status vocabulary is the contract's: PASS_VERIFIED / PARTIAL / MISSING / UNVERIF
 | G-14 | Prior-report-derived evidence in Blueprint §10 (1908/1990 counts, PASS claims) treated as leads only | §10 | CLOSED this task | Matrix re-derives statuses from executed tests; counts now: 94 files / 2012 passed / 3 skipped (this task) | Matrix supersedes §10 evidence annotations | — |
 | G-15 | No approved quantitative targets (retention/engagement…) | §14 | **OPEN_DECISION** (see D-09) | Blueprint §14: “Không bịa chỉ số” | No invented metrics; decision queued | Low |
 | G-16 | `docs/upgrade-plan.md` is historical (Pomodoro etc. appear there only as old notes) | E4.3 | Note | Blueprint §11 #9 | Left untouched (history preserved per contract) | Low |
+| G-18 | **Settings AI copy** said "Two features can ask an AI model… both features stay off" while **eight** AI features exist | C6b (UI/doc consistency; found by the 2026-10-22 read-only product completeness audit) | **CLOSED this task (PASS_VERIFIED)** | Direct read: `src/pages/SettingsPage.tsx` stale copy vs `docs/ai-features.md:3,30` (eight features); grep confirmed no test or doc pinned the old wording | Copy rewritten to the eight-feature reality (per-request payload scope, provider-retention warning, no-key behaviour); browser-verified at `/settings` — "Eight features…" present, "Two features" absent, 0 console errors; gates green (verification-record §4f) | — |
 
 ## Part 2 — Decision register
 

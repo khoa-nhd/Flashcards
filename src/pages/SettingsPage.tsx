@@ -138,12 +138,14 @@ export function SettingsPage() {
         <section className={`${CARD} flex flex-col gap-4 p-5`}>
           <h2 className={SECTION_TITLE}>AI assistance</h2>
           <p className="text-sm text-muted">
-            Two features can ask an AI model for a draft. <span className="font-medium">Smart Reader</span> (Add
-            vocabulary) sends only the sentence around the word you picked, and the <span className="font-medium">
-            Writing Challenge</span> coach sends only the sentence you wrote. Nothing else ever leaves: not your
-            vocabulary, not your history, not your settings — and the sentence itself is taken from your own text,
-            never invented. These providers may keep what is sent, so do not paste anything private. Without a
-            configured model both features stay off, and everything can still be entered by hand.
+            Eight features can ask an AI model for a draft: <span className="font-medium">Smart Reader</span>, the{" "}
+            <span className="font-medium">Writing Challenge</span> coach, word families, example sentences, exam plans,
+            vocabulary maps, and Discovery's <span className="font-medium">Explain</span> and{" "}
+            <span className="font-medium">Draft a reading</span>. Each request carries only what that feature works on —
+            a sentence around your word, the sentence you wrote, or the word, topic, collection or exam pool in play —
+            never your whole library, your history, your settings, or another account's data. These providers may keep
+            what is sent, so do not paste anything private. Without a configured model all eight stay off and say so,
+            and everything can still be entered by hand.
           </p>
         </section>
 
