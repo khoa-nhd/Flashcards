@@ -7,16 +7,21 @@
  * clock: `today` is always passed in.
  */
 import { addDays, compareDates, isIsoDate, type IsoDate } from './dates.js';
+import { STRENGTH_BANDS, strengthBand, type StrengthBand, type StrengthLevel } from './scheduler/strength.js';
 import type { ReviewStatus } from './vocabulary.js';
 
 export interface MetricEntry {
   mastery: number | null;
   dateAdded: IsoDate | null;
   reviewStatus: ReviewStatus;
+  /** Under FSRS alone, the word's memory strength (display only). */
+  memory?: { level: number } | null;
+  /** Under FSRS alone, archived by hand. */
+  suspended?: boolean;
 }
 
 export interface SummaryMetrics {
-  /** Every vocabulary record. Always `mastered + learning + invalid`. */
+  /** Every vocabulary record. Always `mastered + learning + new + suspended + invalid`. */
   total: number;
   /** Mastery has reached the completion level (10). */
   mastered: number;
@@ -24,6 +29,10 @@ export interface SummaryMetrics {
   learning: number;
   /** Mastery is empty or not a whole number, so the word cannot be scheduled. */
   invalid: number;
+  /** Under FSRS alone: never studied, and due to be brought in now. */
+  new: number;
+  /** Under FSRS alone: archived, so out of the queue. */
+  suspended: number;
   /** Learning, scheduled for exactly today. */
   dueToday: number;
   /** Learning, scheduled before today. Never also counted as due today. */
@@ -64,6 +73,8 @@ export function computeSummary(entries: readonly MetricEntry[], today: IsoDate):
     mastered: 0,
     learning: 0,
     invalid: 0,
+    new: 0,
+    suspended: 0,
     dueToday: 0,
     overdue: 0,
     unscheduled: 0,
@@ -94,6 +105,12 @@ export function computeSummary(entries: readonly MetricEntry[], today: IsoDate):
         break;
       case 'upcoming':
         summary.upcoming += 1;
+        break;
+      case 'new':
+        summary.new += 1;
+        break;
+      case 'suspended':
+        summary.suspended += 1;
         break;
     }
 
@@ -129,6 +146,29 @@ export function masteryDistribution(
     else other += 1;
   }
   return { buckets, other };
+}
+
+export interface StrengthDistribution {
+  /** Words at each memory strength level, 1 to 10 in order. */
+  levels: Array<{ level: StrengthLevel; count: number }>;
+  /** The same words by band: New, Learning, Familiar, Strong, Master. */
+  bands: Array<{ band: StrengthBand; count: number }>;
+}
+
+/**
+ * How many words sit at each memory strength level (FSRS alone). Archived
+ * words are left out, as they are of everything else on the dashboard.
+ */
+export function strengthDistribution(entries: readonly MetricEntry[]): StrengthDistribution {
+  const levels = Array.from({ length: 10 }, (_, index) => ({ level: (index + 1) as StrengthLevel, count: 0 }));
+  const bands = STRENGTH_BANDS.map((band) => ({ band, count: 0 }));
+  for (const entry of entries) {
+    const level = entry.memory?.level;
+    if (entry.suspended === true || level === undefined || !Number.isInteger(level) || level < 1 || level > 10) continue;
+    levels[level - 1]!.count += 1;
+    bands[STRENGTH_BANDS.indexOf(strengthBand(level as StrengthLevel))]!.count += 1;
+  }
+  return { levels, bands };
 }
 
 /** How many words carry each Date Added. Entries without a valid date are left out. */

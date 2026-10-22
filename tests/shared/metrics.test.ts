@@ -9,6 +9,7 @@ import {
   masteryDistribution,
   monthGrid,
   startOfWeek,
+  strengthDistribution,
   type MetricEntry,
 } from '../../shared/metrics.js';
 import type { ReviewStatus } from '../../shared/vocabulary.js';
@@ -46,7 +47,7 @@ describe('computeSummary', () => {
   it('splits learning words into four states that never overlap', () => {
     expect(summary).toMatchObject({ dueToday: 2, overdue: 1, unscheduled: 1, upcoming: 2 });
     expect(summary.dueToday + summary.overdue + summary.unscheduled + summary.upcoming).toBe(summary.learning);
-    expect(summary.mastered + summary.learning + summary.invalid).toBe(summary.total);
+    expect(summary.mastered + summary.learning + summary.new + summary.suspended + summary.invalid).toBe(summary.total);
   });
 
   it('never counts a mastered word as pending review', () => {
@@ -79,6 +80,8 @@ describe('computeSummary', () => {
       mastered: 0,
       learning: 0,
       invalid: 0,
+      new: 0,
+      suspended: 0,
       dueToday: 0,
       overdue: 0,
       unscheduled: 0,
@@ -248,5 +251,47 @@ describe('month helpers', () => {
     expect(isMonth('2026-1')).toBe(false);
     expect(isMonth('october')).toBe(false);
     expect(isMonth(null)).toBe(false);
+  });
+});
+
+describe('under FSRS alone', () => {
+  const fsrs = (reviewStatus: ReviewStatus, level: number, suspended = false): MetricEntry => ({
+    reviewStatus,
+    dateAdded: '2026-09-01',
+    mastery: level,
+    memory: { level },
+    suspended,
+  });
+  const entries = [
+    fsrs('new', 1),
+    fsrs('new', 1),
+    fsrs('due_today', 3),
+    fsrs('overdue', 6),
+    fsrs('upcoming', 10),
+    fsrs('upcoming', 8),
+    fsrs('suspended', 9, true),
+  ];
+
+  it('counts new and archived words apart, and every word exactly once', () => {
+    const summary = computeSummary(entries, TODAY);
+    expect(summary).toMatchObject({ total: 7, new: 2, suspended: 1, mastered: 0, learning: 4, dueToday: 1, overdue: 1, upcoming: 2 });
+    expect(summary.mastered + summary.learning + summary.new + summary.suspended + summary.invalid).toBe(summary.total);
+  });
+
+  it('spreads the words over the ten strength levels and five bands, leaving archived ones out', () => {
+    const { levels, bands } = strengthDistribution(entries);
+    expect(levels.map((item) => item.count)).toEqual([2, 0, 1, 0, 0, 1, 0, 1, 0, 1]);
+    expect(bands).toEqual([
+      { band: 'New', count: 2 },
+      { band: 'Learning', count: 1 },
+      { band: 'Familiar', count: 0 },
+      { band: 'Strong', count: 2 },
+      { band: 'Master', count: 1 },
+    ]);
+  });
+
+  it('skips a word with no usable strength', () => {
+    const { levels } = strengthDistribution([{ reviewStatus: 'new', dateAdded: null, mastery: null }]);
+    expect(levels.every((item) => item.count === 0)).toBe(true);
   });
 });

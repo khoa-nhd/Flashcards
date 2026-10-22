@@ -47,6 +47,31 @@ when the choice changes, and none of them ever mixes the two. Mastered still
 means mastery 10 under either. The word list marks a date that FSRS set, and
 that date cannot be edited by hand.
 
+### Under FSRS as the only schedule (schema version 15)
+
+Once the database is at version 15 there is no choice of schedule and no
+mastery: see `docs/fsrs-only-redesign.md`. The states become:
+
+| State | Definition |
+| --- | --- |
+| New | FSRS has not seen the word, and its first day (`due_on`, today when empty) is today or earlier. In the queue. |
+| Overdue | Its FSRS due day (or first day, for a new word) is before today. |
+| Due today | FSRS has it due today. |
+| Upcoming | Its due day is after today. A new word spread to a later day by an import is upcoming too. |
+| Archived (`suspended`) | Archived by hand in the Bank. Never in the queue, whatever its day. |
+| Needs a mastery (`invalid`) | Not used under FSRS alone. |
+
+Nothing is ever mastered: a word stays on FSRS's schedule however strong it is.
+The summary then counts **New** and **Archived** apart, so that
+`Total = Mastered + Learning + New + Archived + Needs a mastery` still holds (with
+Mastered 0), and Learning is Due today + Overdue + Upcoming.
+
+**Memory strength** (display only, never deciding what is due) is read from
+FSRS stability: level 1 under 1 day, 2 from 1, 3 from 3, 4 from 7, 5 from 14,
+6 from 30, 7 from 60, 8 from 120, 9 from 240, 10 from 365 days; bands New (1),
+Learning (2–3), Familiar (4–5), Strong (6–9), Master (10). The strength
+distribution counts live words at each level and band, archived words left out.
+
 ## Summary cards
 
 | Card | Definition |
