@@ -250,7 +250,7 @@ export const LATEST_SCHEMA_VERSION = 15;
  * screens for it exist (docs/fsrs-only-progress.md), so the app does not ask
  * for it yet. Raise this to LATEST_SCHEMA_VERSION when they do.
  */
-export const RECOMMENDED_SCHEMA_VERSION = 14;
+export const RECOMMENDED_SCHEMA_VERSION = 15;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
