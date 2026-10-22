@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ReviewDaysResponse } from '../../shared/api.js';
 import { isIsoDate, type IsoDate } from '../../shared/dates.js';
 import { addMonths, countByDateAdded, isMonth, monthGrid } from '../../shared/metrics.js';
-import { useApp, useVocabulary } from '../app-context.js';
-import { MasteryPill, StatusBadge, formatDate } from '../components/badges.js';
+import { useApp, useUiLanguage, useVocabulary } from '../app-context.js';
+import { MasteryPill, StatusBadge, StrengthPill, formatDate } from '../components/badges.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -121,6 +121,8 @@ function useReviewDays(from: IsoDate | null, to: IsoDate | null) {
 /** A month at a glance: the words added on each day, or the reviews saved on it. */
 export function CalendarPage() {
   const state = useVocabulary();
+  const language = useUiLanguage();
+  const fsrsOnly = state.meta?.fsrsOnly === true;
   const location = useLocation();
   const today = state.meta?.today ?? null;
 
@@ -368,7 +370,11 @@ export function CalendarPage() {
                                 <span className="block truncate font-medium">{entry.word}</span>
                                 <span className="block truncate text-xs text-muted">{entry.meaning ?? entry.definition ?? '—'}</span>
                               </span>
-                              <MasteryPill mastery={entry.mastery} />
+                              {fsrsOnly && entry.memory !== undefined ? (
+                                <StrengthPill memory={entry.memory} compact language={language} />
+                              ) : (
+                                <MasteryPill mastery={entry.mastery} />
+                              )}
                             </button>
                             <span className="sr-only">
                               <StatusBadge status={entry.reviewStatus} />

@@ -557,8 +557,8 @@ export function createApp({
 
   // A batch of new words, each created exactly as the Add form would create it.
   app.post('/api/vocabulary/import', async (c) => {
-    const { items, wordsPerDay } = await parseBody(c, importRequestSchema);
-    return c.json(await requireVocabulary(c).importBatch(items, wordsPerDay));
+    const { items, wordsPerDay, startIndex } = await parseBody(c, importRequestSchema);
+    return c.json(await requireVocabulary(c).importBatch(items, wordsPerDay, startIndex));
   });
 
   // Archives or resumes words in bulk. They stay in the Bank; archived ones leave the review queue.

@@ -5,7 +5,10 @@ import type { ReviewAction } from '../../shared/review-logic.js';
 import { SWIPE } from '../config.js';
 import { useReducedMotion } from '../hooks/useReducedMotion.js';
 import { useSwipe } from '../hooks/useSwipe.js';
+import { useUiLanguage } from '../app-context.js';
+import { pick } from '../lib/i18n.js';
 import type { SwipeDirection } from '../lib/gesture.js';
+import { StrengthPill } from './badges.js';
 
 export interface FlashcardProps {
   card: ReviewCard;
@@ -16,6 +19,8 @@ export interface FlashcardProps {
   /** A save is in flight or has failed; the card is frozen until that resolves. */
   locked: boolean;
   pendingAction: ReviewAction | null;
+  /** The word's strength fell since it was last shown in this session. */
+  strengthDropped?: boolean;
   swipeThresholdPx?: number;
   onFlip: () => void;
   onGrade: (action: ReviewAction) => void;
@@ -47,6 +52,7 @@ export function Flashcard({
   canGrade,
   locked,
   pendingAction,
+  strengthDropped = false,
   swipeThresholdPx = SWIPE.thresholdPx,
   onFlip,
   onGrade,
@@ -54,10 +60,17 @@ export function Flashcard({
   flipButtonRef,
 }: FlashcardProps) {
   const reducedMotion = useReducedMotion();
+  const language = useUiLanguage();
 
   // The answer is not put in the document until the card is first flipped.
   const [revealed, setRevealed] = useState(flipped);
   if (flipped && !revealed) setRevealed(true);
+  // Level 6 and above starts with the definition and example folded away.
+  const [detailsOpen, setDetailsOpen] = useState(false);
+  const detailsCollapsed = card.memory !== undefined && card.detailCollapsed && !detailsOpen;
+  const meaningFields = card.back.filter((field) => field.key === 'meaning');
+  const detailFields = card.back.filter((field) => field.key !== 'meaning');
+  const visibleFields = detailsCollapsed ? meaningFields : card.back;
 
   const handleSwipe = (direction: SwipeDirection) => {
     if (locked) return;
@@ -103,10 +116,14 @@ export function Flashcard({
         <div className="card-flipper" data-flipped={flipped}>
           <section aria-hidden={flipped} className={`${FACE} border-line bg-surface`}>
             <div className="flex items-center justify-between gap-3 text-xs text-faint">
-              <span className="text-[0.6875rem] font-medium uppercase tracking-[0.16em] tabular-nums">
-                Mastery {card.mastery}
-              </span>
-              {due !== null && <span>{due}</span>}
+              {card.memory !== undefined ? (
+                <StrengthPill memory={card.memory} language={language} needsReview={strengthDropped} />
+              ) : (
+                <span className="text-[0.6875rem] font-medium uppercase tracking-[0.16em] tabular-nums">
+                  Mastery {card.mastery}
+                </span>
+              )}
+              {due !== null && <span className="shrink-0">{due}</span>}
             </div>
             <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6 text-center">
               <h2 className="font-serif text-[clamp(2.5rem,8vw,4.5rem)] font-semibold leading-[1.05] tracking-[-0.025em] wrap-anywhere">
@@ -138,7 +155,7 @@ export function Flashcard({
             </div>
             {revealed && (
               <div className="flex flex-1 flex-col justify-center gap-5 py-5">
-                {card.back.map((field) => (
+                {visibleFields.map((field) => (
                   <div key={field.key}>
                     <div className="mb-1.5 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-faint">
                       {field.label}
@@ -146,15 +163,56 @@ export function Flashcard({
                     <p className="whitespace-pre-line font-serif text-[1.125rem] leading-[1.55] wrap-anywhere">{field.value}</p>
                   </div>
                 ))}
+                {detailsCollapsed && detailFields.length > 0 && (
+                  <div>
+                    <button
+                      type="button"
+                      aria-expanded={detailsOpen}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        setDetailsOpen(true);
+                      }}
+                      className="cursor-pointer rounded-full border border-line-strong px-3 py-1.5 text-xs font-semibold text-muted transition-colors hover:text-ink"
+                    >
+                      {pick(language, 'Show definition/example', 'Xem định nghĩa/ví dụ')}
+                    </button>
+                    <p className="mt-2 text-xs text-faint">
+                      {pick(
+                        language,
+                        'The details are folded away at this strength level. They are still there when you need them.',
+                        'Định nghĩa và ví dụ được thu gọn ở mức sức nhớ này. Bạn vẫn mở lại được khi cần.',
+                      )}
+                    </p>
+                  </div>
+                )}
+                {!detailsCollapsed && card.memory !== undefined && card.detailCollapsed && (
+                  <button
+                    type="button"
+                    aria-expanded={detailsOpen}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setDetailsOpen(false);
+                    }}
+                    className="cursor-pointer self-start rounded-full border border-line px-3 py-1.5 text-xs font-medium text-muted transition-colors hover:text-ink"
+                  >
+                    {pick(language, 'Hide definition/example', 'Ẩn định nghĩa/ví dụ')}
+                  </button>
+                )}
                 {card.back.length === 0 && (
                   <p className="text-center text-sm leading-relaxed text-muted">
                     {card.detailsHidden
-                      ? 'The definition and example are hidden at this mastery level. Recall them from memory.'
+                      ? card.memory !== undefined
+                        ? 'The definition and example are folded away at this memory strength. They are still there when you need them.'
+                        : 'The definition and example are hidden at this mastery level. Recall them from memory.'
                       : 'No definition or example is recorded for this word.'}
                   </p>
                 )}
                 {card.back.length > 0 && card.detailsHidden && (
-                  <p className="text-xs text-faint">Other details are hidden at this mastery level.</p>
+                  <p className="text-xs text-faint">
+                    {card.memory !== undefined
+                      ? 'Other details are folded away at this memory strength.'
+                      : 'Other details are hidden at this mastery level.'}
+                  </p>
                 )}
               </div>
             )}

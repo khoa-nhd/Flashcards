@@ -5,7 +5,17 @@
 import { z } from 'zod';
 import { DEFAULT_SPEECH_LANGUAGE, SPEECH_LANGUAGES } from './speech.js';
 
-export const SORT_KEYS = ['word', 'dateAdded', 'reviewDate', 'mastery', 'trueMastery'] as const;
+export const SORT_KEYS = [
+  'word',
+  'dateAdded',
+  'reviewDate',
+  'mastery',
+  'strength',
+  'due',
+  'reps',
+  'lapses',
+  'trueMastery',
+] as const;
 export type SortKey = (typeof SORT_KEYS)[number];
 export type SortDirection = 'asc' | 'desc';
 
@@ -22,6 +32,8 @@ const settingsSchema = z.object({
   answerKeys: z.enum(['none', 'jk', 'fj', 'numbers']),
   /** The accent Listening practice asks the browser to read in. */
   speechLang: z.enum(SPEECH_LANGUAGES.map(([code]) => code)),
+  /** The interface language. `auto` follows the browser, falling back to Vietnamese. */
+  uiLanguage: z.enum(['auto', 'vi', 'en']),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;
@@ -35,6 +47,7 @@ export const DEFAULT_SETTINGS: Settings = {
   reduceMotion: false,
   answerKeys: 'none',
   speechLang: DEFAULT_SPEECH_LANGUAGE,
+  uiLanguage: 'auto',
 };
 
 const STORAGE_KEY = 'vocabulary-review:settings:v1';

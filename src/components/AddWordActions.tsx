@@ -6,7 +6,7 @@
  */
 import { useState, type ReactNode } from 'react';
 import type { AiMessage, CreateEntryInput, UpdateEntryInput, VocabularyEntry } from '../../shared/api.js';
-import { useApp, useLibrary } from '../app-context.js';
+import { useApp, useLibrary, useUiLanguage, useVocabulary } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { openWord } from '../lib/router.js';
 import { extractVocabularyAnalysis } from '../lib/vocabulary-analysis.js';
@@ -14,7 +14,7 @@ import type { ExtractedExample, ExampleRegister } from '../lib/vocabulary-analys
 import { createInputOf, type FormValues } from '../lib/vocabulary-form.js';
 import type { WriteResult } from '../lib/vocabulary-store.js';
 import { AddWordDialog, type AddWordDraft } from './AddWordDialog.js';
-import { MasteryPill, formatDate } from './badges.js';
+import { MasteryPill, StrengthPill, formatDate } from './badges.js';
 import { Icon } from './Icon.js';
 import { Spinner } from './Spinner.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY } from './ui.js';
@@ -61,6 +61,9 @@ export interface AddWordActionsProps {
 
 export function AddWordActions({ message, conversationId, savedVocabularyId, onSaved, children }: AddWordActionsProps) {
   const { api, vocabulary } = useApp();
+  const vocabularyState = useVocabulary();
+  const language = useUiLanguage();
+  const fsrsOnly = vocabularyState.meta?.fsrsOnly === true;
   const libraryService = useApp().library;
   const library = useLibrary();
   const [attempt, setAttempt] = useState<Attempt | null>(null);
@@ -102,7 +105,7 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
   const start = (values: FormValues, selectedExamples: ExtractedExample[] = [], primaryRegister: ExampleRegister | null = null) => {
     setDialog(null);
     setNotice(null);
-    const input = createInputOf(values);
+    const input = createInputOf(values, fsrsOnly);
     const { localId, result } = vocabulary.create(input);
     const attempt: Attempt = {
       status: 'saving',
@@ -293,13 +296,21 @@ export function AddWordActions({ message, conversationId, savedVocabularyId, onS
                 <button type="button" className="cursor-pointer font-semibold underline" onClick={() => openWord(entry.id)}>
                   {entry.word}
                 </button>
-                <MasteryPill mastery={entry.mastery} />
+                {entry.memory !== undefined ? (
+                  <StrengthPill memory={entry.memory} compact language={language} />
+                ) : (
+                  <MasteryPill mastery={entry.mastery} />
+                )}
                 <span className="min-w-0 flex-1 truncate">{entry.meaning ?? entry.definition ?? ''}</span>
                 <span className="text-xs">added {formatDate(entry.dateAdded, 'short')}</span>
               </li>
             ))}
           </ul>
-          <p className="mt-1.5 text-xs">Updating keeps its progress and review dates; only the meaning, definition and example change.</p>
+          <p className="mt-1.5 text-xs">
+            {fsrsOnly
+              ? 'Updating keeps its memory state and schedule; only the meaning, definition and example change.'
+              : 'Updating keeps its progress and review dates; only the meaning, definition and example change.'}
+          </p>
           <div className="mt-2.5 flex flex-wrap gap-2">
             <button type="button" className={BUTTON_SECONDARY} onClick={updateExisting}>
               Update with new information

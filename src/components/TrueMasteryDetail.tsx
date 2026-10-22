@@ -6,6 +6,7 @@ import {
   type PracticeAnswer,
   type ModeBreakdown,
 } from '../../shared/true-mastery.js';
+import { useVocabulary } from '../app-context.js';
 import { formatDate, relativeDay } from './badges.js';
 
 /** Detailed True Mastery breakdown for a single vocabulary item. */
@@ -16,6 +17,8 @@ export function TrueMasteryDetail({
   answers: PracticeAnswer[];
   today: string | null;
 }) {
+  const fsrsOnly = useVocabulary().meta?.fsrsOnly === true;
+  const scoreName = fsrsOnly ? 'Practice score' : 'True Mastery';
   const result = answers.length > 0 && today
     ? calculateTrueMastery(answers, today)
     : null;
@@ -25,7 +28,7 @@ export function TrueMasteryDetail({
     return (
       <section aria-labelledby="true-mastery-heading" className="flex flex-col gap-2 border-t border-line pt-4">
         <h3 id="true-mastery-heading" className="text-xs font-medium uppercase tracking-[0.12em] text-muted">
-          True Mastery
+          {scoreName}
         </h3>
         <p className="text-sm text-muted">
           {answers.length === 0
@@ -33,9 +36,9 @@ export function TrueMasteryDetail({
             : 'Insufficient evidence for a reliable estimate. Keep practising across modes.'}
         </p>
         <p className="text-xs text-muted">
-          True Mastery is an evidence-based estimate (0–100) of how well you know this word,
-          drawn from your practice history across all modes. It is separate from Review Mastery
-          (which drives the schedule) and Practice Mastery (per-mode progress up to 3).
+          {fsrsOnly
+            ? 'Practice score is an evidence-based estimate (0–100) of how well you know this word, drawn from practice answers across all modes. It is separate from memory strength and per-mode practice progress, and it never changes when a word is due.'
+            : 'True Mastery is an evidence-based estimate (0–100) of how well you know this word, drawn from your practice history across all modes. It is separate from Review Mastery (which drives the schedule) and Practice Mastery (per-mode progress up to 3).'}
         </p>
       </section>
     );
@@ -67,7 +70,7 @@ export function TrueMasteryDetail({
   return (
     <section aria-labelledby="true-mastery-heading" className="flex flex-col gap-2 border-t border-line pt-4">
       <h3 id="true-mastery-heading" className="text-xs font-medium uppercase tracking-[0.12em] text-muted">
-        True Mastery
+        {scoreName}
       </h3>
 
       {/* Overall score and tier */}
@@ -90,7 +93,7 @@ export function TrueMasteryDetail({
           </span>
         </div>
         <div className="min-w-0 flex-1">
-          <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-accent-soft" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mastery} aria-label={`True Mastery ${mastery} out of 100`}>
+          <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-accent-soft" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={mastery} aria-label={`${scoreName} ${mastery} out of 100`}>
             <span className="block h-full rounded-full bg-accent" style={{ width: `${mastery}%` }} />
           </div>
         </div>
@@ -157,7 +160,9 @@ export function TrueMasteryDetail({
         </summary>
         <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted">
           <p>
-            True Mastery estimates how well you know this word (0–100) based on your practice history.
+            {fsrsOnly
+              ? 'Practice score estimates how well you know this word (0–100) from your practice answers. It never changes the schedule or memory strength.'
+              : 'True Mastery estimates how well you know this word (0–100) based on your practice history.'}{' '}
             Each mode contributes differently: Typing and Fill-in-the-blank are stronger signals than Recognition.
           </p>
           <p>

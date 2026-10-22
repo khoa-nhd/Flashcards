@@ -4,6 +4,7 @@ import {
   busiestDays,
   computeSummary,
   masteryDistribution,
+  strengthDistribution,
   type Granularity,
 } from '../../shared/metrics.js';
 import { useVocabulary } from '../app-context.js';
@@ -35,9 +36,15 @@ export function InsightsPage() {
   const [granularity, setGranularity] = useState<Granularity>('week');
   const { entries, meta } = state;
   const today = meta?.today ?? null;
+  const fsrsOnly = meta?.fsrsOnly === true;
 
   const summary = useMemo(() => (today === null ? null : computeSummary(entries, today)), [entries, today]);
   const distribution = useMemo(() => masteryDistribution(entries), [entries]);
+  const strength = useMemo(() => strengthDistribution(entries), [entries]);
+  const strengthTotal = useMemo(
+    () => strength.bands.reduce((total, bucket) => total + bucket.count, 0),
+    [strength.bands],
+  );
   const range = RANGES[granularity];
   const additions = useMemo(
     () => (today === null ? [] : additionsByPeriod(entries, granularity, range.periods, today)),
@@ -114,72 +121,126 @@ export function InsightsPage() {
 
             <div className="grid gap-6 lg:grid-cols-2">
               <section className={`${CARD} p-5`}>
-                <h2 className={SECTION_TITLE}>Mastered and still learning</h2>
-                <div
-                  role="progressbar"
-                  aria-label="Share of words mastered"
-                  aria-valuemin={0}
-                  aria-valuemax={summary.total}
-                  aria-valuenow={summary.mastered}
-                  className="mt-4 h-2.5 overflow-hidden rounded-full bg-accent-soft"
-                >
-                  <div
-                    className="h-full rounded-full bg-accent"
-                    style={{ width: `${summary.total === 0 ? 0 : (summary.mastered / summary.total) * 100}%` }}
-                  />
-                </div>
-                <table className="mt-4 w-full text-sm">
-                  <thead className="text-left text-xs text-muted">
-                    <tr>
-                      <th scope="col" className="py-1 font-medium">
-                        State
-                      </th>
-                      <th scope="col" className="py-1 text-right font-medium">
-                        Words
-                      </th>
-                      <th scope="col" className="py-1 text-right font-medium">
-                        Share
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody className="tabular-nums">
-                    {(
-                      [
-                        ['Mastered (mastery 10)', summary.mastered],
-                        ['Learning (mastery 0 to 9)', summary.learning],
-                        ...(summary.invalid > 0 ? ([['No usable mastery', summary.invalid]] as Array<[string, number]>) : []),
-                      ] as Array<[string, number]>
-                    ).map(([label, count]) => (
-                      <tr key={label} className="border-t border-line">
-                        <th scope="row" className="py-1.5 text-left font-normal">
-                          {label}
-                        </th>
-                        <td className="py-1.5 text-right">{count}</td>
-                        <td className="py-1.5 text-right text-muted">{percent(count, summary.total)}</td>
-                      </tr>
-                    ))}
-                    <tr className="border-t border-line font-semibold">
-                      <th scope="row" className="py-1.5 text-left">
-                        Total
-                      </th>
-                      <td className="py-1.5 text-right">{summary.total}</td>
-                      <td className="py-1.5 text-right text-muted">{summary.total === 0 ? '—' : '100%'}</td>
-                    </tr>
-                  </tbody>
-                </table>
+                <h2 className={SECTION_TITLE}>{fsrsOnly ? 'Memory strength' : 'Mastered and still learning'}</h2>
+                {fsrsOnly ? (
+                  <>
+                    <p className="mt-2 text-sm text-muted">
+                      The 1–10 scale is derived from FSRS stability and is display only. Archived words are left out.
+                    </p>
+                    <table className="mt-4 w-full text-sm">
+                      <thead className="text-left text-xs text-muted">
+                        <tr>
+                          <th scope="col" className="py-1 font-medium">
+                            Band
+                          </th>
+                          <th scope="col" className="py-1 text-right font-medium">
+                            Words
+                          </th>
+                          <th scope="col" className="py-1 text-right font-medium">
+                            Share
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="tabular-nums">
+                        {strength.bands.map((bucket) => (
+                          <tr key={bucket.band} className="border-t border-line">
+                            <th scope="row" className="py-1.5 text-left font-normal">
+                              {bucket.band}
+                            </th>
+                            <td className="py-1.5 text-right">{bucket.count}</td>
+                            <td className="py-1.5 text-right text-muted">{percent(bucket.count, strengthTotal)}</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t border-line font-semibold">
+                          <th scope="row" className="py-1.5 text-left">
+                            Total
+                          </th>
+                          <td className="py-1.5 text-right">{strengthTotal}</td>
+                          <td className="py-1.5 text-right text-muted">{strengthTotal === 0 ? '—' : '100%'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </>
+                ) : (
+                  <>
+                    <div
+                      role="progressbar"
+                      aria-label="Share of words mastered"
+                      aria-valuemin={0}
+                      aria-valuemax={summary.total}
+                      aria-valuenow={summary.mastered}
+                      className="mt-4 h-2.5 overflow-hidden rounded-full bg-accent-soft"
+                    >
+                      <div
+                        className="h-full rounded-full bg-accent"
+                        style={{ width: `${summary.total === 0 ? 0 : (summary.mastered / summary.total) * 100}%` }}
+                      />
+                    </div>
+                    <table className="mt-4 w-full text-sm">
+                      <thead className="text-left text-xs text-muted">
+                        <tr>
+                          <th scope="col" className="py-1 font-medium">
+                            State
+                          </th>
+                          <th scope="col" className="py-1 text-right font-medium">
+                            Words
+                          </th>
+                          <th scope="col" className="py-1 text-right font-medium">
+                            Share
+                          </th>
+                        </tr>
+                      </thead>
+                      <tbody className="tabular-nums">
+                        {(
+                          [
+                            ['Mastered (mastery 10)', summary.mastered],
+                            ['Learning (mastery 0 to 9)', summary.learning],
+                            ...(summary.invalid > 0
+                              ? ([['No usable mastery', summary.invalid]] as Array<[string, number]>)
+                              : []),
+                          ] as Array<[string, number]>
+                        ).map(([label, count]) => (
+                          <tr key={label} className="border-t border-line">
+                            <th scope="row" className="py-1.5 text-left font-normal">
+                              {label}
+                            </th>
+                            <td className="py-1.5 text-right">{count}</td>
+                            <td className="py-1.5 text-right text-muted">{percent(count, summary.total)}</td>
+                          </tr>
+                        ))}
+                        <tr className="border-t border-line font-semibold">
+                          <th scope="row" className="py-1.5 text-left">
+                            Total
+                          </th>
+                          <td className="py-1.5 text-right">{summary.total}</td>
+                          <td className="py-1.5 text-right text-muted">{summary.total === 0 ? '—' : '100%'}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+                  </>
+                )}
               </section>
 
               <section className={`${CARD} p-5`}>
                 <BarChart
-                  title="Words at each mastery level"
+                  title={fsrsOnly ? 'Words at each memory strength level' : 'Words at each mastery level'}
                   unit={['word', 'words']}
-                  categoryLabel="Mastery"
-                  data={distribution.buckets.map((bucket) => ({
-                    key: String(bucket.mastery),
-                    tick: String(bucket.mastery),
-                    label: `Mastery ${bucket.mastery}`,
-                    value: bucket.count,
-                  }))}
+                  categoryLabel={fsrsOnly ? 'Level' : 'Mastery'}
+                  data={
+                    fsrsOnly
+                      ? strength.levels.map((bucket) => ({
+                          key: String(bucket.level),
+                          tick: String(bucket.level),
+                          label: `Memory strength level ${bucket.level}`,
+                          value: bucket.count,
+                        }))
+                      : distribution.buckets.map((bucket) => ({
+                          key: String(bucket.mastery),
+                          tick: String(bucket.mastery),
+                          label: `Mastery ${bucket.mastery}`,
+                          value: bucket.count,
+                        }))
+                  }
                 />
               </section>
 
@@ -237,6 +298,7 @@ export function InsightsPage() {
 }
 
 function PracticeStatistics() {
+  const fsrsOnly = useVocabulary().meta?.fsrsOnly === true;
   const activity = useReviewActivity();
   const { data, status } = activity;
 
@@ -322,8 +384,9 @@ function PracticeStatistics() {
       )}
 
       <p className="mt-3 text-xs text-muted">
-        Practice is recorded separately from scheduled reviews and never changes mastery or review dates. Every
-        practice answer is checked automatically.
+        Practice is recorded separately from scheduled reviews and never changes{' '}
+        {fsrsOnly ? 'memory strength or when a word is due' : 'mastery or review dates'}. Every practice answer is
+        checked automatically.
       </p>
     </section>
   );

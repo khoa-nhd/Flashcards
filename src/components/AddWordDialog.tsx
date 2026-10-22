@@ -154,14 +154,15 @@ function AddWordForm({
           initial.missing.length === 1 ? 'it' : 'them'
         } in, or leave ${initial.missing.length === 1 ? 'it' : 'them'} empty.`;
 
+  const fsrsOnly = meta.fsrsOnly;
   const submit = () => {
     if (disabled) return;
-    const found = validate(values);
+    const found = validate(values, !fsrsOnly);
     setErrors(found);
     if (Object.keys(found).length > 0) {
       // Send focus to the first problem so it is announced and easy to fix.
       const first = FORM_FIELDS.find((key) => found[key]);
-      if (first === 'mastery' || first === 'reviewDate') setShowSchedule(true);
+      if ((first === 'mastery' || first === 'reviewDate') && !fsrsOnly) setShowSchedule(true);
       // Deferred so a field inside the just-opened settings section exists by then.
       if (first) setTimeout(() => document.getElementById(`addword-${first}`)?.focus(), 0);
       return;
@@ -271,6 +272,7 @@ function AddWordForm({
         wordInputRef={wordInput}
         hideExample={examples.length > 0}
         exampleSlot={exampleChooser}
+        fsrsOnly={fsrsOnly}
       />
 
       {disabled && (

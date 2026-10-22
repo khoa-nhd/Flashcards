@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useApp, useSettings, useSync, useVocabulary } from '../app-context.js';
 import { AccountSection, DatabaseStatus, TimeZoneSection, TrashSection } from '../components/AccountSettings.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
+import { FsrsSettingsSection, LanguageSetting } from '../components/FsrsSettings.js';
 import { GoalSection } from '../components/GoalSection.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -19,7 +20,11 @@ const SORT_LABELS: Record<SortKey, string> = {
   dateAdded: 'Date added',
   reviewDate: 'Review date',
   mastery: 'Mastery',
-  trueMastery: 'True Mastery',
+  strength: 'Memory strength',
+  due: 'Next due',
+  reps: 'Reviews',
+  lapses: 'Lapses',
+  trueMastery: 'Practice score',
 };
 
 const SOURCE_TEXT = {
@@ -37,8 +42,14 @@ export function SettingsPage() {
   const settings = useSettings();
   const state = useVocabulary();
   const { meta, entries } = state;
+  const fsrsOnly = meta?.fsrsOnly === true;
   const set = <K extends keyof Settings>(key: K, value: Settings[K]) => store.update({ [key]: value });
   const exportName = `vocabulary-${meta?.today ?? 'export'}`;
+  const sortKeys = (Object.keys(SORT_LABELS) as SortKey[]).filter((key) =>
+    fsrsOnly
+      ? key !== 'mastery' && key !== 'reviewDate'
+      : key !== 'strength' && key !== 'due' && key !== 'reps' && key !== 'lapses',
+  );
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
 
@@ -69,8 +80,14 @@ export function SettingsPage() {
       <div className="flex max-w-2xl flex-col gap-6 [&_p]:max-w-[70ch]">
         {account !== null && <AccountSection account={account} />}
         {account !== null && <TimeZoneSection />}
-        <SchedulerSection />
-        <GoalSection />
+        {fsrsOnly ? (
+          <FsrsSettingsSection />
+        ) : (
+          <>
+            <SchedulerSection />
+            <GoalSection />
+          </>
+        )}
 
         <section className={`${CARD} flex flex-col gap-4 p-5`}>
           <h2 className={SECTION_TITLE}>Review</h2>
@@ -135,7 +152,7 @@ export function SettingsPage() {
                   set('bankDirection', defaultSortDirection(key));
                 }}
               >
-                {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                {sortKeys.map((key) => (
                   <option key={key} value={key}>
                     {SORT_LABELS[key]}
                   </option>
@@ -158,6 +175,7 @@ export function SettingsPage() {
 
         <section className={`${CARD} flex flex-col gap-4 p-5`}>
           <h2 className={SECTION_TITLE}>Display</h2>
+          <LanguageSetting />
           <label className="flex flex-col gap-1.5 text-sm font-medium sm:max-w-xs">
             Dashboard additions chart
             <select
@@ -193,8 +211,9 @@ export function SettingsPage() {
         <section className={`${CARD} flex flex-col gap-3 p-5`}>
           <h2 className={SECTION_TITLE}>Backup</h2>
           <p className="text-sm text-muted">
-            Download every word with its meaning, definition, example, mastery and dates. Exporting only reads; it
-            never changes anything.
+            {fsrsOnly
+              ? 'Download every word with its meaning, definition, example, schedule and dates. Exporting only reads; it never changes anything.'
+              : 'Download every word with its meaning, definition, example, mastery and dates. Exporting only reads; it never changes anything.'}
           </p>
           <div className="flex flex-wrap gap-2">
             <button
@@ -278,8 +297,11 @@ export function SettingsPage() {
               </dd>
               <dt className="text-muted">New words start at</dt>
               <dd className="m-0">
-                Mastery {meta.defaults.mastery},{' '}
-                {meta.defaults.reviewDate === 'today' ? 'review date today' : 'no review date (due right away)'}
+                {fsrsOnly
+                  ? 'Due today, with no strength until the first review'
+                  : `Mastery ${meta.defaults.mastery}, ${
+                      meta.defaults.reviewDate === 'today' ? 'review date today' : 'no review date (due right away)'
+                    }`}
               </dd>
             </dl>
           )}

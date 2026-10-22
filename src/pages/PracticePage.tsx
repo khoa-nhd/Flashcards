@@ -145,6 +145,7 @@ export function PracticePage() {
   }, [api, finished]);
 
   const today = state.meta?.today ?? null;
+  const fsrsOnly = state.meta?.fsrsOnly === true;
   const pool = useMemo(() => state.entries.map(toPracticeWord), [state.entries]);
   const candidates = useMemo(() => {
     const entries = state.entries.filter((entry) => {
@@ -367,7 +368,11 @@ export function PracticePage() {
     <div className={PAGE}>
       <PageHeader
         title="Practice"
-        description="Other ways to work on your words. Practice is recorded for your statistics; it never changes mastery or review dates."
+        description={
+          fsrsOnly
+            ? 'Other ways to work on your words. Practice is recorded for your statistics; it never changes memory strength or when a word is due.'
+            : 'Other ways to work on your words. Practice is recorded for your statistics; it never changes mastery or review dates.'
+        }
         actions={
           run !== null ? (
             <button
@@ -586,6 +591,7 @@ export function PracticePage() {
 }
 
 function Summary({ mode, outcomes, recovered = [] }: { mode: StudyMode; outcomes: Outcome[]; recovered?: readonly string[] }) {
+  const fsrsOnly = useVocabulary().meta?.fsrsOnly === true;
   const correct = outcomes.filter((outcome) => outcome.correct).length;
   const missed = outcomes.filter((outcome) => !outcome.correct);
   const unrecorded = outcomes.filter((outcome) => !outcome.recorded).length;
@@ -625,8 +631,14 @@ function Summary({ mode, outcomes, recovered = [] }: { mode: StudyMode; outcomes
       )}
       <p className={HELP}>
         {unrecorded === 0
-          ? 'These answers are recorded under Insights. Your mastery levels and review dates are unchanged.'
-          : `${count(unrecorded, 'answer was', 'answers were')} judged but not recorded: saving is switched off, or the database needs its latest update. Your mastery levels and review dates are unchanged.`}
+          ? fsrsOnly
+            ? 'These answers are recorded under Insights. Your memory strength and review schedule are unchanged.'
+            : 'These answers are recorded under Insights. Your mastery levels and review dates are unchanged.'
+          : `${count(unrecorded, 'answer was', 'answers were')} judged but not recorded: saving is switched off, or the database needs its latest update. ${
+              fsrsOnly
+                ? 'Your memory strength and review schedule are unchanged.'
+                : 'Your mastery levels and review dates are unchanged.'
+            }`}
       </p>
       <div className="flex flex-wrap gap-2">
         <Link to={ROUTES.review} className={BUTTON_SECONDARY}>
@@ -651,6 +663,7 @@ function PracticeStatsTable({
   error: string | null;
   onReload: () => void;
 }) {
+  const fsrsOnly = useVocabulary().meta?.fsrsOnly === true;
   if (loading) {
     return (
       <section className={`${CARD} p-5`} aria-label="Practice statistics">
@@ -773,7 +786,9 @@ function PracticeStatsTable({
 
       <p className="mt-3 text-xs text-muted">
         Shows correct / total answers per mode. Click a word to open its details.
-        Practice mastery (capped at 3 per mode) is shown in the word detail panel.
+        {fsrsOnly
+          ? 'Practice score (capped at 3 per mode) is shown in the word detail panel.'
+          : 'Practice mastery (capped at 3 per mode) is shown in the word detail panel.'}
       </p>
     </section>
   );

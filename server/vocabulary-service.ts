@@ -147,6 +147,7 @@ export class VocabularyService {
       timeZone,
       mode: catalog.mode,
       writesEnabled: await this.writesEnabled(),
+      fsrsOnly: this.fsrsMode(),
       skipped: invalid,
       defaults,
     };
@@ -220,7 +221,7 @@ export class VocabularyService {
    * reported with where it stopped; sending the same batch again finishes it
    * without creating anything twice.
    */
-  async importBatch(items: readonly unknown[], wordsPerDay?: number): Promise<ImportResponse> {
+  async importBatch(items: readonly unknown[], wordsPerDay?: number, startIndex = 0): Promise<ImportResponse> {
     await this.requireWrites();
     const results: ImportResponse['results'] = [];
     const start = this.today();
@@ -233,7 +234,7 @@ export class VocabularyService {
       }
       try {
         const spreadDay =
-          wordsPerDay === undefined ? undefined : addDays(start, Math.floor(index / wordsPerDay));
+          wordsPerDay === undefined ? undefined : addDays(start, Math.floor((startIndex + index) / wordsPerDay));
         const { entry, created } = await this.create(
           spreadDay === undefined ? parsed.data : { ...parsed.data, dueOn: spreadDay },
         );

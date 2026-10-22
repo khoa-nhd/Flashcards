@@ -1,34 +1,39 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { useSync } from '../app-context.js';
+import { useSync, useUiLanguage } from '../app-context.js';
+import { pick } from '../lib/i18n.js';
 import { ROUTES, type RouteKey } from '../lib/router.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { Icon, type IconName } from './Icon.js';
 import { Link } from './Link.js';
+import { Onboarding } from './Onboarding.js';
 import { SyncStatus } from './SyncStatus.js';
 
 interface NavItem {
   route: RouteKey;
   label: string;
+  labelVi: string;
   /** A shorter label for the narrow bottom bar. */
   short: string;
+  shortVi: string;
   icon: IconName;
 }
 
 const PRIMARY: NavItem[] = [
-  { route: 'dashboard', label: 'Dashboard', short: 'Home', icon: 'dashboard' },
-  { route: 'review', label: 'Review', short: 'Review', icon: 'review' },
-  { route: 'add', label: 'Add vocabulary', short: 'Add', icon: 'add' },
-  { route: 'bank', label: 'Vocabulary bank', short: 'Bank', icon: 'bank' },
-  { route: 'calendar', label: 'Calendar', short: 'Calendar', icon: 'calendar' },
-  { route: 'chat', label: 'AI Chat', short: 'Chat', icon: 'chat' },
+  { route: 'dashboard', label: 'Dashboard', labelVi: 'Tổng quan', short: 'Home', shortVi: 'Trang chủ', icon: 'dashboard' },
+  { route: 'review', label: 'Review', labelVi: 'Ôn tập', short: 'Review', shortVi: 'Ôn tập', icon: 'review' },
+  { route: 'add', label: 'Add vocabulary', labelVi: 'Thêm từ', short: 'Add', shortVi: 'Thêm', icon: 'add' },
+  { route: 'bank', label: 'Vocabulary bank', labelVi: 'Sổ từ', short: 'Bank', shortVi: 'Sổ từ', icon: 'bank' },
+  { route: 'calendar', label: 'Calendar', labelVi: 'Lịch', short: 'Calendar', shortVi: 'Lịch', icon: 'calendar' },
+  { route: 'chat', label: 'AI Chat', labelVi: 'Trợ lý AI', short: 'Chat', shortVi: 'Chat', icon: 'chat' },
 ];
 
 const SECONDARY: NavItem[] = [
-  { route: 'practice', label: 'Practice', short: 'Practice', icon: 'practice' },
-  { route: 'collections', label: 'Collections', short: 'Collections', icon: 'collections' },
-  { route: 'weak', label: 'Weak words', short: 'Weak', icon: 'weak' },
-  { route: 'insights', label: 'Insights', short: 'Insights', icon: 'insights' },
-  { route: 'settings', label: 'Settings', short: 'Settings', icon: 'settings' },
+  { route: 'practice', label: 'Practice', labelVi: 'Luyện tập', short: 'Practice', shortVi: 'Luyện tập', icon: 'practice' },
+  { route: 'collections', label: 'Collections', labelVi: 'Bộ sưu tập', short: 'Collections', shortVi: 'Bộ sưu tập', icon: 'collections' },
+  { route: 'weak', label: 'Weak words', labelVi: 'Từ yếu', short: 'Weak', shortVi: 'Từ yếu', icon: 'weak' },
+  { route: 'insights', label: 'Insights', labelVi: 'Thống kê', short: 'Insights', shortVi: 'Thống kê', icon: 'insights' },
+  { route: 'help', label: 'Help', labelVi: 'Trợ giúp', short: 'Help', shortVi: 'Trợ giúp', icon: 'help' },
+  { route: 'settings', label: 'Settings', labelVi: 'Cài đặt', short: 'Settings', shortVi: 'Cài đặt', icon: 'settings' },
 ];
 
 export interface AppShellProps {
@@ -45,6 +50,9 @@ export interface AppShellProps {
 
 export function AppShell({ active, reviewCount, badge, account = null, children }: AppShellProps) {
   const main = useRef<HTMLElement>(null);
+  const language = useUiLanguage();
+  const navLabel = (item: NavItem) => pick(language, item.label, item.labelVi);
+  const navShort = (item: NavItem) => pick(language, item.short, item.shortVi);
 
   // A new page starts at its top, like a full page load would.
   useEffect(() => {
@@ -53,8 +61,13 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
 
   // Importing is part of adding vocabulary, and is reached from there.
   const section: RouteKey | null = active === 'import' ? 'add' : active;
+  const currentNav = [...PRIMARY, ...SECONDARY].find((item) => item.route === active);
   const title =
-    active === 'import' ? 'Import' : ([...PRIMARY, ...SECONDARY].find((item) => item.route === active)?.label ?? 'Vocabulary');
+    active === 'import'
+      ? pick(language, 'Import', 'Nhập danh sách')
+      : currentNav === undefined
+        ? pick(language, 'Vocabulary', 'Từ vựng')
+        : navLabel(currentNav);
 
   const sideLink = (item: NavItem) => {
     const current = item.route === section;
@@ -71,11 +84,11 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           <span aria-hidden="true" className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-accent" />
         )}
         <Icon name={item.icon} className={current ? 'size-5 text-accent' : 'size-5'} />
-        <span className="flex-1">{item.label}</span>
+        <span className="flex-1">{navLabel(item)}</span>
         {item.route === 'review' && reviewCount !== null && reviewCount > 0 && (
           <span className="rounded-full bg-accent px-2 py-0.5 text-xs font-semibold tabular-nums text-on-accent">
             {reviewCount}
-            <span className="sr-only"> ready to review</span>
+            <span className="sr-only"> {pick(language, 'ready to review', 'từ sẵn sàng ôn')}</span>
           </span>
         )}
       </Link>
@@ -94,7 +107,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           )}
           <SyncStatus />
         </div>
-        <nav aria-label="Main" className="flex flex-1 flex-col gap-1 overflow-y-auto">
+        <nav aria-label={pick(language, 'Main', 'Chính')} className="flex flex-1 flex-col gap-1 overflow-y-auto">
           {PRIMARY.map(sideLink)}
           <div className="my-2 border-t border-line" />
           {SECONDARY.map(sideLink)}
@@ -102,7 +115,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
         {account !== null && (
           <div className="flex flex-col gap-1 border-t border-line px-3 pt-3 text-xs text-faint">
             <span className="truncate" title={account.email ?? undefined}>
-              {account.email ?? 'Signed in'}
+              {account.email ?? pick(language, 'Signed in', 'Đã đăng nhập')}
             </span>
             <SignOut account={account} />
           </div>
@@ -125,7 +138,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
               <Link
                 key={item.route}
                 to={ROUTES[item.route]}
-                aria-label={item.label}
+                aria-label={navLabel(item)}
                 aria-current={item.route === active ? 'page' : undefined}
                 className={`flex size-9 items-center justify-center rounded-[10px] ${
                   item.route === active ? 'bg-accent-soft text-accent' : 'text-muted'
@@ -151,7 +164,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
         </main>
 
         <nav
-          aria-label="Main"
+          aria-label={pick(language, 'Main', 'Chính')}
           className="grid grid-cols-6 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)] md:hidden"
         >
           {PRIMARY.map((item) => {
@@ -161,13 +174,13 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
                 key={item.route}
                 to={ROUTES[item.route]}
                 aria-current={current ? 'page' : undefined}
-                aria-label={item.label}
+                aria-label={navLabel(item)}
                 className={`relative flex h-14 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium ${
                   current ? 'text-accent' : 'text-muted'
                 }`}
               >
                 <Icon name={item.icon} />
-                <span>{item.short}</span>
+                <span>{navShort(item)}</span>
                 {item.route === 'review' && reviewCount !== null && reviewCount > 0 && (
                   <span
                     aria-hidden="true"
@@ -181,6 +194,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           })}
         </nav>
       </div>
+      <Onboarding />
     </div>
   );
 }

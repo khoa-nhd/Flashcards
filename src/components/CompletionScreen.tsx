@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { DayPlanResponse, SessionSummary } from '../../shared/api.js';
-import { useApp, useCounting } from '../app-context.js';
+import { useApp, useCounting, useUiLanguage } from '../app-context.js';
+import { pick } from '../lib/i18n.js';
 import { formatDuration } from '../lib/format.js';
 import { FOCUS_TEXT, SELECT_TEXT, type FocusText } from '../lib/review-focus.js';
 import { ROUTES } from '../lib/router.js';
@@ -29,7 +30,9 @@ type Loaded = { for: string; summary: SessionSummary | null };
 export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, onDismiss, recovered = [] }: CompletionScreenProps) {
   const { api } = useApp();
   const counting = useCounting();
+  const language = useUiLanguage();
   const { meta, tally } = state;
+  const fsrsOnly = meta?.capabilities.fsrsOnly === true;
   const total = state.cards.length;
   const preview = meta !== null && !meta.writesEnabled;
   const answered = tally.remember + tally.notRemember;
@@ -62,15 +65,17 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
   const accuracy = reviewed === 0 ? null : Math.round((remembered / reviewed) * 100);
   const showAccuracy = accuracy !== null && !preview;
 
-  // An empty queue has three different causes; say which one this is.
-  let emptyTitle = 'Nothing is due right now';
-  let emptyDetail = 'No vocabulary is waiting for review.';
-  if (meta?.vocabulary === 'all_mastered') {
+  // An empty queue has different causes; say which one this is.
+  let emptyTitle = fsrsOnly ? pick(language, 'All caught up', 'Đã ôn xong') : 'Nothing is due right now';
+  let emptyDetail = fsrsOnly
+    ? pick(language, 'No words are due today. FSRS will bring the next ones when they are ready.', 'Hôm nay không có từ nào đến hạn. FSRS sẽ mang từ tiếp theo khi đến lúc.')
+    : 'No vocabulary is waiting for review.';
+  if (!fsrsOnly && meta?.vocabulary === 'all_mastered') {
     emptyTitle = 'Every word is mastered';
     emptyDetail = 'All of your vocabulary has reached full mastery, so there is nothing left to review.';
   } else if (meta?.vocabulary === 'empty') {
-    emptyTitle = 'No vocabulary yet';
-    emptyDetail = 'Add your first word to start reviewing.';
+    emptyTitle = pick(language, 'No vocabulary yet', 'Chưa có từ vựng');
+    emptyDetail = pick(language, 'Add your first word to start reviewing.', 'Thêm từ đầu tiên để bắt đầu ôn.');
   }
   // A narrowed queue being empty says nothing about the rest of the vocabulary.
   const focus: Pick<FocusText, 'emptyTitle' | 'emptyDetail' | 'done'> | null =
@@ -168,8 +173,13 @@ export function CompletionScreen({ state, sessionId, onReload, onUndo, onRetry, 
 
       {!counting && reviewed > 0 && (
         <p className="w-full rounded-2xl border border-line px-4 py-3 text-left text-sm text-muted">
-          Counting towards mastery was off, so those answers left every word’s mastery and review date as they were.
-          They are still saved, and still count in your accuracy, streak and daily goal.
+          {fsrsOnly
+            ? pick(
+                language,
+                'Counting toward the schedule was off, so those answers left every word’s FSRS state as it was. They are still saved, and still count in your accuracy and daily goal.',
+                'Tính vào lịch đang tắt, nên các câu trả lời này không thay đổi trạng thái FSRS của từ. Chúng vẫn được lưu và vẫn tính vào độ chính xác và mục tiêu ngày.',
+              )
+            : 'Counting towards mastery was off, so those answers left every word’s mastery and review date as they were. They are still saved, and still count in your accuracy, streak and daily goal.'}
         </p>
       )}
 

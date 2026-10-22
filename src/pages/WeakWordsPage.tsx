@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import type { WeakWordView } from '../../shared/api.js';
-import { useApp } from '../app-context.js';
-import { MasteryPill } from '../components/badges.js';
+import { useApp, useUiLanguage, useVocabulary } from '../app-context.js';
+import { MasteryPill, StrengthPill } from '../components/badges.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -44,11 +44,18 @@ function recentText(word: WeakWordView, windowDays: number): string {
 /** Words that need attention, weakest first, each with the reasons it is listed. */
 export function WeakWordsPage() {
   const { api } = useApp();
+  const vocabulary = useVocabulary();
+  const language = useUiLanguage();
+  const fsrsOnly = vocabulary.meta?.fsrsOnly === true;
   const { trueMasteryMap } = useTrueMastery();
   const weak = useRemote(api.fetchWeakWords, 'Could not load your weak words.');
   const [severity, setSeverity] = useState<Severity | null>(null);
 
   const words = useMemo(() => weak.data?.words ?? [], [weak.data]);
+  const memoryById = useMemo(
+    () => new Map(vocabulary.entries.map((entry) => [entry.id, entry.memory])),
+    [vocabulary.entries],
+  );
   const trueMasteryWords = useMemo((): WeakWordWithTrueMastery[] => {
     if (!trueMasteryMap) return words as WeakWordWithTrueMastery[];
     return words.map(word => {
@@ -111,7 +118,11 @@ export function WeakWordsPage() {
     <div className={PAGE}>
       <PageHeader
         title="Weak words"
-        description="Words that need attention, weakest first, and why each one is here."
+        description={
+          fsrsOnly
+            ? 'Words with the lowest recalled memory first, and why each one is here.'
+            : 'Words that need attention, weakest first, and why each one is here.'
+        }
         actions={
           <>
             <button
@@ -202,7 +213,8 @@ export function WeakWordsPage() {
                   ? 'None of these is due for review right now.'
                   : `${dueNow} ${dueNow === 1 ? 'is' : 'are'} due for review now.`}{' '}
                 A focused review can bring any of these forward, even if it is not due yet. It starts with counting off, so
-                the words keep the mastery and review date they had; switch it on beside the card to have them move.
+                the words keep {fsrsOnly ? 'their memory strength and schedule' : 'the mastery and review date they had'};
+                switch it on beside the card to have them move.
               </p>
 
               {shown.length === 0 ? (
@@ -243,13 +255,23 @@ export function WeakWordsPage() {
                               return (
                                 <span
                                   className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-medium ${tierColors[tier]}`}
-                                  title={tm.trueMasteryCoverage ? `True Mastery: ${tm.trueMasteryScore} (${tm.trueMasteryCoverage})` : 'True Mastery'}
+                                  title={
+                                    tm.trueMasteryCoverage
+                                      ? `${fsrsOnly ? 'Practice score' : 'True Mastery'}: ${tm.trueMasteryScore} (${tm.trueMasteryCoverage})`
+                                      : fsrsOnly
+                                        ? 'Practice score'
+                                        : 'True Mastery'
+                                  }
                                 >
                                   {tier} ({tm.trueMasteryScore})
                                 </span>
                               );
                             })()}
-                          <MasteryPill mastery={word.mastery} />
+                          {fsrsOnly && memoryById.get(word.id) !== undefined ? (
+                            <StrengthPill memory={memoryById.get(word.id)!} compact language={language} />
+                          ) : (
+                            <MasteryPill mastery={word.mastery} />
+                          )}
                           {word.reviewable && (
                             <span className="inline-flex whitespace-nowrap rounded-full border border-accent/60 px-2 py-0.5 text-xs font-medium text-accent">
                               Due now
@@ -288,9 +310,10 @@ export function WeakWordsPage() {
                 <ul className="m-0 mt-2 flex list-disc flex-col gap-1 pl-4 text-muted">
                   <li>Being forgotten on several separate days counts the most.</li>
                   <li>
-                    Then: recent misses, a low share remembered recently, and slipping after reaching a high mastery.
+                    Then: recent misses, a low share remembered recently, and slipping after reaching a{' '}
+                    {fsrsOnly ? 'strong memory' : 'high mastery'}.
                   </li>
-                  <li>Waiting a week or more past its review date adds a little; missing content adds the least.</li>
+                  <li>Waiting a week or more past its due date adds a little; missing content adds the least.</li>
                   <li>Only answers that were saved and not undone are counted. Nothing is guessed for other words.</li>
                 </ul>
               </details>

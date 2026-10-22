@@ -15,8 +15,8 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { VocabularyEntry } from '../../shared/api.js';
-import { useLibrary, useVocabulary } from '../app-context.js';
-import { MasteryPill } from './badges.js';
+import { useLibrary, useUiLanguage, useVocabulary } from '../app-context.js';
+import { MasteryPill, StrengthPill } from './badges.js';
 import { Spinner } from './Spinner.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT } from './ui.js';
 
@@ -41,7 +41,10 @@ const matches = (entry: VocabularyEntry, query: string): boolean => {
 };
 
 export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
-  const { status, entries } = useVocabulary();
+  const vocabulary = useVocabulary();
+  const { status, entries } = vocabulary;
+  const language = useUiLanguage();
+  const fsrsOnly = vocabulary.meta?.fsrsOnly === true;
   const { collections, status: libraryStatus } = useLibrary();
   const [query, setQuery] = useState('');
   const [shown, setShown] = useState(PAGE_SIZE);
@@ -59,14 +62,19 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
   }, [initialIds]);
 
   const byId = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries]);
-  const hidden = useMemo(() => entries.filter(isMastered).length, [entries]);
-  // What there is to choose from, lowest mastery first. Ties keep the bank's own order.
+  const hidden = useMemo(() => (fsrsOnly ? 0 : entries.filter(isMastered).length), [entries, fsrsOnly]);
+  // Under FSRS nothing retires, so every unarchived word can be picked. Lowest
+  // memory strength first; the legacy schedule still uses mastery.
   const choices = useMemo(
     () =>
       entries
-        .filter((entry) => !isMastered(entry))
-        .sort((a, b) => (a.mastery ?? 0) - (b.mastery ?? 0)),
-    [entries],
+        .filter((entry) => (fsrsOnly ? entry.suspended !== true : !isMastered(entry)))
+        .sort((a, b) =>
+          fsrsOnly
+            ? (a.memory?.level ?? 0) - (b.memory?.level ?? 0)
+            : (a.mastery ?? 0) - (b.mastery ?? 0),
+        ),
+    [entries, fsrsOnly],
   );
   const found = useMemo(() => choices.filter((entry) => matches(entry, query)), [choices, query]);
   const visible = found.slice(0, shown);
@@ -147,7 +155,9 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
         )}
       </div>
 
-      <p className={HELP}>Lowest mastery first. Shift-click to tick a whole range.</p>
+      <p className={HELP}>
+        {fsrsOnly ? 'Lowest memory strength first.' : 'Lowest mastery first.'} Shift-click to tick a whole range.
+      </p>
 
       <div className={`${CARD} min-h-0 flex-1 overflow-y-auto`}>
         {status === 'loading' || status === 'idle' ? (
@@ -161,7 +171,11 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
           </p>
         ) : found.length === 0 ? (
           <p className="p-6 text-center text-muted">
-            {choices.length === 0 ? 'There are no words left to pick.' : 'No word matches that search.'}
+            {choices.length === 0
+              ? fsrsOnly
+                ? 'There are no words to pick yet.'
+                : 'There are no words left to pick.'
+              : 'No word matches that search.'}
           </p>
         ) : (
           <ul className="divide-y divide-line">
@@ -180,7 +194,11 @@ export function WordPicker({ initialIds, onStart, onClose }: WordPickerProps) {
                     <span className="block truncate font-medium">{entry.word}</span>
                     {entry.meaning !== null && <span className="block truncate text-muted">{entry.meaning}</span>}
                   </span>
-                  <MasteryPill mastery={entry.mastery} />
+                  {fsrsOnly && entry.memory !== undefined ? (
+                    <StrengthPill memory={entry.memory} compact language={language} />
+                  ) : (
+                    <MasteryPill mastery={entry.mastery} />
+                  )}
                 </label>
               </li>
             ))}

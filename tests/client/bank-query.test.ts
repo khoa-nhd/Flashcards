@@ -23,6 +23,7 @@ const query = (patch: Partial<BankQuery> = {}): BankQuery => ({
   search: '',
   status: null,
   mastery: null,
+  strengthBand: null,
   addedFrom: null,
   addedTo: null,
   missing: null,

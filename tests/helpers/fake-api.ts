@@ -12,6 +12,7 @@ import type {
   QueueResponse,
   SchedulerReport,
   SimulationResponse,
+  StudyGoalsResponse,
   ReviewActionResponse,
   ReviewCard,
   ReviewDaysResponse,
@@ -58,6 +59,7 @@ export function vocabularyList(
     timeZone: TIME_ZONE,
     mode: 'supabase',
     writesEnabled: true,
+    fsrsOnly: false,
     skipped: [],
     defaults: { mastery: 1, reviewDate: 'empty' },
     ...overrides,
@@ -83,6 +85,8 @@ export interface FakeApiOptions {
   practiceMasteryAvailable?: boolean;
   analytics?: Partial<AnalyticsResponse>;
   weakWords?: Partial<WeakWordsResponse>;
+  /** The two FSRS-only daily goals. */
+  studyGoals?: Partial<StudyGoalsResponse>;
   /** The figures the day's plan is worked out from; the plan itself comes from the real planner. */
   plan?: Partial<PlanFigures>;
   /** What the server says it did with a practice answer. */
@@ -214,6 +218,23 @@ export function weakWordsResponse(overrides: Partial<WeakWordsResponse> = {}): W
   return { historyAvailable: true, today: TODAY, windowDays: 30, total: words.length, ...overrides, words };
 }
 
+/** The two FSRS-only goals with the suggested starting targets, unless a test overrides them. */
+export function studyGoalsResponse(overrides: Partial<StudyGoalsResponse> = {}): StudyGoalsResponse {
+  const goals = { newWords: 10, reviews: 30, maintenanceMode: false, ...overrides.goals };
+  return {
+    available: true,
+    chosen: false,
+    today: TODAY,
+    timeZone: TIME_ZONE,
+    goals,
+    newWords: { target: goals.newWords, done: 0, remaining: goals.newWords, met: false, exhausted: false },
+    reviews: { target: goals.reviews, done: 0, remaining: goals.reviews, met: false, exhausted: false },
+    due: { total: 0, overdue: 0 },
+    streak: { current: 0, longest: 0, metToday: false },
+    ...overrides,
+  };
+}
+
 export function createFakeApi({
   cards = [],
   queue = {},
@@ -228,6 +249,7 @@ export function createFakeApi({
   reviewDays = [],
   analytics: analyticsOverrides = {},
   weakWords: weakWordsOverrides = {},
+  studyGoals: studyGoalsOverrides = {},
   plan: planFigures = {},
   practiceOutcome = 'recorded',
   library: libraryStart = {},
@@ -244,6 +266,7 @@ export function createFakeApi({
   const weak = weakWordsResponse(weakWordsOverrides);
   const scheduler = schedulerReport(schedulerOverrides);
   const simulated = simulationResponse(simulationOverrides);
+  let studyGoals = studyGoalsResponse(studyGoalsOverrides);
   /** Correct practice answers so far, by word and mode, and the requests already counted. */
   const practiceCorrect = new Map<string, number>(
     Object.entries(practiceCorrectStart).flatMap(([id, byMode]) =>
@@ -346,6 +369,17 @@ export function createFakeApi({
       return { ...restored };
     }),
     fetchTrash: vi.fn<AppApi['fetchTrash']>(async () => [...trash.values()].map((item) => ({ ...item }))),
+
+    archiveEntries: vi.fn<AppApi['archiveEntries']>(async (ids, archived) => {
+      const entries = store
+        .filter((item) => ids.includes(item.id))
+        .map((item) => {
+          item.suspended = archived;
+          item.reviewStatus = archived ? 'suspended' : item.reviewStatus === 'suspended' ? 'due_today' : item.reviewStatus;
+          return { ...item };
+        });
+      return { archived: entries.length, entries };
+    }),
 
     fetchSettings: vi.fn<AppApi['fetchSettings']>(async () => ({ ...settings })),
     fetchScheduler: vi.fn<AppApi['fetchScheduler']>(async () => ({ ...scheduler })),
@@ -542,6 +576,22 @@ export function createFakeApi({
     saveGoal: vi.fn<AppApi['saveGoal']>(async (next) => {
       goal = next;
       return dayPlan({ ...planFigures, goal });
+    }),
+    fetchStudyGoals: vi.fn<AppApi['fetchStudyGoals']>(async () => ({ ...studyGoals, goals: { ...studyGoals.goals } })),
+    saveStudyGoals: vi.fn<AppApi['saveStudyGoals']>(async (input) => {
+      const goals = {
+        newWords: input.newWords ?? studyGoals.goals.newWords,
+        reviews: input.reviews ?? studyGoals.goals.reviews,
+        maintenanceMode: input.maintenanceMode ?? studyGoals.goals.maintenanceMode,
+      };
+      studyGoals = {
+        ...studyGoals,
+        chosen: true,
+        goals,
+        newWords: { ...studyGoals.newWords, target: goals.newWords, remaining: Math.max(0, goals.newWords - studyGoals.newWords.done) },
+        reviews: { ...studyGoals.reviews, target: goals.reviews, remaining: Math.max(0, goals.reviews - studyGoals.reviews.done) },
+      };
+      return { ...studyGoals, goals: { ...studyGoals.goals } };
     }),
     saveSettings: vi.fn<AppApi['saveSettings']>(async ({ timeZone, fsrsRetention, countReviewsTowardMastery, countReviewsTowardSchedule, maxReviewsPerDay, uiLanguage }) => {
       if (timeZone !== undefined) settings.timeZone = timeZone;

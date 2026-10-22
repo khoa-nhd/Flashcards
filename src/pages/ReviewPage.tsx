@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { REVIEW_FOCUSES, pageIdSchema } from '../../shared/api.js';
-import { useApp, useCounting, useLibrary, useSettings } from '../app-context.js';
+import { useApp, useCounting, useLibrary, useSettings, useUiLanguage } from '../app-context.js';
 import { CompletionScreen } from '../components/CompletionScreen.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
@@ -8,6 +8,7 @@ import { ReviewScreen } from '../components/ReviewScreen.js';
 import { ShortcutHelp } from '../components/ShortcutHelp.js';
 import { Spinner } from '../components/Spinner.js';
 import { WordPicker } from '../components/WordPicker.js';
+import { pick } from '../lib/i18n.js';
 import { EVERYTHING_LABEL, FOCUS_TEXT, SELECT_TEXT, SELECT_VALUE, scopeFromQuery } from '../lib/review-focus.js';
 import { ALL_SCOPE, WEAK_SCOPE, sameScope, scopeKey, selection } from '../lib/review-scope.js';
 import { ROUTES, buildHref, navigate, useLocation } from '../lib/router.js';
@@ -37,13 +38,21 @@ function ModeBadge({ meta }: { meta: SessionMeta | null }) {
  * Whether an answer moves the word. Either way the answer is recorded and counted in accuracy and
  * the daily goal; switched off, the word's mastery, review date and FSRS state all stay as they are.
  */
-function CountingSwitch() {
+function CountingSwitch({ fsrsOnly }: { fsrsOnly: boolean }) {
   const counting = useCounting();
   const { counting: preference } = useApp();
+  const language = useUiLanguage();
+  const title = fsrsOnly
+    ? pick(
+        language,
+        'Count this review toward the schedule. Off, the answers are still recorded, but FSRS does not move the word.',
+        'Tính lần ôn này vào lịch. Khi tắt, câu trả lời vẫn được lưu nhưng FSRS không thay đổi từ này.',
+      )
+    : 'Count this review toward mastery. Off, the answers are still recorded, but every word keeps its mastery and review date.';
   return (
     <label
       className="flex h-9 cursor-pointer items-center gap-2 rounded-full border border-line-strong bg-transparent px-3 text-sm font-medium text-muted"
-      title="Count this review toward mastery. Off, the answers are still recorded, but every word keeps its mastery and review date."
+      title={title}
     >
       <input
         type="checkbox"
@@ -56,7 +65,9 @@ function CountingSwitch() {
           preference.set(event.target.checked);
         }}
       />
-      Count toward mastery
+      {fsrsOnly
+        ? pick(language, 'Count toward schedule', 'Tính vào lịch ôn')
+        : pick(language, 'Count toward mastery', 'Tính vào mức thành thạo')}
     </label>
   );
 }
@@ -71,9 +82,11 @@ const HEADER_BUTTON =
 export function ReviewPage() {
   const { api, session, ensureReviewSession } = useApp();
   const settings = useSettings();
+  const language = useUiLanguage();
   const counting = useCounting();
   const state = useSyncExternalStore(session.subscribe, session.getState);
   const { status, error } = state;
+  const fsrsOnly = state.meta?.capabilities.fsrsOnly === true;
   const [helpOpen, setHelpOpen] = useState(false);
   const reload = () => void session.load();
   const { query } = useLocation();
@@ -217,7 +230,15 @@ export function ReviewPage() {
   // what makes a word that is not due answerable at all.
   const parts = [
     text?.banner ?? null,
-    counting ? null : 'Not counting toward mastery, so every word keeps the mastery and review date it had.',
+    counting
+      ? null
+      : fsrsOnly
+        ? pick(
+            language,
+            'Not counting toward the schedule, so FSRS leaves every word where it is.',
+            'Không tính vào lịch, nên FSRS giữ nguyên mọi từ.',
+          )
+        : 'Not counting toward mastery, so every word keeps the mastery and review date it had.',
   ].filter((part): part is string => part !== null);
   const banner = parts.length === 0 ? null : parts.join(' ');
 
@@ -256,7 +277,7 @@ export function ReviewPage() {
             ))}
             <option value={SELECT_VALUE}>{SELECT_TEXT.label}</option>
           </select>
-          <CountingSwitch />
+          <CountingSwitch fsrsOnly={fsrsOnly} />
           {pickedScope && !choosing && (
             <button type="button" onClick={() => setPicked(null)} className={HEADER_BUTTON}>
               Change words

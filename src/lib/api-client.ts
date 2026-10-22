@@ -7,6 +7,7 @@ import {
   aiMessageSchema,
   analyticsResponseSchema,
   apiErrorSchema,
+  archiveEntriesResponseSchema,
   collectionSchema,
   dayPlanSchema,
   deletedResponseSchema,
@@ -26,6 +27,7 @@ import {
   schedulerReportSchema,
   sessionSummarySchema,
   simulationResponseSchema,
+  studyGoalsResponseSchema,
   trashResponseSchema,
   vocabularyListResponseSchema,
   weakWordsResponseSchema,
@@ -35,6 +37,7 @@ import {
   type AiConversationListResponse,
   type AiMessage,
   type AiMessageSavedResponse,
+  type ArchiveEntriesResponse,
   type DayPlanResponse,
   type ImportResponse,
   type LibraryResponse,
@@ -53,6 +56,8 @@ import {
   type SchedulerReport,
   type SessionSummary,
   type SimulationResponse,
+  type StudyGoalsResponse,
+  type UpdateStudyGoalsInput,
   type UpdateEntryInput,
   type VocabularyEntry,
   type VocabularyListResponse,
@@ -101,6 +106,8 @@ export interface VocabularyApi {
   restoreEntry(id: string): Promise<VocabularyEntry>;
   /** Deleted words that can still be restored. */
   fetchTrash(): Promise<VocabularyEntry[]>;
+  /** Archives or resumes words in bulk. Archived words leave the queue and dashboard. */
+  archiveEntries(ids: readonly string[], archived: boolean): Promise<ArchiveEntriesResponse>;
 }
 
 export interface AccountApi {
@@ -132,6 +139,10 @@ export interface AnalyticsApi {
   saveGoal(goal: DailyGoal): Promise<DayPlanResponse>;
   /** Saved reviews on each day of a range of the reviewer's days. Days without any are absent. */
   fetchReviewDays(from: IsoDate, to: IsoDate): Promise<ReviewDaysResponse>;
+  /** The two daily goals, today's progress and the streak they make (FSRS alone). */
+  fetchStudyGoals(): Promise<StudyGoalsResponse>;
+  /** Changes one or both goals and returns the new progress. */
+  saveStudyGoals(input: UpdateStudyGoalsInput): Promise<StudyGoalsResponse>;
 }
 
 /** Collections, further examples and relationships. None of these calls can change a word or its schedule. */
@@ -153,8 +164,10 @@ export interface TransferApi {
   /**
    * Imports one request's worth of rows as new words. Each row carries its own
    * request id, so sending the same rows again never imports one twice.
+   * `wordsPerDay` spreads a large import over several days; `startIndex`
+   * keeps the spread consistent when the list is sent in several requests.
    */
-  importWords(items: readonly ImportItem[]): Promise<ImportResponse>;
+  importWords(items: readonly ImportItem[], wordsPerDay?: number, startIndex?: number): Promise<ImportResponse>;
   /** Everything the account can read about itself, in the documented export format. Reads only. */
   fetchExport(): Promise<AccountExport>;
 }
@@ -460,6 +473,14 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         timeoutMessage: 'Loading deleted words took too long.',
       }).then((response) => response.entries),
 
+    archiveEntries: (ids, archived) =>
+      call('/api/vocabulary/archive', archiveEntriesResponseSchema, {
+        method: 'POST',
+        body: { ids: [...ids], archived },
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
     fetchSettings: () =>
       call('/api/settings', accountSettingsSchema, {
         method: 'GET',
@@ -488,10 +509,29 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         timeoutMessage: 'Loading the reviews for this month took too long.',
       }),
 
-    importWords: (items) =>
+    fetchStudyGoals: () =>
+      call('/api/study-goals', studyGoalsResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.quickMs,
+        timeoutMessage: 'Loading your daily goals took too long.',
+      }),
+
+    saveStudyGoals: (body) =>
+      call('/api/study-goals', studyGoalsResponseSchema, {
+        method: 'PUT',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    importWords: (items, wordsPerDay, startIndex) =>
       call('/api/vocabulary/import', importResponseSchema, {
         method: 'POST',
-        body: { items },
+        body: {
+          items,
+          ...(wordsPerDay === undefined ? {} : { wordsPerDay }),
+          ...(startIndex === undefined || startIndex === 0 ? {} : { startIndex }),
+        },
         timeoutMs: TIMEOUTS.queueMs,
         timeoutMessage: 'Importing took too long. Nothing is imported twice if you try again.',
       }),

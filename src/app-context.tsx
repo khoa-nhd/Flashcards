@@ -13,6 +13,7 @@ import { createSender } from './lib/offline/send.js';
 import { createMemoryStore, type LocalStore } from './lib/offline/storage.js';
 import { withCachedReads } from './lib/offline/cached-api.js';
 import { createSyncEngine, type SyncEngine, type SyncEngineState } from './lib/offline/sync-engine.js';
+import { resolveUiLanguage, type UiLanguage } from './lib/i18n.js';
 import { invalidateAllPracticeHistory } from './lib/practice-history-cache.js';
 import { ALL_SCOPE, sameScope, type ReviewScope } from './lib/review-scope.js';
 import { createSessionController, type SessionController } from './lib/session-controller.js';
@@ -201,6 +202,13 @@ export function useLibrary(): LibraryState {
 export function useSettings(): Settings {
   const { settings } = useApp();
   return useSyncExternalStore(settings.subscribe, settings.getState);
+}
+
+/** The interface language, resolved from the preference and the browser. */
+export function useUiLanguage(): UiLanguage {
+  const { uiLanguage } = useSettings();
+  const browser = typeof navigator === 'undefined' ? null : navigator.language;
+  return resolveUiLanguage(uiLanguage, browser);
 }
 
 /** Whether a review moves a word, as the switch beside the card has it. */

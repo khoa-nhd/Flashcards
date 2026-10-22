@@ -35,7 +35,7 @@ export function blankForm(meta: VocabularyMeta): FormValues {
   };
 }
 
-export function validate(values: FormValues): FormErrors {
+export function validate(values: FormValues, checkSchedule = true): FormErrors {
   const errors: FormErrors = {};
   const word = values.word.trim();
   if (word === '') errors.word = 'Enter the word you want to add.';
@@ -44,6 +44,7 @@ export function validate(values: FormValues): FormErrors {
     if (values[key].trim().length > FIELD_LIMITS.text) errors[key] = `Keep this under ${FIELD_LIMITS.text} characters.`;
   }
   if (values.dateAdded === '' || !isIsoDate(values.dateAdded)) errors.dateAdded = 'Choose the date the word was added.';
+  if (!checkSchedule) return errors;
   const mastery = Number(values.mastery);
   if (values.mastery.trim() === '' || !Number.isInteger(mastery) || mastery < 0 || mastery > 10) {
     errors.mastery = 'Mastery must be a whole number from 0 to 10.';
@@ -53,14 +54,19 @@ export function validate(values: FormValues): FormErrors {
 }
 
 /** The form as one write the vocabulary store can send. */
-export function createInputOf(values: FormValues): Omit<CreateEntryInput, 'requestId'> {
+export function createInputOf(values: FormValues, fsrsOnly = false): Omit<CreateEntryInput, 'requestId'> {
   return {
     word: values.word,
     meaning: values.meaning,
     definition: values.definition,
     example: values.example,
     dateAdded: values.dateAdded,
-    mastery: Number(values.mastery),
-    reviewDate: values.reviewDate === '' ? null : values.reviewDate,
+    // FSRS starts every new word with no mastery, due today.
+    ...(fsrsOnly
+      ? {}
+      : {
+          mastery: Number(values.mastery),
+          reviewDate: values.reviewDate === '' ? null : values.reviewDate,
+        }),
   };
 }

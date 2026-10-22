@@ -36,6 +36,8 @@ export interface VocabularyFieldsProps {
   hideExample?: boolean;
   /** Rendered in place of the "Example sentences" field. */
   exampleSlot?: ReactNode;
+  /** FSRS alone: a new word is due today and has no mastery to set. */
+  fsrsOnly?: boolean;
 }
 
 export function VocabularyFields({
@@ -54,6 +56,7 @@ export function VocabularyFields({
   wordInputRef,
   hideExample = false,
   exampleSlot,
+  fsrsOnly = false,
 }: VocabularyFieldsProps) {
   const id = (field: string) => `${idPrefix}-${field}`;
 
@@ -123,7 +126,11 @@ export function VocabularyFields({
           <Field
             id={id('definition')}
             label="Definition"
-            hint="In English. Shown on the card while the word's mastery is 5 or lower."
+            hint={
+              fsrsOnly
+                ? 'In English. From strength level 6 it starts folded away on the card, but can always be opened.'
+                : "In English. Shown on the card while the word's mastery is 5 or lower."
+            }
             error={errors.definition}
           >
             <textarea
@@ -168,6 +175,15 @@ export function VocabularyFields({
         </>
       )}
 
+      {fsrsOnly ? (
+        <div className="rounded-xl border border-line bg-paper px-3 py-2.5">
+          <p className="text-sm font-medium text-ink">New words are due today</p>
+          <p className="mt-0.5 text-xs leading-relaxed text-muted">
+            FSRS starts the word at strength 1/10 and decides the next date from your answers. There is no mastery or
+            review date to set.
+          </p>
+        </div>
+      ) : (
       <div className="border-t border-line">
         <button
           type="button"
@@ -225,6 +241,7 @@ export function VocabularyFields({
           </div>
         )}
       </div>
+      )}
     </>
   );
 }

@@ -1,8 +1,8 @@
 import { useMemo, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { CreateEntryInput, VocabularyEntry } from '../../shared/api.js';
 import { normalizeWord } from '../../shared/text.js';
-import { useApp, useVocabulary } from '../app-context.js';
-import { MasteryPill, formatDate } from '../components/badges.js';
+import { useApp, useUiLanguage, useVocabulary } from '../app-context.js';
+import { MasteryPill, StrengthPill, formatDate } from '../components/badges.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -60,6 +60,8 @@ interface Attempt {
 
 function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyEntry[] }) {
   const { vocabulary } = useApp();
+  const language = useUiLanguage();
+  const fsrsOnly = meta.fsrsOnly;
   const [values, setValues] = useState<FormValues>(() => blankForm(meta));
   const [errors, setErrors] = useState<FormErrors>({});
   const [quick, setQuick] = useState(false);
@@ -103,12 +105,12 @@ function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyE
 
   const submit = (allowDuplicate: boolean) => {
     if (!meta.writesEnabled) return;
-    const found = validate(values);
+    const found = validate(values, !fsrsOnly);
     setErrors(found);
     if (Object.keys(found).length > 0) {
       // Send focus to the first problem so it is announced and easy to fix.
       const first = FORM_FIELDS.find((key) => found[key]);
-      if (first === 'mastery' || first === 'reviewDate') setShowSchedule(true);
+      if ((first === 'mastery' || first === 'reviewDate') && !fsrsOnly) setShowSchedule(true);
       // Deferred so a field inside the just-opened settings section exists by then.
       if (first) setTimeout(() => document.getElementById(`add-${first}`)?.focus(), 0);
       return;
@@ -127,8 +129,13 @@ function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyE
       definition: quick ? undefined : values.definition,
       example: quick ? undefined : values.example,
       dateAdded: values.dateAdded,
-      mastery: Number(values.mastery),
-      reviewDate: values.reviewDate === '' ? null : values.reviewDate,
+      // Under FSRS the server starts every new word with no mastery and due today.
+      ...(fsrsOnly
+        ? {}
+        : {
+            mastery: Number(values.mastery),
+            reviewDate: values.reviewDate === '' ? null : values.reviewDate,
+          }),
       allowDuplicate: allowDuplicate || undefined,
       requestId: requestId.current,
     };
@@ -296,6 +303,7 @@ function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyE
           hideSimilar={duplicates !== null}
           masteryDefault={meta.defaults.mastery}
           wordInputRef={wordInput}
+          fsrsOnly={fsrsOnly}
         />
 
         {duplicates !== null && (
@@ -344,7 +352,11 @@ function AddForm({ meta, entries }: { meta: VocabularyMeta; entries: VocabularyE
                       <button type="button" className="cursor-pointer font-semibold underline" onClick={() => openWord(entry.id)}>
                         {entry.word}
                       </button>
-                      <MasteryPill mastery={entry.mastery} />
+                      {entry.memory !== undefined ? (
+                        <StrengthPill memory={entry.memory} compact language={language} />
+                      ) : (
+                        <MasteryPill mastery={entry.mastery} />
+                      )}
                       <span className="min-w-0 flex-1 truncate">{entry.meaning ?? entry.definition ?? ''}</span>
                       <span className="text-xs">added {formatDate(entry.dateAdded, 'short')}</span>
                     </li>

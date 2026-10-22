@@ -1,9 +1,9 @@
 /** The parts of Settings that exist because the app has accounts: who is signed in, their time zone, their trash. */
 import { useEffect, useMemo, useState } from 'react';
 import type { AccountSettings, VocabularyEntry } from '../../shared/api.js';
-import { useApp, type AccountControls } from '../app-context.js';
+import { useApp, useUiLanguage, useVocabulary, type AccountControls } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
-import { MasteryPill } from './badges.js';
+import { MasteryPill, StrengthPill } from './badges.js';
 import { BUTTON_SECONDARY, CARD, HELP, INPUT, SECTION_TITLE } from './ui.js';
 
 const messageOf = (error: unknown, fallback: string) => (error instanceof ApiError ? error.message : fallback);
@@ -153,6 +153,9 @@ export function TimeZoneSection() {
 /** Deleted words. Deleting only ever moves a word here, so nothing is lost by accident. */
 export function TrashSection() {
   const { api, vocabulary, toasts } = useApp();
+  const vocabularyState = useVocabulary();
+  const language = useUiLanguage();
+  const fsrsOnly = vocabularyState.meta?.fsrsOnly === true;
   const [entries, setEntries] = useState<VocabularyEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [restoring, setRestoring] = useState<string | null>(null);
@@ -199,7 +202,10 @@ export function TrashSection() {
           Refresh
         </button>
       </div>
-      <p className={HELP}>A deleted word keeps its mastery and dates, and comes back exactly as it was.</p>
+      <p className={HELP}>
+        A deleted word keeps its {fsrsOnly ? 'memory strength and schedule' : 'mastery and dates'}, and comes back
+        exactly as it was.
+      </p>
       {error !== null && (
         <p role="alert" className="text-sm text-bad-ink">
           {error}
@@ -221,7 +227,11 @@ export function TrashSection() {
                 <span className="block truncate text-sm font-medium">{entry.word}</span>
                 {entry.meaning !== null && <span className="block truncate text-xs text-muted">{entry.meaning}</span>}
               </span>
-              <MasteryPill mastery={entry.mastery} />
+              {fsrsOnly && entry.memory !== undefined ? (
+                <StrengthPill memory={entry.memory} compact language={language} />
+              ) : (
+                <MasteryPill mastery={entry.mastery} />
+              )}
               <button
                 type="button"
                 className={BUTTON_SECONDARY}

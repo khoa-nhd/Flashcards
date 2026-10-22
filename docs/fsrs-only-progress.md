@@ -15,7 +15,7 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 | Test | 78 file, 1918 test, tất cả đạt |
 | Migration v15 | Đã viết: `supabase/migrations/20261029090000_fsrs_only.sql`. **Chưa chạy trên database thật** |
 | Server (Phase 3) | **Xong**, có test qua HTTP thật + schema thật + RLS |
-| Giao diện (Phase 4) | **Chưa bắt đầu** |
+| Giao diện (Phase 4) | **Xong** |
 
 ### An toàn khi deploy (push `main` = Vercel deploy)
 
@@ -129,7 +129,7 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 | Phase | Còn thiếu |
 |---|---|
 | 3. Server/API | ✅ Xong. (Sửa lịch bằng tay khi FSRS-only giờ bị từ chối rõ ràng, 409 `not_editable`.) |
-| 4. Giao diện | Tất cả: StrengthPill, thẻ thu gọn từ level 6 + nút mở, Bank (cột/lọc Sức nhớ, archive hàng loạt, lọc Archived), Dashboard hai vòng mục tiêu + phân bố strength, Settings (retention nâng cao, ngôn ngữ, mục tiêu, maintenance mode), đổi tên Practice score, onboarding 3 màn, switcher VI/EN, import hỏi rải theo từ/ngày (mặc định 20) |
+| 4. Giao diện | ✅ Xong. |
 | 5. Export/import/offline, v16 | Export v2, đọc file v1; offline đã gửi `expectedRevision` nhưng cần xử lý 409 bằng tải lại thẻ; migration dọn dẹp v16 |
 | 6. Kiểm thử, docs, rollout | Kiểm tra thủ công trước production (mục 10 của kế hoạch); hướng dẫn chủ dự án chạy v15 |
 

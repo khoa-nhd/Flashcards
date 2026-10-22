@@ -1,8 +1,9 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { VocabularyEntry } from '../../shared/api.js';
 import type { IsoDate } from '../../shared/dates.js';
-import { useApp, useLibrary, useSettings, useVocabulary } from '../app-context.js';
-import { MasteryPill, QualityFlag, StatusBadge, formatDate, relativeDay } from '../components/badges.js';
+import type { StrengthBand } from '../../shared/scheduler/strength.js';
+import { useApp, useLibrary, useSettings, useUiLanguage, useVocabulary } from '../app-context.js';
+import { MasteryPill, StrengthPill, QualityFlag, StatusBadge, formatDate, relativeDay } from '../components/badges.js';
 import { Icon } from '../components/Icon.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
@@ -13,6 +14,7 @@ import {
   MISSING_LABELS,
   STATUS_FILTERS,
   STATUS_LABELS,
+  STRENGTH_FILTERS,
   activePreset,
   bankQueryParams,
   defaultSortDirection,
@@ -24,6 +26,8 @@ import {
   type BankQuery,
 } from '../lib/bank-query.js';
 import { downloadFile, toCsv, toJson } from '../lib/export.js';
+import { pick } from '../lib/i18n.js';
+import { ApiError } from '../lib/api-client.js';
 import { ROUTES, buildHref, navigate, openWord, useLocation } from '../lib/router.js';
 import type { SortKey } from '../lib/settings.js';
 import { useTrueMastery, type TrueMasteryEntry } from '../hooks/useTrueMastery.js';
@@ -33,7 +37,11 @@ const SORT_LABELS: Record<SortKey, string> = {
   dateAdded: 'Date added',
   reviewDate: 'Review date',
   mastery: 'Mastery',
-  trueMastery: 'True Mastery',
+  strength: 'Memory strength',
+  due: 'Next due',
+  reps: 'Reviews',
+  lapses: 'Lapses',
+  trueMastery: 'Practice score',
 };
 
 function FilterSelect({
@@ -67,6 +75,10 @@ interface BankTableProps {
   query: BankQuery;
   onSort: (key: SortKey) => void;
   trueMasteryMap: Map<string, TrueMasteryEntry>;
+  fsrsOnly: boolean;
+  selected: ReadonlySet<string>;
+  onToggle: (id: string) => void;
+  onToggleAll: () => void;
 }
 
 function BankTable({
@@ -75,7 +87,12 @@ function BankTable({
   query,
   onSort,
   trueMasteryMap,
+  fsrsOnly,
+  selected,
+  onToggle,
+  onToggleAll,
 }: BankTableProps) {
+  const language = useUiLanguage();
   const header = (key: SortKey, className = '', title?: string) => {
     const active = query.sort === key;
     return (
@@ -98,35 +115,63 @@ function BankTable({
       </th>
     );
   };
+  const practiceTitle = fsrsOnly
+    ? 'Practice score is an evidence-based estimate (0–100) from your practice history. It is separate from memory strength and never changes the schedule.'
+    : 'True Mastery is an evidence-based estimate (0–100) of how well you know a word, from your practice history across modes. It is separate from Review Mastery, which drives the schedule.';
+  const allSelected = entries.length > 0 && entries.every((entry) => selected.has(entry.id));
 
   return (
     <div className={`${CARD} overflow-x-auto`}>
       <table className="w-full text-sm">
         <thead className="border-b border-line text-left text-[0.6875rem] uppercase tracking-[0.12em] text-faint">
           <tr>
+            {fsrsOnly && (
+              <th scope="col" className="w-10 px-3 py-2.5">
+                <input
+                  type="checkbox"
+                  aria-label={pick(language, 'Select every word on this page', 'Chọn mọi từ trên trang này')}
+                  checked={allSelected}
+                  onChange={onToggleAll}
+                  className="size-4 cursor-pointer accent-[var(--accent)]"
+                />
+              </th>
+            )}
             {header('word')}
             <th scope="col" className="hidden px-3 py-2.5 font-medium lg:table-cell">
               Meaning
             </th>
-            {header('mastery', 'w-24')}
-            {header(
-              'trueMastery',
-              'w-32',
-              'True Mastery is an evidence-based estimate (0–100) of how well you know a word, from your practice history across modes. It is separate from Review Mastery, which drives the schedule.',
-            )}
-            {header('reviewDate', 'w-40')}
+            {fsrsOnly ? header('strength', 'w-36') : header('mastery', 'w-24')}
+            {header('trueMastery', 'w-32', practiceTitle)}
+            {fsrsOnly ? header('due', 'w-40') : header('reviewDate', 'w-40')}
+            {fsrsOnly && header('reps', 'hidden w-20 xl:table-cell')}
+            {fsrsOnly && header('lapses', 'hidden w-20 xl:table-cell')}
             {header('dateAdded', 'hidden w-32 xl:table-cell')}
           </tr>
         </thead>
         <tbody>
           {entries.map((entry) => {
             const trueMastery = trueMasteryMap.get(entry.id);
+            const isSelected = selected.has(entry.id);
+            const due = entry.dueDate ?? entry.reviewDate;
             return (
               <tr
                 key={entry.id}
                 onClick={() => openWord(entry.id)}
-                className="cursor-pointer border-t border-line transition-colors first:border-t-0 hover:bg-line-strong/40"
+                className={`cursor-pointer border-t border-line transition-colors first:border-t-0 hover:bg-line-strong/40 ${
+                  isSelected ? 'bg-accent-soft/40' : ''
+                }`}
               >
+                {fsrsOnly && (
+                  <td className="px-3 py-2.5" onClick={(event) => event.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      aria-label={`${pick(language, 'Select', 'Chọn')} ${entry.word}`}
+                      checked={isSelected}
+                      onChange={() => onToggle(entry.id)}
+                      className="size-4 cursor-pointer accent-[var(--accent)]"
+                    />
+                  </td>
+                )}
                 <th scope="row" className="max-w-56 px-3 py-2.5 text-left font-medium">
                   <span className="flex items-center gap-2">
                     {/* The row is clickable for the mouse; this button is the keyboard and screen-reader route. */}
@@ -147,7 +192,15 @@ function BankTable({
                   <span className="line-clamp-1">{entry.meaning ?? entry.definition ?? '—'}</span>
                 </td>
                 <td className="px-3 py-2.5">
-                  <MasteryPill mastery={entry.mastery} />
+                  {fsrsOnly ? (
+                    entry.memory === undefined ? (
+                      <span className="text-muted">—</span>
+                    ) : (
+                      <StrengthPill memory={entry.memory} compact language={language} />
+                    )
+                  ) : (
+                    <MasteryPill mastery={entry.mastery} />
+                  )}
                 </td>
                 <td className="px-3 py-2.5">
                   {trueMastery && trueMastery.mastery !== null && (
@@ -167,7 +220,7 @@ function BankTable({
                             : 'bg-line-strong/60 text-muted'
                         }`}
                         title={
-                          `True Mastery: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
+                          `${fsrsOnly ? 'Practice score' : 'True Mastery'}: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
                           `Evidence: ${trueMastery.coverageLabel} (${trueMastery.totalEffectiveEvidence.toFixed(1)} effective evidence across ${trueMastery.modesWithEvidence} mode${trueMastery.modesWithEvidence === 1 ? '' : 's'})\n` +
                           (trueMastery.modeStats?.length > 0
                             ? trueMastery.modeStats
@@ -193,11 +246,17 @@ function BankTable({
                 <td className="px-3 py-2.5">
                   <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
                     <StatusBadge status={entry.reviewStatus} />
-                    {entry.reviewDate !== null && entry.reviewStatus !== 'mastered' && (
-                      <span className="whitespace-nowrap text-xs text-muted">{relativeDay(entry.reviewDate, today)}</span>
+                    {due !== null && entry.reviewStatus !== 'mastered' && entry.reviewStatus !== 'suspended' && (
+                      <span className="whitespace-nowrap text-xs text-muted">{relativeDay(due, today)}</span>
                     )}
                   </span>
                 </td>
+                {fsrsOnly && (
+                  <td className="hidden px-3 py-2.5 tabular-nums text-muted xl:table-cell">{entry.memory?.reps ?? '—'}</td>
+                )}
+                {fsrsOnly && (
+                  <td className="hidden px-3 py-2.5 tabular-nums text-muted xl:table-cell">{entry.memory?.lapses ?? '—'}</td>
+                )}
                 <td className="hidden whitespace-nowrap px-3 py-2.5 text-muted xl:table-cell">
                   {formatDate(entry.dateAdded, 'short')}
                 </td>
@@ -214,21 +273,42 @@ interface BankListProps {
   entries: VocabularyEntry[];
   today: IsoDate | null;
   trueMasteryMap: Map<string, TrueMasteryEntry>;
+  fsrsOnly: boolean;
+  selected: ReadonlySet<string>;
+  onToggle: (id: string) => void;
 }
 
-function BankList({ entries, today, trueMasteryMap }: BankListProps) {
+function BankList({ entries, today, trueMasteryMap, fsrsOnly, selected, onToggle }: BankListProps) {
+  const language = useUiLanguage();
   return (
     <ul className={`${CARD} m-0 flex list-none flex-col divide-y divide-line p-0`}>
       {entries.map((entry) => {
         const trueMastery = trueMasteryMap.get(entry.id);
         return (
-          <li key={entry.id}>
+          <li key={entry.id} className={`flex items-center ${selected.has(entry.id) ? 'bg-accent-soft/40' : ''}`}>
+            {fsrsOnly && (
+              <input
+                type="checkbox"
+                aria-label={`${pick(language, 'Select', 'Chọn')} ${entry.word}`}
+                checked={selected.has(entry.id)}
+                onChange={() => onToggle(entry.id)}
+                className="ml-3 size-4 shrink-0 cursor-pointer accent-[var(--accent)]"
+              />
+            )}
             <button
               type="button"
               onClick={() => openWord(entry.id)}
-              className="flex w-full cursor-pointer items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-line-strong/40"
+              className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-line-strong/40"
             >
-              <MasteryPill mastery={entry.mastery} />
+              {fsrsOnly ? (
+                entry.memory === undefined ? (
+                  <span className="text-xs text-muted">—</span>
+                ) : (
+                  <StrengthPill memory={entry.memory} compact language={language} />
+                )
+              ) : (
+                <MasteryPill mastery={entry.mastery} />
+              )}
               <span className="min-w-0 flex-1 truncate">
                 <span className="font-serif text-[1.0625rem] font-medium">{entry.word}</span>
                 {entry.meaning !== null && <span className="text-muted"> — {entry.meaning}</span>}
@@ -251,7 +331,7 @@ function BankList({ entries, today, trueMasteryMap }: BankListProps) {
                         : 'bg-line-strong/60 text-muted'
                     }`}
                     title={
-                      `True Mastery: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
+                      `${fsrsOnly ? 'Practice score' : 'True Mastery'}: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
                       `Evidence: ${trueMastery.coverageLabel} (${trueMastery.totalEffectiveEvidence.toFixed(1)} effective evidence across ${trueMastery.modesWithEvidence} mode${trueMastery.modesWithEvidence === 1 ? '' : 's'})\n` +
                       (trueMastery.modeStats?.length > 0
                         ? trueMastery.modeStats
@@ -276,11 +356,15 @@ function BankList({ entries, today, trueMasteryMap }: BankListProps) {
                 </span>
               )}
               <span className="shrink-0 text-xs text-muted">
-                {entry.reviewStatus === 'mastered'
-                  ? 'mastered'
-                  : entry.reviewDate === null
-                    ? 'no date'
-                    : relativeDay(entry.reviewDate, today)}
+                {entry.reviewStatus === 'suspended'
+                  ? pick(language, 'archived', 'đã lưu trữ')
+                  : entry.reviewStatus === 'new'
+                    ? pick(language, 'new', 'mới')
+                    : entry.reviewStatus === 'mastered'
+                      ? 'mastered'
+                      : (entry.dueDate ?? entry.reviewDate) === null
+                        ? pick(language, 'no date', 'chưa có ngày')
+                        : relativeDay(entry.dueDate ?? entry.reviewDate, today)}
               </span>
             </button>
           </li>
@@ -293,7 +377,8 @@ function BankList({ entries, today, trueMasteryMap }: BankListProps) {
 export function BankPage() {
   const state = useVocabulary();
   const settings = useSettings();
-  const { settings: settingsStore } = useApp();
+  const language = useUiLanguage();
+  const { api, settings: settingsStore, toasts, vocabulary } = useApp();
   const location = useLocation();
   const defaults = useMemo(
     () => ({ sort: settings.bankSort, direction: settings.bankDirection }),
@@ -301,6 +386,11 @@ export function BankPage() {
   );
   const query = useMemo(() => parseBankQuery(location.query, defaults), [location.query, defaults]);
   const today = state.meta?.today ?? null;
+  const fsrsOnly = state.meta?.fsrsOnly === true;
+
+  // Bulk archive is a Bank action only; archived words leave the queue and dashboard.
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [archiving, setArchiving] = useState(false);
 
   // Use the True Mastery hook early so it's available for sorting
   const { trueMasteryMap } = useTrueMastery();
@@ -329,18 +419,86 @@ export function BankPage() {
     if (word !== null) base.set('word', word);
     const keptCollection = options.collection === undefined ? collectionId : options.collection;
     if (keptCollection !== null) base.set('collection', keptCollection);
+    setSelected(new Set());
     navigate(buildHref(ROUTES.bank, bankQueryParams(next, defaults), base), { replace: options.replace });
   };
-  const NO_FILTERS = { search: '', status: null, mastery: null, addedFrom: null, addedTo: null, missing: null } as const;
+  const NO_FILTERS = {
+    search: '',
+    status: null,
+    mastery: null,
+    strengthBand: null,
+    addedFrom: null,
+    addedTo: null,
+    missing: null,
+  } as const;
 
   const sortBy = (key: SortKey) => {
     if (query.sort === key) update({ direction: query.direction === 'asc' ? 'desc' : 'asc' });
-    // A new sort starts in its own natural direction: weakest first for mastery and review date.
+    // A new sort starts in its own natural direction: weakest first for strength and due dates.
     else update({ sort: key, direction: defaultSortDirection(key) });
+  };
+
+  const toggleSelected = (id: string) => {
+    setSelected((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAllOnPage = () => {
+    setSelected((current) => {
+      const next = new Set(current);
+      const all = page.items.every((entry) => next.has(entry.id));
+      for (const entry of page.items) {
+        if (all) next.delete(entry.id);
+        else next.add(entry.id);
+      }
+      return next;
+    });
+  };
+
+  const archiveSelected = async (archived: boolean) => {
+    const ids = [...selected];
+    if (ids.length === 0 || archiving) return;
+    setArchiving(true);
+    try {
+      const result = await api.archiveEntries(ids, archived);
+      for (const entry of result.entries) vocabulary.upsert(entry);
+      setSelected(new Set());
+      const count = result.archived;
+      toasts.show({
+        message: archived
+          ? pick(language, `Archived ${count} ${count === 1 ? 'word' : 'words'}.`, `Đã lưu trữ ${count} từ.`)
+          : pick(language, `Resumed ${count} ${count === 1 ? 'word' : 'words'}.`, `Đã bỏ lưu trữ ${count} từ.`),
+      });
+    } catch (cause) {
+      toasts.show({
+        tone: 'error',
+        message:
+          cause instanceof ApiError
+            ? cause.message
+            : pick(language, 'Could not change those words. Try again.', 'Không thể thay đổi các từ đó. Hãy thử lại.'),
+      });
+    } finally {
+      setArchiving(false);
+    }
   };
 
   const preset = today === null ? null : activePreset(query, today);
   const exportName = `vocabulary-${today ?? 'export'}`;
+  const presets = BANK_PRESETS.filter((item) =>
+    fsrsOnly ? item.key !== 'mastered' : item.key !== 'new' && item.key !== 'archived',
+  );
+  const statusFilters = STATUS_FILTERS.filter((key) => {
+    if (fsrsOnly) return key !== 'mastered' && key !== 'unscheduled';
+    return key !== 'new' && key !== 'archived';
+  });
+  const sortKeys = (Object.keys(SORT_LABELS) as SortKey[]).filter((key) =>
+    fsrsOnly ? key !== 'mastery' && key !== 'reviewDate' : key !== 'strength' && key !== 'due' && key !== 'reps' && key !== 'lapses',
+  );
+  const selectedEntries = state.entries.filter((entry) => selected.has(entry.id));
 
   return (
     <div className={PAGE}>
@@ -387,7 +545,7 @@ export function BankPage() {
         {today !== null && (
           <div className={`flex flex-col gap-4 ${state.refreshing ? 'opacity-70' : ''}`}>
             <div className="flex flex-wrap gap-2" role="group" aria-label="Quick filters">
-              {BANK_PRESETS.map((item) => (
+              {presets.map((item) => (
                 <button
                   key={item.key}
                   type="button"
@@ -422,17 +580,37 @@ export function BankPage() {
 
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
                 <FilterSelect
-                  label="Review status"
+                  label={pick(language, 'Review status', 'Trạng thái ôn')}
                   value={query.status ?? ''}
                   onChange={(value) => update({ status: value === '' ? null : (value as BankQuery['status']) })}
-                  options={[['', 'Any status'], ...STATUS_FILTERS.map((key): [string, string] => [key, STATUS_LABELS[key]])]}
+                  options={[
+                    ['', pick(language, 'Any status', 'Mọi trạng thái')],
+                    ...statusFilters.map((key): [string, string] => [key, STATUS_LABELS[key]]),
+                  ]}
                 />
-                <FilterSelect
-                  label="Mastery"
-                  value={query.mastery === null ? '' : String(query.mastery)}
-                  onChange={(value) => update({ mastery: value === '' ? null : Number(value) })}
-                  options={[['', 'Any mastery'], ...Array.from({ length: 11 }, (_, level): [string, string] => [String(level), `Mastery ${level}`])]}
-                />
+                {fsrsOnly ? (
+                  <FilterSelect
+                    label={pick(language, 'Memory strength', 'Sức nhớ')}
+                    value={query.strengthBand ?? ''}
+                    onChange={(value) =>
+                      update({ strengthBand: value === '' ? null : (value as StrengthBand) })
+                    }
+                    options={[
+                      ['', pick(language, 'Any strength', 'Mọi mức sức nhớ')],
+                      ...STRENGTH_FILTERS.map((band): [string, string] => [band, band]),
+                    ]}
+                  />
+                ) : (
+                  <FilterSelect
+                    label="Mastery"
+                    value={query.mastery === null ? '' : String(query.mastery)}
+                    onChange={(value) => update({ mastery: value === '' ? null : Number(value) })}
+                    options={[
+                      ['', 'Any mastery'],
+                      ...Array.from({ length: 11 }, (_, level): [string, string] => [String(level), `Mastery ${level}`]),
+                    ]}
+                  />
+                )}
                 <FilterSelect
                   label="Completeness"
                   value={query.missing ?? ''}
@@ -506,7 +684,7 @@ export function BankPage() {
                         update({ sort: key, direction: defaultSortDirection(key) });
                       }}
                     >
-                      {(Object.keys(SORT_LABELS) as SortKey[]).map((key) => (
+                      {sortKeys.map((key) => (
                         <option key={key} value={key}>
                           {SORT_LABELS[key]}
                         </option>
@@ -540,6 +718,39 @@ export function BankPage() {
                 </div>
               </div>
             </div>
+
+            {fsrsOnly && selected.size > 0 && (
+              <div
+                role="group"
+                aria-label={pick(language, 'Selected words', 'Các từ đã chọn')}
+                className={`${CARD} flex flex-wrap items-center gap-3 border-accent/30 bg-accent-soft/30 px-3 py-2.5`}
+              >
+                <p className="text-sm font-medium">
+                  {pick(language, `${selected.size} selected`, `Đã chọn ${selected.size} từ`)}
+                </p>
+                <div className="ml-auto flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className={BUTTON_SECONDARY}
+                    disabled={archiving || selectedEntries.length === 0}
+                    onClick={() => void archiveSelected(true)}
+                  >
+                    {pick(language, 'Archive', 'Lưu trữ')}
+                  </button>
+                  <button
+                    type="button"
+                    className={BUTTON_SECONDARY}
+                    disabled={archiving || selectedEntries.length === 0}
+                    onClick={() => void archiveSelected(false)}
+                  >
+                    {pick(language, 'Resume', 'Bỏ lưu trữ')}
+                  </button>
+                  <button type="button" className={BUTTON_GHOST} onClick={() => setSelected(new Set())}>
+                    {pick(language, 'Clear selection', 'Bỏ chọn')}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -578,11 +789,22 @@ export function BankPage() {
                 query={query}
                 onSort={sortBy}
                 trueMasteryMap={trueMasteryMap}
+                fsrsOnly={fsrsOnly}
+                selected={selected}
+                onToggle={toggleSelected}
+                onToggleAll={toggleAllOnPage}
               />
             </>
           ) : (
             <>
-              <BankList entries={page.items as VocabularyEntry[]} today={today} trueMasteryMap={trueMasteryMap} />
+              <BankList
+                entries={page.items as VocabularyEntry[]}
+                today={today}
+                trueMasteryMap={trueMasteryMap}
+                fsrsOnly={fsrsOnly}
+                selected={selected}
+                onToggle={toggleSelected}
+              />
             </>
           )}
 

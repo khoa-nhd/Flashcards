@@ -39,6 +39,23 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
   const [hintVisible, setHintVisible] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const flipButton = useRef<HTMLButtonElement>(null);
+  // Remember the strength seen for each card in this sitting. FSRS can lower a
+  // word's stability after a "Not remember"; the card then gets a quiet arrow.
+  const lastStrength = useRef(new Map<string, number>());
+  const [dropped, setDropped] = useState<ReadonlySet<string>>(new Set());
+
+  useEffect(() => {
+    if (card === null || card.memory === undefined) return;
+    const previous = lastStrength.current.get(card.id);
+    lastStrength.current.set(card.id, card.memory.level);
+    if (previous === undefined || previous === card.memory.level) return;
+    setDropped((current) => {
+      const next = new Set(current);
+      if (card.memory!.level < previous) next.add(card.id);
+      else next.delete(card.id);
+      return next;
+    });
+  }, [card]);
 
   const showFlipHint = useCallback(() => {
     setHintVisible(true);
@@ -141,6 +158,7 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
             canGrade={canGrade}
             locked={false}
             pendingAction={null}
+            strengthDropped={dropped.has(card.id)}
             onFlip={flip}
             onGrade={grade}
             onBlockedGrade={showFlipHint}

@@ -1,10 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { DayPlanResponse, VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates } from '../../shared/dates.js';
-import { additionsByPeriod, computeSummary, masteryDistribution } from '../../shared/metrics.js';
-import { useApp, useSettings, useVocabulary, useTrueMastery } from '../app-context.js';
+import { additionsByPeriod, computeSummary, masteryDistribution, strengthDistribution } from '../../shared/metrics.js';
+import { useApp, useSettings, useUiLanguage, useVocabulary, useTrueMastery } from '../app-context.js';
 import { BarChart } from '../components/BarChart.js';
-import { MasteryPill, StatusBadge, formatDate } from '../components/badges.js';
+import { MasteryPill, StrengthPill, StatusBadge, formatDate } from '../components/badges.js';
 import { GoalForm } from '../components/GoalSection.js';
 import { GoalProgress, goalTargetText, hasGoal, useDayPlan } from '../components/GoalStatus.js';
 import { Icon } from '../components/Icon.js';
@@ -12,9 +12,11 @@ import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { ReviewActivityCard, useReviewActivity } from '../components/ReviewActivity.js';
 import { StatTile } from '../components/StatTile.js';
+import { StudyGoalsCard, useStudyGoals } from '../components/StudyGoals.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { RECENT_DAYS } from '../lib/bank-query.js';
+import { pick } from '../lib/i18n.js';
 import { ROUTES, buildHref, openWord } from '../lib/router.js';
 
 const RECENT_COUNT = 6;
@@ -103,20 +105,26 @@ export function DashboardPage() {
   const state = useVocabulary();
   const { vocabulary } = useApp();
   const settings = useSettings();
+  const language = useUiLanguage();
   const activity = useReviewActivity();
   const plan = useDayPlan();
   const { trueMasteryMap } = useTrueMastery();
   const { entries, meta } = state;
   const today = meta?.today ?? null;
+  const fsrsOnly = meta?.fsrsOnly === true;
+  const goals = useStudyGoals(fsrsOnly);
 
   const summary = useMemo(() => (today === null ? null : computeSummary(entries, today)), [entries, today]);
   const distribution = useMemo(() => masteryDistribution(entries), [entries]);
+  const strength = useMemo(() => strengthDistribution(entries), [entries]);
   const additions = useMemo(
     () => (today === null ? [] : additionsByPeriod(entries, 'day', settings.dashboardDays, today)),
     [entries, today, settings.dashboardDays],
   );
   const recent = useMemo(() => recentAdditions(entries), [entries]);
   const ready = useMemo(() => entries.filter((entry) => entry.reviewable).length, [entries]);
+  const masterCount = strength.bands.find((item) => item.band === 'Master')?.count ?? 0;
+  const reviewDue = summary === null ? 0 : summary.dueToday + summary.overdue;
 
   // True Mastery summary
   const trueMasterySummary = useMemo(() => {
@@ -141,8 +149,12 @@ export function DashboardPage() {
   return (
     <div className={PAGE}>
       <PageHeader
-        title="Dashboard"
-        description={today === null ? 'Your vocabulary at a glance.' : `Your vocabulary as of ${formatDate(today)}.`}
+        title={pick(language, 'Dashboard', 'Tổng quan')}
+        description={
+          today === null
+            ? pick(language, 'Your vocabulary at a glance.', 'Từ vựng của bạn trong một cái nhìn.')
+            : pick(language, `Your vocabulary as of ${formatDate(today)}.`, `Từ vựng của bạn tính đến ${formatDate(today)}.`)
+        }
         actions={
           <button
             type="button"
@@ -151,11 +163,14 @@ export function DashboardPage() {
               void vocabulary.reload();
               activity.reload();
               plan.reload();
+              if (fsrsOnly) void goals.reload();
             }}
             disabled={state.refreshing || state.status === 'loading'}
           >
             <Icon name="refresh" className="size-4" />
-            {state.refreshing ? 'Refreshing…' : 'Refresh'}
+            {state.refreshing
+              ? pick(language, 'Refreshing…', 'Đang làm mới…')
+              : pick(language, 'Refresh', 'Làm mới')}
           </button>
         }
       />
@@ -172,31 +187,52 @@ export function DashboardPage() {
                 <div className="min-w-0 max-w-[36rem]">
                   <h2 className="font-serif text-[2.5rem] font-semibold leading-[1.04] tracking-[-0.025em] text-ink md:text-[3.25rem]">
                     {ready === 0
-                      ? 'Nothing is due right now.'
-                      : `${ready} ${ready === 1 ? 'word' : 'words'} ready to review.`}
+                      ? pick(language, 'All caught up.', 'Đã ôn xong.')
+                      : pick(
+                          language,
+                          `${ready} ${ready === 1 ? 'word' : 'words'} ready to review.`,
+                          `${ready} từ sẵn sàng để ôn.`,
+                        )}
                   </h2>
                   <p className="mt-3 text-sm leading-relaxed text-muted">
                     {ready === 0
-                      ? 'New words and due reviews will show up here.'
-                      : `${summary.overdue} overdue, ${summary.dueToday} due today${
-                          summary.unscheduled > 0 && ready > summary.overdue + summary.dueToday
-                            ? `, ${summary.unscheduled} new`
-                            : ''
-                        }.`}
+                      ? pick(
+                          language,
+                          'Nothing is due today. FSRS will bring the next words when they are ready.',
+                          'Hôm nay không có từ nào đến hạn. FSRS sẽ mang từ tiếp theo khi đến lúc.',
+                        )
+                      : fsrsOnly
+                        ? pick(
+                            language,
+                            `${reviewDue} due for review${summary.new > 0 ? ` · ${summary.new} new` : ''}.`,
+                            `${reviewDue} lượt ôn đến hạn${summary.new > 0 ? ` · ${summary.new} từ mới` : ''}.`,
+                          )
+                        : `${summary.overdue} overdue, ${summary.dueToday} due today${
+                            summary.unscheduled > 0 && ready > summary.overdue + summary.dueToday
+                              ? `, ${summary.unscheduled} new`
+                              : ''
+                          }.`}
                   </p>
                 </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
-                    <Icon name="review" className="size-4" /> Start review
-                  </Link>
-                  <Link to={ROUTES.add} className={BUTTON_SECONDARY}>
-                    <Icon name="add" className="size-4" /> Add vocabulary
-                  </Link>
+                <div className="flex w-full shrink-0 flex-col gap-3 xl:w-[30rem]">
+                  <div className="flex flex-wrap gap-2 xl:justify-end">
+                    <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
+                      <Icon name="review" className="size-4" />
+                      {pick(language, 'Start review', 'Bắt đầu ôn')}
+                    </Link>
+                    <Link to={ROUTES.add} className={BUTTON_SECONDARY}>
+                      <Icon name="add" className="size-4" />
+                      {pick(language, 'Add vocabulary', 'Thêm từ')}
+                    </Link>
+                  </div>
+                  {fsrsOnly && goals.status === 'ready' && goals.data !== null && (
+                    <StudyGoalsCard data={goals.data} onSaved={goals.adopt} compact />
+                  )}
                 </div>
               </div>
             </section>
 
-            {plan.status === 'ready' && plan.data.available && (
+            {!fsrsOnly && plan.status === 'ready' && plan.data.available && (
               <DashboardGoal plan={plan.data} onSaved={plan.adopt} />
             )}
 
@@ -269,52 +305,104 @@ export function DashboardPage() {
             </section>
 
             <section aria-label="Summary">
-              <h2 className={SECTION_TITLE}>Summary</h2>
-              <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-                <StatTile label="Total vocabulary" value={summary.total} to={ROUTES.bank} />
-                <StatTile
-                  label="Mastered"
-                  value={summary.mastered}
-                  hint="Mastery 10"
-                  to={buildHref(ROUTES.bank, { status: 'mastered' })}
-                />
-                <StatTile
-                  label="Learning"
-                  value={summary.learning}
-                  hint="Mastery 0 to 9"
-                  to={buildHref(ROUTES.bank, { status: 'learning' })}
-                />
-                <StatTile
-                  label="Upcoming"
-                  value={summary.upcoming}
-                  hint="Scheduled after today"
-                  to={buildHref(ROUTES.bank, { status: 'upcoming' })}
-                />
-                <StatTile
-                  label="Due today"
-                  value={summary.dueToday}
-                  emphasis="accent"
-                  to={buildHref(ROUTES.bank, { status: 'due_today' })}
-                />
-                <StatTile
-                  label="Overdue"
-                  value={summary.overdue}
-                  hint="Scheduled before today"
-                  emphasis="bad"
-                  to={buildHref(ROUTES.bank, { status: 'overdue' })}
-                />
-                <StatTile
-                  label="Added today"
-                  value={summary.addedToday}
-                  to={buildHref(ROUTES.bank, { from: today, to: today })}
-                />
-                <StatTile
-                  label="Added this week"
-                  value={summary.addedThisWeek}
-                  hint="Monday to Sunday"
-                  to={buildHref(ROUTES.calendar)}
-                />
-              </div>
+              <h2 className={SECTION_TITLE}>{pick(language, 'Summary', 'Tóm tắt')}</h2>
+              {fsrsOnly ? (
+                <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <StatTile
+                    label={pick(language, 'Total vocabulary', 'Tổng số từ')}
+                    value={summary.total}
+                    to={ROUTES.bank}
+                  />
+                  <StatTile
+                    label={pick(language, 'New', 'Từ mới')}
+                    value={summary.new}
+                    hint={pick(language, 'Never studied', 'Chưa ôn lần nào')}
+                    to={buildHref(ROUTES.bank, { status: 'new' })}
+                  />
+                  <StatTile
+                    label={pick(language, 'Due today', 'Đến hạn hôm nay')}
+                    value={summary.dueToday}
+                    emphasis="accent"
+                    to={buildHref(ROUTES.bank, { status: 'due_today' })}
+                  />
+                  <StatTile
+                    label={pick(language, 'Overdue', 'Quá hạn')}
+                    value={summary.overdue}
+                    hint={pick(language, 'Scheduled before today', 'Đến hạn trước hôm nay')}
+                    emphasis="bad"
+                    to={buildHref(ROUTES.bank, { status: 'overdue' })}
+                  />
+                  <StatTile
+                    label={pick(language, 'Upcoming', 'Sắp đến hạn')}
+                    value={summary.upcoming}
+                    hint={pick(language, 'Scheduled after today', 'Đến hạn sau hôm nay')}
+                    to={buildHref(ROUTES.bank, { status: 'upcoming' })}
+                  />
+                  <StatTile
+                    label={pick(language, 'Master', 'Master')}
+                    value={masterCount}
+                    hint={pick(language, 'Strength 10/10', 'Sức nhớ 10/10')}
+                    to={buildHref(ROUTES.bank, { band: 'Master' })}
+                  />
+                  <StatTile
+                    label={pick(language, 'Archived', 'Lưu trữ')}
+                    value={summary.suspended}
+                    hint={pick(language, 'Out of the queue', 'Ngoài hàng đợi')}
+                    to={buildHref(ROUTES.bank, { status: 'archived' })}
+                  />
+                  <StatTile
+                    label={pick(language, 'Added today', 'Thêm hôm nay')}
+                    value={summary.addedToday}
+                    to={buildHref(ROUTES.bank, { from: today, to: today })}
+                  />
+                </div>
+              ) : (
+                <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
+                  <StatTile label="Total vocabulary" value={summary.total} to={ROUTES.bank} />
+                  <StatTile
+                    label="Mastered"
+                    value={summary.mastered}
+                    hint="Mastery 10"
+                    to={buildHref(ROUTES.bank, { status: 'mastered' })}
+                  />
+                  <StatTile
+                    label="Learning"
+                    value={summary.learning}
+                    hint="Mastery 0 to 9"
+                    to={buildHref(ROUTES.bank, { status: 'learning' })}
+                  />
+                  <StatTile
+                    label="Upcoming"
+                    value={summary.upcoming}
+                    hint="Scheduled after today"
+                    to={buildHref(ROUTES.bank, { status: 'upcoming' })}
+                  />
+                  <StatTile
+                    label="Due today"
+                    value={summary.dueToday}
+                    emphasis="accent"
+                    to={buildHref(ROUTES.bank, { status: 'due_today' })}
+                  />
+                  <StatTile
+                    label="Overdue"
+                    value={summary.overdue}
+                    hint="Scheduled before today"
+                    emphasis="bad"
+                    to={buildHref(ROUTES.bank, { status: 'overdue' })}
+                  />
+                  <StatTile
+                    label="Added today"
+                    value={summary.addedToday}
+                    to={buildHref(ROUTES.bank, { from: today, to: today })}
+                  />
+                  <StatTile
+                    label="Added this week"
+                    value={summary.addedThisWeek}
+                    hint="Monday to Sunday"
+                    to={buildHref(ROUTES.calendar)}
+                  />
+                </div>
+              )}
               {(summary.unscheduled > 0 || summary.invalid > 0 || summary.missingDateAdded > 0) && (
                 <ul className="mt-3 flex flex-col gap-1 text-sm text-muted">
                   {summary.unscheduled > 0 && (
@@ -341,35 +429,85 @@ export function DashboardPage() {
               )}
             </section>
 
-            <section className={`${CARD} p-5`}>
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <h2 className={SECTION_TITLE}>Progress to mastery</h2>
-                <p className="text-sm text-muted">
-                  <strong className="font-semibold text-ink">{summary.mastered}</strong> of {summary.total} mastered
-                  {summary.total > 0 && ` (${Math.round((summary.mastered / summary.total) * 100)}%)`}
-                </p>
-              </div>
-              <div
-                role="progressbar"
-                aria-label="Mastered words"
-                aria-valuemin={0}
-                aria-valuemax={summary.total}
-                aria-valuenow={summary.mastered}
-                className="mt-3 h-2.5 overflow-hidden rounded-full bg-accent-soft"
-              >
+            {fsrsOnly ? (
+              <section className={`${CARD} p-5`} aria-label={pick(language, 'Memory strength', 'Sức nhớ')}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <div>
+                    <h2 className={SECTION_TITLE}>{pick(language, 'Memory strength', 'Sức nhớ')}</h2>
+                    <p className="mt-1 text-sm text-muted">
+                      {pick(
+                        language,
+                        'Estimated from FSRS. It never decides when a word is due.',
+                        'Ước lượng từ FSRS. Chỉ số này không quyết định ngày ôn.',
+                      )}
+                    </p>
+                  </div>
+                  <p className="text-sm text-muted">
+                    <strong className="font-semibold text-ink">{masterCount}</strong>{' '}
+                    {pick(language, 'at Master', 'ở mức Master')}
+                  </p>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+                  {strength.bands.map((item) => (
+                    <Link
+                      key={item.band}
+                      to={buildHref(ROUTES.bank, { band: item.band })}
+                      className="rounded-xl border border-line bg-paper px-3 py-2.5 transition-colors hover:border-muted"
+                    >
+                      <span className="block text-xs font-medium text-muted">{item.band}</span>
+                      <span className="mt-0.5 block font-serif text-xl font-semibold tabular-nums text-ink">
+                        {item.count}
+                      </span>
+                    </Link>
+                  ))}
+                </div>
+                <div className="mt-5">
+                  <BarChart
+                    title={pick(language, 'Words at each memory strength level', 'Số từ theo từng mức sức nhớ')}
+                    unit={[pick(language, 'word', 'từ'), pick(language, 'words', 'từ')]}
+                    categoryLabel={pick(language, 'Memory strength', 'Sức nhớ')}
+                    data={strength.levels.map((item) => ({
+                      key: String(item.level),
+                      tick: String(item.level),
+                      label: pick(language, `Level ${item.level}`, `Mức ${item.level}`),
+                      value: item.count,
+                    }))}
+                  />
+                </div>
+              </section>
+            ) : (
+              <section className={`${CARD} p-5`}>
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <h2 className={SECTION_TITLE}>Progress to mastery</h2>
+                  <p className="text-sm text-muted">
+                    <strong className="font-semibold text-ink">{summary.mastered}</strong> of {summary.total} mastered
+                    {summary.total > 0 && ` (${Math.round((summary.mastered / summary.total) * 100)}%)`}
+                  </p>
+                </div>
                 <div
-                  className="h-full rounded-full bg-accent"
-                  style={{ width: `${summary.total === 0 ? 0 : (summary.mastered / summary.total) * 100}%` }}
-                />
-              </div>
-            </section>
+                  role="progressbar"
+                  aria-label="Mastered words"
+                  aria-valuemin={0}
+                  aria-valuemax={summary.total}
+                  aria-valuenow={summary.mastered}
+                  className="mt-3 h-2.5 overflow-hidden rounded-full bg-accent-soft"
+                >
+                  <div
+                    className="h-full rounded-full bg-accent"
+                    style={{ width: `${summary.total === 0 ? 0 : (summary.mastered / summary.total) * 100}%` }}
+                  />
+                </div>
+              </section>
+            )}
 
             {trueMasterySummary && (
-              <section className="flex flex-col" aria-label="True Mastery">
+              <section className="flex flex-col" aria-label={fsrsOnly ? 'Practice score' : 'True Mastery'}>
                 <div className="flex flex-wrap items-baseline justify-between gap-2 mb-3">
-                  <h2 className={SECTION_TITLE}>True Mastery</h2>
+                  <h2 className={SECTION_TITLE}>{fsrsOnly ? 'Practice score' : 'True Mastery'}</h2>
                   <span className="text-xs text-muted">
-                    Evidence-based estimate (0–100) from practice history. Separate from Review Mastery.
+                    {fsrsOnly
+                      ? 'Evidence-based estimate (0–100) from practice history. Separate from memory strength.'
+                      : 'Evidence-based estimate (0–100) from practice history. Separate from Review Mastery.'}
                   </span>
                 </div>
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
@@ -425,26 +563,28 @@ export function DashboardPage() {
               </section>
             )}
 
-            <div className="grid gap-6 lg:grid-cols-2">
-              <section className={`${CARD} p-5`}>
-                <BarChart
-                  title="Words at each mastery level"
-                  unit={['word', 'words']}
-                  categoryLabel="Mastery"
-                  data={distribution.buckets.map((bucket) => ({
-                    key: String(bucket.mastery),
-                    tick: String(bucket.mastery),
-                    label: `Mastery ${bucket.mastery}`,
-                    value: bucket.count,
-                  }))}
-                />
-                {distribution.other > 0 && (
-                  <p className="mt-2 text-xs text-muted">
-                    {distribution.other} {distribution.other === 1 ? 'word is' : 'words are'} not shown because{' '}
-                    {distribution.other === 1 ? 'its' : 'their'} mastery is empty or outside 0 to 10.
-                  </p>
-                )}
-              </section>
+            <div className={fsrsOnly ? 'grid gap-6' : 'grid gap-6 lg:grid-cols-2'}>
+              {!fsrsOnly && (
+                <section className={`${CARD} p-5`}>
+                  <BarChart
+                    title="Words at each mastery level"
+                    unit={['word', 'words']}
+                    categoryLabel="Mastery"
+                    data={distribution.buckets.map((bucket) => ({
+                      key: String(bucket.mastery),
+                      tick: String(bucket.mastery),
+                      label: `Mastery ${bucket.mastery}`,
+                      value: bucket.count,
+                    }))}
+                  />
+                  {distribution.other > 0 && (
+                    <p className="mt-2 text-xs text-muted">
+                      {distribution.other} {distribution.other === 1 ? 'word is' : 'words are'} not shown because{' '}
+                      {distribution.other === 1 ? 'its' : 'their'} mastery is empty or outside 0 to 10.
+                    </p>
+                  )}
+                </section>
+              )}
 
               <section className={`${CARD} p-5`}>
                 <BarChart
@@ -488,7 +628,11 @@ export function DashboardPage() {
                         <span className="hidden shrink-0 sm:block">
                           <StatusBadge status={entry.reviewStatus} />
                         </span>
-                        <MasteryPill mastery={entry.mastery} />
+                        {entry.memory !== undefined ? (
+                          <StrengthPill memory={entry.memory} compact language={language} />
+                        ) : (
+                          <MasteryPill mastery={entry.mastery} />
+                        )}
                         <span className="w-16 shrink-0 text-right text-xs text-muted">{formatDate(entry.dateAdded, 'short')}</span>
                       </button>
                     </li>
@@ -504,9 +648,15 @@ export function DashboardPage() {
               <Link to={buildHref(ROUTES.bank, { status: 'overdue' })} className={BUTTON_SECONDARY}>
                 View overdue
               </Link>
-              <Link to={buildHref(ROUTES.bank, { status: 'mastered' })} className={BUTTON_SECONDARY}>
-                Browse mastered
-              </Link>
+              {fsrsOnly ? (
+                <Link to={buildHref(ROUTES.bank, { status: 'archived' })} className={BUTTON_SECONDARY}>
+                  Archived words
+                </Link>
+              ) : (
+                <Link to={buildHref(ROUTES.bank, { status: 'mastered' })} className={BUTTON_SECONDARY}>
+                  Browse mastered
+                </Link>
+              )}
               <Link
                 to={buildHref(ROUTES.bank, { from: addDays(today, -(RECENT_DAYS - 1)), to: today })}
                 className={BUTTON_SECONDARY}

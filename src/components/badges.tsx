@@ -1,5 +1,6 @@
-import type { VocabularyEntry } from '../../shared/api.js';
+import type { MemoryStrength, VocabularyEntry } from '../../shared/api.js';
 import { daysBetween, type IsoDate } from '../../shared/dates.js';
+import { pick, type UiLanguage } from '../lib/i18n.js';
 import type { ReviewStatus } from '../../shared/vocabulary.js';
 import { missingFields, MISSING_LABELS } from '../lib/bank-query.js';
 import { Icon } from './Icon.js';
@@ -42,6 +43,85 @@ export function MasteryPill({ mastery }: { mastery: number | null }) {
       {mastery === null ? '–' : mastery}
       <span className="sr-only">{mastery === null ? ' no mastery' : ' of 10 mastery'}</span>
     </span>
+  );
+}
+
+const STRENGTH_TONE: Record<MemoryStrength['label'], string> = {
+  New: 'border-line text-muted',
+  Learning: 'border-line-strong text-ink',
+  Familiar: 'border-accent/35 bg-accent-soft/50 text-accent',
+  Strong: 'border-accent/50 bg-accent-soft text-accent',
+  Master: 'border-accent bg-accent text-on-accent',
+};
+
+const STRENGTH_TITLE = {
+  vi: 'Ước lượng sức nhớ từ FSRS. Chỉ số này không quyết định ngày ôn.',
+  en: 'Estimated from FSRS. This index never decides when a word is due.',
+} as const;
+
+/**
+ * Memory strength, the display-only scale derived from FSRS stability. It is
+ * shown wherever a word has FSRS state; older mastery-era data keeps MasteryPill.
+ */
+export function StrengthPill({
+  memory,
+  compact = false,
+  needsReview = false,
+  language = 'en',
+  className = '',
+}: {
+  memory: Pick<MemoryStrength, 'level' | 'label'>;
+  /** The level and band without the "Sức nhớ" prefix, for dense tables. */
+  compact?: boolean;
+  /** A quiet arrow after a drop in strength; never a warning colour. */
+  needsReview?: boolean;
+  language?: UiLanguage;
+  className?: string;
+}) {
+  const prefix = pick(language, 'Memory strength', 'Sức nhớ');
+  return (
+    <span
+      className={`inline-flex min-w-0 items-center gap-1.5 ${className}`}
+      title={`${pick(language, prefix, prefix)} ${memory.level}/10 · ${memory.label}. ${STRENGTH_TITLE[language]}`}
+    >
+      <span
+        className={`inline-flex items-center gap-1 whitespace-nowrap rounded-full border px-2 py-0.5 text-xs font-semibold tabular-nums ${STRENGTH_TONE[memory.label]}`}
+      >
+        <span className="sr-only">{prefix} </span>
+        <span>
+          {memory.level}/10{!compact && ` · ${memory.label}`}
+        </span>
+        {compact && <span className="font-medium">{memory.label}</span>}
+      </span>
+      {needsReview && (
+        <span className="whitespace-nowrap text-[0.6875rem] font-medium text-muted">
+          <span aria-hidden="true">↓ </span>
+          {pick(language, 'needs review', 'cần ôn lại')}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Ten quiet segments for the detail panel: one filled per strength level. */
+export function StrengthMeter({ memory, language = 'en' }: { memory: Pick<MemoryStrength, 'level' | 'percent'>; language?: UiLanguage }) {
+  return (
+    <div
+      role="meter"
+      aria-label={pick(language, 'Memory strength', 'Sức nhớ')}
+      aria-valuemin={1}
+      aria-valuemax={10}
+      aria-valuenow={memory.level}
+      className="flex gap-1"
+    >
+      {Array.from({ length: 10 }, (_, index) => (
+        <span
+          key={index}
+          aria-hidden="true"
+          className={`h-1.5 flex-1 rounded-full ${index < memory.level ? 'bg-accent' : 'bg-line-strong'}`}
+        />
+      ))}
+    </div>
   );
 }
 

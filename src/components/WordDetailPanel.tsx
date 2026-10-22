@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { FIELD_LIMITS, type UpdateEntryInput, type VocabularyEntry } from '../../shared/api.js';
 import { isIsoDate } from '../../shared/dates.js';
-import { useApp, useVocabulary } from '../app-context.js';
+import { useApp, useUiLanguage, useVocabulary } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
+import { pick } from '../lib/i18n.js';
 import { MISSING_LABELS, missingFields } from '../lib/bank-query.js';
-import { MasteryPill, StatusBadge, formatDate, relativeDay } from './badges.js';
+import { MasteryPill, StatusBadge, StrengthMeter, StrengthPill, formatDate, relativeDay } from './badges.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { Field, describedBy } from './Field.js';
 import { Icon } from './Icon.js';
@@ -74,6 +75,7 @@ function validate(draft: Draft, checkSchedule: boolean): DraftErrors {
  */
 export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const { api, vocabulary, toasts } = useApp();
+  const language = useUiLanguage();
   // Subscribing also loads the vocabulary if this panel was opened from a direct link.
   const loaded = useVocabulary();
   const cached = loaded.entries.find((entry) => entry.id === entryId) ?? null;
@@ -190,10 +192,12 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
   const save = (allowDuplicate: boolean) => {
     if (entry === null || draft === null || saving) return;
     const before = toDraft(entry);
+    // Under FSRS the schedule is read-only: its dates come from saved answers.
+    const scheduleReadOnly = entry.memory !== undefined || entry.scheduledBy === 'fsrs';
     // An edit to the schedule counts whether or not its section is still open: closing the
     // section must neither throw the edit away unseen nor let it through unchecked.
-    const editedSchedule = scheduleEdited(draft, before);
-    const found = validate(draft, scheduleOpen || editedSchedule);
+    const editedSchedule = !scheduleReadOnly && scheduleEdited(draft, before);
+    const found = validate(draft, !scheduleReadOnly && (scheduleOpen || editedSchedule));
     setErrors(found);
     if (Object.keys(found).length > 0) {
       // A problem in the schedule fields has to be on screen to be put right.
@@ -364,10 +368,64 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
               )}
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={entry.reviewStatus} />
-                <span className="flex items-center gap-1.5 text-sm text-muted">
-                  Mastery <MasteryPill mastery={entry.mastery} />
-                </span>
+                {entry.memory === undefined && (
+                  <span className="flex items-center gap-1.5 text-sm text-muted">
+                    Mastery <MasteryPill mastery={entry.mastery} />
+                  </span>
+                )}
               </div>
+
+              {entry.memory !== undefined && (
+                <section aria-label={pick(language, 'Memory strength', 'Sức nhớ')} className="rounded-xl border border-line bg-paper p-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <StrengthPill memory={entry.memory} language={language} />
+                    {entry.memory.retrievability !== null && (
+                      <span className="text-xs text-muted">
+                        {pick(language, 'Estimated recall now', 'Khả năng nhớ hiện tại')}{' '}
+                        <strong className="font-semibold tabular-nums text-ink">
+                          {Math.round(entry.memory.retrievability * 100)}%
+                        </strong>
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-2">
+                    <StrengthMeter memory={entry.memory} language={language} />
+                  </div>
+                  <dl className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                    <MemoryFact
+                      label={pick(language, 'Stability', 'Độ bền')}
+                      value={entry.memory.stabilityDays === null ? '—' : `${formatNumber(entry.memory.stabilityDays)} ${pick(language, 'days', 'ngày')}`}
+                    />
+                    <MemoryFact
+                      label={pick(language, 'Difficulty', 'Độ khó')}
+                      value={entry.memory.difficulty === null ? '—' : formatNumber(entry.memory.difficulty)}
+                    />
+                    <MemoryFact
+                      label={pick(language, 'Reviewed', 'Đã ôn')}
+                      value={`${entry.memory.reps}×`}
+                    />
+                    <MemoryFact
+                      label={pick(language, 'Lapses', 'Quên')}
+                      value={String(entry.memory.lapses)}
+                    />
+                    <MemoryFact
+                      label={pick(language, 'Last review', 'Ôn gần nhất')}
+                      value={entry.memory.lastReview === null ? '—' : formatDate(entry.memory.lastReview.slice(0, 10), 'short')}
+                    />
+                    <MemoryFact
+                      label={pick(language, 'Next due', 'Đến hạn tiếp')}
+                      value={entry.memory.nextIntervalDays === null ? '—' : `${entry.memory.nextIntervalDays} ${pick(language, 'days', 'ngày')}`}
+                    />
+                  </dl>
+                  <p className="mt-2 text-[0.6875rem] leading-relaxed text-faint">
+                    {pick(
+                      language,
+                      'Estimated from FSRS. This index never decides when a word is due.',
+                      'Ước lượng sức nhớ từ FSRS. Chỉ số này không quyết định ngày ôn.',
+                    )}
+                  </p>
+                </section>
+              )}
 
               <dl className="flex flex-col gap-5">
                 <DetailRow label="Vietnamese meaning" value={entry.meaning} />
@@ -376,7 +434,13 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                 <div className="grid grid-cols-2 gap-4">
                   <DetailRow label="Date added" value={entry.dateAdded === null ? null : formatDate(entry.dateAdded)} />
                   <DetailRow
-                    label={entry.scheduledBy === 'fsrs' ? 'Review date (set by FSRS)' : 'Review date'}
+                    label={
+                      entry.memory !== undefined
+                        ? pick(language, 'Next due (set by FSRS)', 'Đến hạn (FSRS đặt)')
+                        : entry.scheduledBy === 'fsrs'
+                          ? 'Review date (set by FSRS)'
+                          : 'Review date'
+                    }
                     value={
                       entry.reviewDate === null
                         ? null
@@ -463,69 +527,67 @@ export function WordDetailPanel({ entryId, onClose }: WordDetailPanelProps) {
                 />
               </Field>
 
-              <div className="rounded-xl border border-line">
-                <button
-                  type="button"
-                  aria-expanded={scheduleOpen}
-                  onClick={() => setScheduleOpen((open) => !open)}
-                  className="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-left text-sm font-medium"
-                >
-                  <span>Review schedule</span>
-                  <span className="text-xs font-normal text-muted">
-                    {entry !== null && scheduleEdited(draft, toDraft(entry))
-                      ? 'Changed: will be saved'
-                      : scheduleOpen
-                        ? 'Nothing changed yet'
-                        : 'Not changed unless opened'}
-                  </span>
-                </button>
-                {scheduleOpen && (
-                  <div className="flex flex-col gap-3 border-t border-line p-3">
-                    <p className="text-xs text-muted">
-                      Mastery and the review date are normally set by reviewing. Changing them here overrides the
-                      schedule for this word.
-                    </p>
-                    <div className="grid grid-cols-2 gap-3">
-                      <Field id="edit-mastery" label="Mastery" error={errors.mastery}>
-                        <input
-                          id="edit-mastery"
-                          type="number"
-                          min={0}
-                          max={10}
-                          step={1}
-                          inputMode="numeric"
-                          className={INPUT}
-                          value={draft.mastery}
-                          onChange={(event) => change('mastery', event.target.value)}
-                          aria-describedby={describedBy('edit-mastery', null, errors.mastery)}
-                        />
-                      </Field>
-                      <Field id="edit-review-date" label="Review date" error={errors.reviewDate}>
-                        <input
-                          id="edit-review-date"
-                          type="date"
-                          className={INPUT}
-                          value={draft.reviewDate}
-                          // FSRS works this date out from the answers; there is nothing honest to store for a typed one.
-                          disabled={entry.scheduledBy === 'fsrs'}
-                          onChange={(event) => change('reviewDate', event.target.value)}
-                          aria-describedby={describedBy(
-                            'edit-review-date',
-                            entry.scheduledBy === 'fsrs' ? true : null,
-                            errors.reviewDate,
-                          )}
-                        />
-                      </Field>
-                    </div>
-                    {entry.scheduledBy === 'fsrs' && (
-                      <p id="edit-review-date-hint" className="text-xs text-muted">
-                        FSRS sets this word’s review date from your answers, so it cannot be changed by hand. To set
-                        dates yourself, go back to the mastery schedule in Settings.
+              {entry.memory === undefined && entry.scheduledBy !== 'fsrs' ? (
+                <div className="rounded-xl border border-line">
+                  <button
+                    type="button"
+                    aria-expanded={scheduleOpen}
+                    onClick={() => setScheduleOpen((open) => !open)}
+                    className="flex w-full cursor-pointer items-center justify-between gap-3 px-3 py-2.5 text-left text-sm font-medium"
+                  >
+                    <span>Review schedule</span>
+                    <span className="text-xs font-normal text-muted">
+                      {entry !== null && scheduleEdited(draft, toDraft(entry))
+                        ? 'Changed: will be saved'
+                        : scheduleOpen
+                          ? 'Nothing changed yet'
+                          : 'Not changed unless opened'}
+                    </span>
+                  </button>
+                  {scheduleOpen && (
+                    <div className="flex flex-col gap-3 border-t border-line p-3">
+                      <p className="text-xs text-muted">
+                        Mastery and the review date are normally set by reviewing. Changing them here overrides the
+                        schedule for this word.
                       </p>
-                    )}
-                  </div>
-                )}
-              </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <Field id="edit-mastery" label="Mastery" error={errors.mastery}>
+                          <input
+                            id="edit-mastery"
+                            type="number"
+                            min={0}
+                            max={10}
+                            step={1}
+                            inputMode="numeric"
+                            className={INPUT}
+                            value={draft.mastery}
+                            onChange={(event) => change('mastery', event.target.value)}
+                            aria-describedby={describedBy('edit-mastery', null, errors.mastery)}
+                          />
+                        </Field>
+                        <Field id="edit-review-date" label="Review date" error={errors.reviewDate}>
+                          <input
+                            id="edit-review-date"
+                            type="date"
+                            className={INPUT}
+                            value={draft.reviewDate}
+                            onChange={(event) => change('reviewDate', event.target.value)}
+                            aria-describedby={describedBy('edit-review-date', null, errors.reviewDate)}
+                          />
+                        </Field>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="rounded-xl border border-line bg-paper px-3 py-2.5 text-xs leading-relaxed text-muted">
+                  {pick(
+                    language,
+                    'Memory strength and the next due date come from FSRS and your saved answers. They cannot be set by hand.',
+                    'Sức nhớ và ngày đến hạn do FSRS và các câu trả lời đã lưu quyết định. Không thể sửa tay.',
+                  )}
+                </p>
+              )}
 
               {duplicateOf !== null && (
                 <div role="alert" className="rounded-xl border border-warn-ink/30 bg-warn-soft p-3 text-sm text-warn-ink">
@@ -618,4 +680,19 @@ function DetailRow({ label, value }: { label: string; value: string | null }) {
       </dd>
     </div>
   );
+}
+
+function MemoryFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-faint">{label}</dt>
+      <dd className="m-0 font-medium tabular-nums text-ink">{value}</dd>
+    </div>
+  );
+}
+
+const numberFormat = new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 });
+
+function formatNumber(value: number): string {
+  return numberFormat.format(value);
 }

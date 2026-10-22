@@ -1,6 +1,6 @@
 import { useCallback, useId } from 'react';
 import { STUDY_MODE_LABELS } from '../../shared/study-modes.js';
-import { useApp } from '../app-context.js';
+import { useApp, useVocabulary } from '../app-context.js';
 import { useRemote } from '../hooks/useRemote.js';
 import { ROUTES, buildHref } from '../lib/router.js';
 import { Link } from './Link.js';
@@ -16,14 +16,15 @@ const HEADING = 'text-xs font-medium uppercase tracking-[0.12em] text-muted';
  */
 export function PracticeMastery({ wordId }: { wordId: string }) {
   const { api } = useApp();
+  const fsrsOnly = useVocabulary().meta?.fsrsOnly === true;
   const headingId = useId();
   const load = useCallback(() => api.fetchPracticeMastery(wordId), [api, wordId]);
-  const mastery = useRemote(load, 'Could not load this word’s practice mastery.');
+  const mastery = useRemote(load, fsrsOnly ? 'Could not load this word’s practice score.' : 'Could not load this word’s practice mastery.');
 
   if (mastery.status === 'loading') {
     return (
       <p role="status" className="border-t border-line pt-4 text-sm text-muted">
-        Loading practice mastery…
+        {fsrsOnly ? 'Loading practice score…' : 'Loading practice mastery…'}
       </p>
     );
   }
@@ -47,7 +48,7 @@ export function PracticeMastery({ wordId }: { wordId: string }) {
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-2 border-t border-line pt-4">
       <h3 id={headingId} className={HEADING}>
-        Practice mastery
+        {fsrsOnly ? 'Practice score' : 'Practice mastery'}
       </h3>
       <ul className="m-0 flex list-none flex-col gap-1.5 p-0">
         {modes.map(({ mode, mastery: level }) => (
@@ -55,7 +56,7 @@ export function PracticeMastery({ wordId }: { wordId: string }) {
             <span className="w-32 shrink-0">{STUDY_MODE_LABELS[mode]}</span>
             <span
               role="meter"
-              aria-label={`${STUDY_MODE_LABELS[mode]} practice mastery`}
+              aria-label={`${STUDY_MODE_LABELS[mode]} ${fsrsOnly ? 'practice score' : 'practice mastery'}`}
               aria-valuemin={0}
               aria-valuemax={max}
               aria-valuenow={level}
@@ -72,7 +73,8 @@ export function PracticeMastery({ wordId }: { wordId: string }) {
       </ul>
       <p className={HELP}>
         One point for each correct practice answer in that mode, up to {max}. A wrong answer changes nothing. This is
-        separate from the mastery above: it never decides when the word is due, and reviewing does not change it.
+        separate from {fsrsOnly ? 'memory strength' : 'the mastery'} above: it never decides when the word is due, and
+        reviewing does not change it.
         {!practised && (
           <>
             {' '}

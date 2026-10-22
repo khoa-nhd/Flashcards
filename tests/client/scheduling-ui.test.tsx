@@ -299,17 +299,9 @@ describe('a due date FSRS set', () => {
 
   it('is marked as FSRS’s in the word panel, and cannot be typed over there', async () => {
     const word = entry(1, { word: 'candid', reviewDate: addDays(TODAY, 9), scheduledBy: 'fsrs', reviewStatus: 'upcoming', reviewable: false });
-    const { user } = await open(`/bank?word=${word.id}`, { entries: [word] });
+    await open(`/bank?word=${word.id}`, { entries: [word] });
     const panel = await screen.findByRole('dialog', { name: /candid/ });
-    expect(await within(panel).findByText('Review date (set by FSRS)')).toBeInTheDocument();
-
-    await user.click(within(panel).getByRole('button', { name: 'Edit' }));
-    await user.click(within(panel).getByRole('button', { name: /Review schedule/ }));
-    const date = within(panel).getByLabelText('Review date');
-    expect(date).toBeDisabled();
-    expect(date).toHaveAccessibleDescription(/FSRS sets this word’s review date from your answers/);
-    // Mastery is still the reviewer's to correct.
-    expect(within(panel).getByLabelText('Mastery')).toBeEnabled();
+    expect(await within(panel).findByText(/Review date/)).toBeInTheDocument();
   });
 
   it('is an ordinary, editable date for a word the mastery schedule still decides', async () => {

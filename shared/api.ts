@@ -788,6 +788,8 @@ export const vocabularyListResponseSchema = z.object({
   mode: dataModeSchema,
   /** False when the app may not change stored data; adding, editing and deleting are then unavailable. */
   writesEnabled: z.boolean(),
+  /** True when FSRS is the only schedule; the interface then hides mastery entirely. */
+  fsrsOnly: z.boolean().default(false),
   skipped: z.array(skippedRecordSchema),
   /** What a new word starts with, so the Add form can show it rather than hide it. */
   defaults: z.object({
@@ -864,6 +866,11 @@ export const importRequestSchema = z.strictObject({
    * the next N tomorrow, and so on. Omitted means every word is due today.
    */
   wordsPerDay: z.number().int().min(1).max(1000).optional(),
+  /**
+   * Where this batch starts in the original list. Sending a large import in
+   * several requests keeps the same day boundaries when this is passed.
+   */
+  startIndex: z.number().int().min(0).optional(),
 });
 
 export const importResponseSchema = z.object({
@@ -1068,8 +1075,10 @@ export type UpdateEntryInput = z.input<typeof updateEntryRequestSchema>;
 export type AppConfigResponse = z.infer<typeof appConfigResponseSchema>;
 export type AccountSettings = z.infer<typeof accountSettingsSchema>;
 export type StudyGoals = z.infer<typeof studyGoalsSchema>;
+export type UpdateStudyGoalsInput = z.input<typeof updateStudyGoalsRequestSchema>;
 export type StudyGoalsResponse = z.infer<typeof studyGoalsResponseSchema>;
 export type ArchiveEntriesRequest = z.infer<typeof archiveEntriesRequestSchema>;
+export type ArchiveEntriesResponse = z.infer<typeof archiveEntriesResponseSchema>;
 
 // ---- AI Chat ----
 

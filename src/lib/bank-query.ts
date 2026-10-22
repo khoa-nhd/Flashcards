@@ -7,11 +7,21 @@ import { RECENTLY_ADDED_DAYS, type VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates, isIsoDate, type IsoDate } from '../../shared/dates.js';
 import { matchesQuery } from '../../shared/text.js';
 import type { ReviewStatus, TextFieldKey } from '../../shared/vocabulary.js';
+import { STRENGTH_BANDS, type StrengthBand } from '../../shared/scheduler/strength.js';
 import { SORT_KEYS, type SortDirection, type SortKey } from './settings.js';
 import type { TrueMasteryEntry } from '../hooks/useTrueMastery.js';
 
 /** `learning` is every word that is not yet mastered and has a usable mastery. */
-export const STATUS_FILTERS = ['due_today', 'overdue', 'upcoming', 'mastered', 'learning', 'unscheduled'] as const;
+export const STATUS_FILTERS = [
+  'due_today',
+  'overdue',
+  'upcoming',
+  'mastered',
+  'learning',
+  'new',
+  'archived',
+  'unscheduled',
+] as const;
 export type StatusFilter = (typeof STATUS_FILTERS)[number];
 
 export const STATUS_LABELS: Record<StatusFilter, string> = {
@@ -20,8 +30,14 @@ export const STATUS_LABELS: Record<StatusFilter, string> = {
   upcoming: 'Upcoming',
   mastered: 'Completed (mastered)',
   learning: 'Learning',
+  new: 'New',
+  archived: 'Archived',
   unscheduled: 'No review date',
 };
+
+/** The five memory-strength bands, for the Bank's band filter. */
+export const STRENGTH_FILTERS = STRENGTH_BANDS;
+export type StrengthFilter = StrengthBand;
 
 export const MISSING_LABELS: Record<TextFieldKey, string> = {
   meaning: 'Missing Vietnamese meaning',
@@ -34,6 +50,8 @@ export interface BankQuery {
   status: StatusFilter | null;
   /** An exact mastery level. */
   mastery: number | null;
+  /** An exact memory-strength band, under FSRS. */
+  strengthBand: StrengthBand | null;
   addedFrom: IsoDate | null;
   addedTo: IsoDate | null;
   /** A descriptive field that must be empty. A data-completeness check, not a review result. */
@@ -48,7 +66,7 @@ export interface BankDefaults {
   direction: SortDirection;
 }
 
-const LEARNING: readonly ReviewStatus[] = ['due_today', 'overdue', 'upcoming', 'unscheduled'];
+const LEARNING: readonly ReviewStatus[] = ['due_today', 'overdue', 'upcoming', 'unscheduled', 'new'];
 
 const oneOf = <T extends string>(value: string | null, allowed: readonly T[]): T | null =>
   value !== null && (allowed as readonly string[]).includes(value) ? (value as T) : null;
@@ -65,6 +83,7 @@ export function parseBankQuery(params: URLSearchParams, defaults: BankDefaults):
     search: params.get('q') ?? '',
     status: oneOf(params.get('status'), STATUS_FILTERS),
     mastery: params.has('mastery') && Number.isInteger(mastery) && mastery >= 0 && mastery <= 10 ? mastery : null,
+    strengthBand: oneOf(params.get('band'), STRENGTH_FILTERS),
     addedFrom: date('from'),
     addedTo: date('to'),
     missing: oneOf(params.get('missing'), ['meaning', 'definition', 'example'] as const),
@@ -80,6 +99,7 @@ export function bankQueryParams(query: BankQuery, defaults: BankDefaults): Recor
     q: query.search.trim() === '' ? null : query.search,
     status: query.status,
     mastery: query.mastery,
+    band: query.strengthBand ?? null,
     from: query.addedFrom,
     to: query.addedTo,
     missing: query.missing,
@@ -94,15 +114,23 @@ export function hasActiveFilters(query: BankQuery): boolean {
     query.search.trim() !== '' ||
     query.status !== null ||
     query.mastery !== null ||
+    (query.strengthBand ?? null) !== null ||
     query.addedFrom !== null ||
     query.addedTo !== null ||
     query.missing !== null
   );
 }
 
-type Filters = Pick<BankQuery, 'status' | 'mastery' | 'addedFrom' | 'addedTo' | 'missing'>;
+type Filters = Pick<BankQuery, 'status' | 'mastery' | 'strengthBand' | 'addedFrom' | 'addedTo' | 'missing'>;
 
-const NO_FILTERS: Filters = { status: null, mastery: null, addedFrom: null, addedTo: null, missing: null };
+const NO_FILTERS: Filters = {
+  status: null,
+  mastery: null,
+  strengthBand: null,
+  addedFrom: null,
+  addedTo: null,
+  missing: null,
+};
 
 /** How many days back "Recently added" reaches, today included. */
 export const RECENT_DAYS = RECENTLY_ADDED_DAYS;
@@ -119,7 +147,9 @@ export const BANK_PRESETS: BankPreset[] = [
   { key: 'due_today', label: 'Due today', filters: () => ({ ...NO_FILTERS, status: 'due_today' }) },
   { key: 'overdue', label: 'Overdue', filters: () => ({ ...NO_FILTERS, status: 'overdue' }) },
   { key: 'learning', label: 'Learning', filters: () => ({ ...NO_FILTERS, status: 'learning' }) },
+  { key: 'new', label: 'New', filters: () => ({ ...NO_FILTERS, status: 'new' }) },
   { key: 'mastered', label: 'Mastered', filters: () => ({ ...NO_FILTERS, status: 'mastered' }) },
+  { key: 'archived', label: 'Archived', filters: () => ({ ...NO_FILTERS, status: 'archived' }) },
   {
     key: 'recent',
     label: 'Recently added',
@@ -134,7 +164,9 @@ export function activePreset(query: BankQuery, today: IsoDate): string | null {
   if (query.search.trim() !== '') return null;
   const match = BANK_PRESETS.find((preset) => {
     const filters = preset.filters(today);
-    return (Object.keys(filters) as Array<keyof Filters>).every((key) => filters[key] === query[key]);
+    return (Object.keys(filters) as Array<keyof Filters>).every(
+      (key) => (filters[key] ?? null) === (query[key] ?? null),
+    );
   });
   return match?.key ?? null;
 }
@@ -145,7 +177,9 @@ export function missingFields(entry: VocabularyEntry): TextFieldKey[] {
 }
 
 function matchesStatus(entry: VocabularyEntry, status: StatusFilter): boolean {
-  return status === 'learning' ? LEARNING.includes(entry.reviewStatus) : entry.reviewStatus === status;
+  if (status === 'learning') return LEARNING.includes(entry.reviewStatus);
+  if (status === 'archived') return entry.reviewStatus === 'suspended' || entry.suspended === true;
+  return entry.reviewStatus === status;
 }
 
 export function filterEntries(entries: readonly VocabularyEntry[], query: BankQuery): VocabularyEntry[] {
@@ -154,6 +188,7 @@ export function filterEntries(entries: readonly VocabularyEntry[], query: BankQu
     if (!matchesQuery(query.search, [entry.word, entry.meaning, entry.definition, entry.example])) return false;
     if (query.status !== null && !matchesStatus(entry, query.status)) return false;
     if (query.mastery !== null && entry.mastery !== query.mastery) return false;
+    if ((query.strengthBand ?? null) !== null && entry.memory?.label !== query.strengthBand) return false;
     if (query.missing !== null && entry[query.missing] !== null) return false;
     if (query.addedFrom !== null || query.addedTo !== null) {
       // A word with no Date Added cannot be placed in a date range.
@@ -198,8 +233,29 @@ export function sortEntries(
       if (masteryA === masteryB) return byWord(a, b);
       return sign * (masteryA - masteryB);
     }
-    const left = a[sort];
-    const right = b[sort];
+    let left: number | string | null;
+    let right: number | string | null;
+    switch (sort) {
+      case 'strength':
+        left = a.memory?.level ?? null;
+        right = b.memory?.level ?? null;
+        break;
+      case 'due':
+        left = a.dueDate ?? a.reviewDate;
+        right = b.dueDate ?? b.reviewDate;
+        break;
+      case 'reps':
+        left = a.memory?.reps ?? null;
+        right = b.memory?.reps ?? null;
+        break;
+      case 'lapses':
+        left = a.memory?.lapses ?? null;
+        right = b.memory?.lapses ?? null;
+        break;
+      default:
+        left = a[sort];
+        right = b[sort];
+    }
     if (left === null || right === null) {
       if (left === right) return byWord(a, b);
       return left === null ? 1 : -1;

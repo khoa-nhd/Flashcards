@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import type { PracticeResponse } from '../../shared/api.js';
+import { useVocabulary } from '../app-context.js';
 import {
   PRACTICE_MASTERY_MAX,
   STUDY_MODE_LABELS,
@@ -232,6 +233,7 @@ export interface VerdictProps {
  * has confirmed it yet. Focus lands on the button so Enter continues.
  */
 export function Verdict({ mode, word, verdict, last, onNext }: VerdictProps) {
+  const fsrsOnly = useVocabulary().meta?.fsrsOnly === true;
   const headline = verdict.typed !== null ? TYPED_TEXT[verdict.typed] : verdict.correct ? 'Correct.' : 'Not quite.';
   // For recognition the right choice is already marked above; elsewhere a miss shows the answer.
   const answer = !verdict.correct && mode !== 'recognition' ? verdict.expected : null;
@@ -252,7 +254,8 @@ export function Verdict({ mode, word, verdict, last, onNext }: VerdictProps) {
         )}
         {verdict.outcome !== 'pending' && verdict.modeMastery !== null && (
           <p className="mt-0.5 text-xs">
-            {STUDY_MODE_LABELS[mode]} mastery for this word: {verdict.modeMastery} of {PRACTICE_MASTERY_MAX}.
+            {STUDY_MODE_LABELS[mode]} {fsrsOnly ? 'practice score' : 'mastery'} for this word: {verdict.modeMastery} of{' '}
+            {PRACTICE_MASTERY_MAX}.
           </p>
         )}
         {verdict.outcome === 'dry_run' && <p className="mt-0.5 text-xs">Not recorded.</p>}

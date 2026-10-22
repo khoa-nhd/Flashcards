@@ -19,6 +19,7 @@ import { CalendarPage } from './pages/CalendarPage.js';
 import { ChatPage } from './pages/ChatPage.js';
 import { CollectionsPage } from './pages/CollectionsPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
+import { HelpPage } from './pages/HelpPage.js';
 import { ImportPage } from './pages/ImportPage.js';
 import { InsightsPage } from './pages/InsightsPage.js';
 import { PracticePage } from './pages/PracticePage.js';
@@ -39,6 +40,7 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   weak: { title: 'Weak words', render: () => <WeakWordsPage /> },
   insights: { title: 'Insights', render: () => <InsightsPage /> },
   settings: { title: 'Settings', render: () => <SettingsPage /> },
+  help: { title: 'Help', render: () => <HelpPage /> },
 };
 
 export interface AppProps {

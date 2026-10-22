@@ -58,7 +58,14 @@ interface Report {
   stopped: string | null;
   /** Rows not sent or not confirmed, for another attempt. */
   remaining: ImportItem[];
+  /** The spreading chosen for this import, kept so a retry continues it. */
+  wordsPerDay: number | null;
+  /** How many rows were already processed, so a retry keeps the same day boundaries. */
+  spreadOffset: number;
 }
+
+/** A list over one default day's worth is worth asking about, not silently flooding the queue. */
+const SPREAD_ASK_ABOVE = 20;
 
 /**
  * Bringing in a list of words. Nothing is sent anywhere until the last step:
@@ -69,6 +76,7 @@ export function ImportPage() {
   const { api, vocabulary } = useApp();
   const state = useVocabulary();
   const canWrite = state.meta?.writesEnabled ?? false;
+  const fsrsOnly = state.meta?.fsrsOnly === true;
 
   const [text, setText] = useState('');
   const [fileName, setFileName] = useState<string | null>(null);
@@ -82,6 +90,10 @@ export function ImportPage() {
   const [forced, setForced] = useState<ReadonlySet<number>>(new Set());
   const [sending, setSending] = useState<{ done: number; total: number } | null>(null);
   const [report, setReport] = useState<Report | null>(null);
+  const [spreadPrompt, setSpreadPrompt] = useState(false);
+  const [spread, setSpread] = useState(true);
+  const [wordsPerDay, setWordsPerDay] = useState('20');
+  const [spreadError, setSpreadError] = useState<string | null>(null);
   /** One request id per line, kept for as long as this list is on screen, so a retry never imports a row twice. */
   const requestIds = useRef(new Map<number, string>());
 
@@ -115,6 +127,8 @@ export function ImportPage() {
     setMapping(guessMapping(width, next.header ?? (headed ? first : null)));
     setForced(new Set());
     setReport(null);
+    setSpreadPrompt(false);
+    setSpreadError(null);
     requestIds.current = new Map();
   };
 
@@ -170,6 +184,8 @@ export function ImportPage() {
     setForced(new Set());
     setReadError(null);
     setSheetNote(null);
+    setSpreadPrompt(false);
+    setSpreadError(null);
   };
 
   const toItems = (rows: readonly CheckedRow[]): ImportItem[] =>
@@ -187,7 +203,7 @@ export function ImportPage() {
       };
     });
 
-  const send = async (items: ImportItem[], earlier: Report | null) => {
+  const send = async (items: ImportItem[], earlier: Report | null, spreadPerDay = earlier?.wordsPerDay ?? null) => {
     const result: Report = {
       leftOut: earlier?.leftOut ?? checked.length - items.length,
       imported: earlier?.imported ?? 0,
@@ -195,14 +211,17 @@ export function ImportPage() {
       refused: [...(earlier?.refused ?? [])],
       stopped: null,
       remaining: [],
+      wordsPerDay: spreadPerDay,
+      spreadOffset: earlier?.spreadOffset ?? 0,
     };
     let done = 0;
+    let offset = result.spreadOffset;
     setSending({ done, total: items.length });
     const chunks = chunkForUpload(items);
     for (const [position, chunk] of chunks.entries()) {
       const rest = () => chunks.slice(position).flat();
       try {
-        const reply = await api.importWords(chunk);
+        const reply = await api.importWords(chunk, spreadPerDay ?? undefined, offset);
         reply.results.forEach((outcome, index) => {
           if (outcome.outcome === 'imported') result.imported += 1;
           else if (outcome.outcome === 'already_imported') result.alreadyImported += 1;
@@ -210,21 +229,46 @@ export function ImportPage() {
         });
         if (reply.stopped !== null) {
           result.stopped = reply.stopped.message;
+          // Rows before the stopping point were processed; the rest continue from there.
+          result.spreadOffset = offset + reply.results.length;
           result.remaining = [...chunk.slice(reply.stopped.index), ...chunks.slice(position + 1).flat()];
           break;
         }
       } catch (cause) {
         result.stopped = cause instanceof ApiError ? cause.message : 'The import could not be sent.';
+        result.spreadOffset = offset;
         result.remaining = rest();
         break;
       }
       done += chunk.length;
+      offset += chunk.length;
+      result.spreadOffset = offset;
       setSending({ done, total: items.length });
     }
     setSending(null);
     setReport(result);
     // The new words belong in every other view straight away.
     if (result.imported > 0) void vocabulary.reload();
+  };
+
+  const askOrImport = () => {
+    if (fsrsOnly && chosen.length > SPREAD_ASK_ABOVE) {
+      setSpreadError(null);
+      setSpreadPrompt(true);
+      return;
+    }
+    void send(toItems(chosen), null);
+  };
+
+  const confirmImport = () => {
+    const perDay = Number(wordsPerDay);
+    if (spread && (!Number.isInteger(perDay) || perDay < 1 || perDay > 1000)) {
+      setSpreadError('Choose a whole number from 1 to 1000 words a day.');
+      return;
+    }
+    setSpreadError(null);
+    setSpreadPrompt(false);
+    void send(toItems(chosen), null, spread ? perDay : undefined);
   };
 
   const setColumn = (index: number, field: ImportField | null) =>
@@ -282,9 +326,16 @@ export function ImportPage() {
                   ))}
                 </ul>
               )}
+              {report.wordsPerDay !== null && (
+                <p className={HELP}>
+                  New words were spread at {report.wordsPerDay} a day, starting with today. Change the daily pace
+                  anytime from Settings or the dashboard goals.
+                </p>
+              )}
               <p className={HELP}>
-                Imported words start like any newly added word: at the starting mastery, with no review history. Nothing
-                was merged into, or changed on, a word you already had.
+                {fsrsOnly
+                  ? 'Imported words start as new: no mastery, no review history, and due on their assigned day. Nothing was merged into, or changed on, a word you already had.'
+                  : 'Imported words start like any newly added word: at the starting mastery, with no review history. Nothing was merged into, or changed on, a word you already had.'}
               </p>
               <div className="flex flex-wrap gap-2">
                 {report.remaining.length > 0 && (
@@ -342,7 +393,8 @@ export function ImportPage() {
                   CSV or tab-separated text with one word per row, a plain list with one word per line, an Excel file
                   (.xlsx, first sheet only), or a file this app exported. A file is read on this device and is not
                   uploaded. Only the word, meaning, definition, example and date added are used. A mastery or review
-                  date in the file is ignored: an imported word starts as a new one.
+                  date in the file is ignored: an imported word starts as a new one
+                  {fsrsOnly ? ', with FSRS deciding when it comes up.' : '.'}
                 </p>
               </section>
 
@@ -513,12 +565,83 @@ export function ImportPage() {
                     </p>
                   )}
 
+                  {spreadPrompt && (
+                    <div
+                      role="group"
+                      aria-label="Spread this import over several days"
+                      className="flex flex-col gap-3 rounded-xl border border-accent/40 bg-accent-soft/40 p-4"
+                    >
+                      <div>
+                        <p className="text-sm font-semibold text-ink">
+                          This list has {chosen.length} words. Spread them over several days?
+                        </p>
+                        <p className="mt-1 text-xs leading-relaxed text-muted">
+                          A large list all at once would flood the queue. Spread words are still in the Bank right
+                          away; only their first due day changes.
+                        </p>
+                      </div>
+                      <label className="flex items-start gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="spread-import"
+                          className="mt-1 accent-[var(--accent)]"
+                          checked={spread}
+                          onChange={() => setSpread(true)}
+                        />
+                        <span className="flex flex-wrap items-center gap-2">
+                          Yes, about
+                          <input
+                            type="number"
+                            min={1}
+                            max={1000}
+                            inputMode="numeric"
+                            aria-label="New words per day"
+                            className={`${INPUT} w-24`}
+                            value={wordsPerDay}
+                            disabled={!spread}
+                            onChange={(event) => setWordsPerDay(event.target.value)}
+                          />
+                          new words a day
+                        </span>
+                      </label>
+                      <label className="flex items-start gap-2 text-sm">
+                        <input
+                          type="radio"
+                          name="spread-import"
+                          className="mt-1 accent-[var(--accent)]"
+                          checked={!spread}
+                          onChange={() => setSpread(false)}
+                        />
+                        <span>No, make every word due today.</span>
+                      </label>
+                      {spread && (
+                        <p className="text-xs text-muted">
+                          The first {Math.max(1, Number(wordsPerDay) || 0)} are due today, the next on the following
+                          days. You can change the pace later.
+                        </p>
+                      )}
+                      {spreadError !== null && (
+                        <p role="alert" className="text-xs text-bad-ink">
+                          {spreadError}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap gap-2">
+                        <button type="button" className={BUTTON_PRIMARY} onClick={confirmImport}>
+                          Import {count(chosen.length, 'word')}
+                        </button>
+                        <button type="button" className={BUTTON_SECONDARY} onClick={() => setSpreadPrompt(false)}>
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center gap-3">
                     <button
                       type="button"
                       className={BUTTON_PRIMARY}
-                      disabled={!canWrite || chosen.length === 0 || tooMany || sending !== null}
-                      onClick={() => void send(toItems(chosen), null)}
+                      disabled={!canWrite || chosen.length === 0 || tooMany || sending !== null || spreadPrompt}
+                      onClick={askOrImport}
                     >
                       {sending !== null ? `Importing ${sending.done} of ${sending.total}…` : `Import ${count(chosen.length, 'word')}`}
                     </button>
