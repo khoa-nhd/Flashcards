@@ -40,7 +40,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   strength: 'Memory strength',
   due: 'Next due',
   reps: 'Reviews',
-  lapses: 'Lapses',
+  lapses: 'Forgot',
   trueMastery: 'Practice score',
 };
 
