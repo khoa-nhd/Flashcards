@@ -67,10 +67,10 @@ const remember = (id: string, revision: number, extra: Record<string, unknown> =
 });
 
 describe('the schema version Settings reports', () => {
-  it('does not ask for version 15 yet, and reports a database already at 15 as up to date', async () => {
+  it('asks for version 15 now that its screens exist, and reports a database at 15 as up to date', async () => {
     const settings = accountSettingsSchema.parse(await (await call(app, alice, '/api/settings')).json());
     expect(settings.database).toEqual({ version: LATEST_SCHEMA_VERSION, latest: RECOMMENDED_SCHEMA_VERSION });
-    expect(RECOMMENDED_SCHEMA_VERSION).toBe(14);
+    expect(RECOMMENDED_SCHEMA_VERSION).toBe(15);
     expect(settings.database!.version >= settings.database!.latest).toBe(true);
   });
 });
@@ -381,15 +381,15 @@ describe('the two daily goals', () => {
     expect(await db.admin('select * from public.study_days')).toEqual([]);
   });
 
-  it('counts a word brought into study, meets the review goal when nothing is left due, and starts a streak', async () => {
+  it('counts a word added today, meets the review goal when nothing is left due, and starts a streak', async () => {
     expect((await setGoals(alice, { newWords: 1, reviews: 5 })).status).toBe(200);
-    const word = await addWord(alice, 'candid');
     expect(await goalsOf(alice)).toMatchObject({ chosen: true, newWords: { done: 0, met: false }, streak: { current: 0 } });
 
-    await answer(alice, remember(word.id, 0));
+    await addWord(alice, 'candid');
     const goals = await goalsOf(alice);
-    expect(goals.newWords).toEqual({ target: 1, done: 1, remaining: 0, met: true, exhausted: true });
-    // Nothing is due any more, so five reviews are not needed today.
+    // The owner's rule (2026-10-22): adding the word is what counts, not studying it.
+    expect(goals.newWords).toEqual({ target: 1, done: 1, remaining: 0, met: true, exhausted: false });
+    // Nothing is due for review, so five reviews are not needed today.
     expect(goals.reviews).toMatchObject({ target: 5, done: 0, met: true, exhausted: true });
     expect(goals.streak).toEqual({ current: 1, longest: 1, metToday: true });
   });
@@ -409,13 +409,11 @@ describe('the two daily goals', () => {
     expect(goals.reviews.done).toBe(1);
   });
 
-  it('keeps a met day met, even after its answer is taken back', async () => {
+  it('keeps a met day met, even after the word that met it is deleted', async () => {
     await setGoals(alice, { newWords: 1, reviews: 1 });
     const word = await addWord(alice, 'candid');
-    const requestId = newId();
-    await answer(alice, { ...remember(word.id, 0), requestId });
     expect((await goalsOf(alice)).streak.metToday).toBe(true);
-    await call(app, alice, '/api/review-undo', { method: 'POST', body: { reviewRequestId: requestId, requestId: newId() } });
+    await call(app, alice, `/api/vocabulary/${word.id}`, { method: 'DELETE' });
     const goals = await goalsOf(alice);
     expect(goals.newWords.done).toBe(0);
     expect(goals.streak).toMatchObject({ current: 1, metToday: true });
@@ -429,7 +427,7 @@ describe('the two daily goals', () => {
         [alice.id, day],
       );
     }
-    await addWord(alice, 'candid');
+    // Nothing added today, so today is not met yet and the streak stands from yesterday.
     expect((await goalsOf(alice)).streak).toEqual({ current: 3, longest: 3, metToday: false });
     // Another account has a streak of its own.
     expect((await goalsOf(bob)).streak.current).toBe(0);
@@ -444,14 +442,24 @@ describe('the two daily goals', () => {
     expect(studyGoalsResponseSchema.parse(await maintenance.json()).newWords).toMatchObject({ target: 0, met: true });
   });
 
-  it('records the day as soon as an answer completes it, without the goals being opened', async () => {
+  it('records the day as soon as adding a word completes it, without the goals being opened', async () => {
     await setGoals(alice, { newWords: 1, reviews: 1 });
-    const word = await addWord(alice, 'candid');
-    await answer(alice, remember(word.id, 0));
+    await addWord(alice, 'candid');
     expect(await db.admin('select day::text as day, met from public.study_days where user_id = $1', [alice.id])).toEqual([
       { day: TODAY, met: true },
     ]);
   });
+
+  it('counts a spread-out import by the day its words are added, not the day they first come up', async () => {
+    await setGoals(alice, { newWords: 3, reviews: 1 });
+    const response = await call(app, alice, '/api/vocabulary/import', {
+      method: 'POST',
+      body: { items: ['one', 'two', 'three'].map((word) => ({ requestId: newId(), word })), wordsPerDay: 1 },
+    });
+    expect(response.status).toBe(200);
+    expect((await goalsOf(alice)).newWords).toMatchObject({ done: 3, met: true });
+  });
+
 });
 
 describe('the daily review limit', () => {

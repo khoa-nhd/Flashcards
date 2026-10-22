@@ -2,8 +2,8 @@
  * The two daily goals under FSRS alone, and the streak they make. The owner's
  * rules (2026-10-21, docs/fsrs-only-redesign.md):
  *
- * - New words: words brought into study for the first time that day. Having
- *   no new words left does not meet it; maintenance mode lets it be 0.
+ * - New words: words added to the vocabulary that day (the owner's rule,
+ *   2026-10-22, replacing "brought into study"). Maintenance mode lets it be 0.
  * - Reviews: due words reviewed that day. Met as well once nothing is left due.
  * - A day counts towards the streak only when both are met.
  * - The goals never stop a session; they only decide the streak.
@@ -47,14 +47,14 @@ export interface GoalPart {
 
 export interface DayInput {
   goals: StudyGoals;
-  /** Words brought into study today. */
+  /** Words added today. */
   newDone: number;
   /** Due words reviewed today. */
   reviewsDone: number;
   /** Words still due now. */
   dueLeft: number;
-  /** Words never studied yet, archived ones left out. */
-  newLeft: number;
+  /** Words never studied yet, archived ones left out. Leave it out where it does not limit the goal. */
+  newLeft?: number;
 }
 
 export interface DayResult {

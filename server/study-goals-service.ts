@@ -15,6 +15,7 @@ import {
   type StudyGoals,
 } from '../shared/study-goals.js';
 import { HttpError } from './errors.js';
+import type { VocabularyCatalog } from './vocabulary-catalog.js';
 import type { VocabularyRepository } from './vocabulary-repository.js';
 
 /** Where the account keeps its two goals. `get` is `null` until they are chosen. */
@@ -42,6 +43,8 @@ export function createStudyGoalStore(
 
 export interface StudyGoalsServiceOptions {
   repository: VocabularyRepository;
+  /** Where the words are listed, to count those added today towards the new-word goal. */
+  catalog?: VocabularyCatalog;
   store: StudyGoalStore;
   timeZone: string;
   now?: () => Date;
@@ -66,15 +69,13 @@ export class StudyGoalsService {
     const chosen = store.get();
     const goals = chosen ?? SUGGESTED_STUDY_GOALS;
 
-    // What is still due, and what has never been studied; archived words count for neither.
+    // What is still due; archived words do not count.
     const { records } = await repository.listLiveRecords();
     let total = 0;
     let overdue = 0;
-    let newLeft = 0;
     for (const record of records) {
       if (record.suspended === true) continue;
       const state = record.fsrs?.state ?? null;
-      if (state === null) newLeft += 1;
       const due = state !== null ? fsrsDueDay(state, timeZone) : (record.dueOn ?? record.nextReview ?? today);
       const order = compareDates(due, today);
       // A word never studied is new, not a review: it counts towards the new-word goal instead.
@@ -86,7 +87,9 @@ export class StudyGoalsService {
       available && repository.studyDayCounts !== undefined
         ? await repository.studyDayCounts(today)
         : { newWords: 0, reviews: 0 };
-    const day = evaluateDay({ goals, newDone: counts.newWords, reviewsDone: counts.reviews, dueLeft: total, newLeft });
+    // New words are the words added today (the owner's rule), wherever they were added from.
+    const newDone = await this.addedOn(today, counts.newWords);
+    const day = evaluateDay({ goals, newDone, reviewsDone: counts.reviews, dueLeft: total });
 
     let metToday = day.met;
     let metDays: IsoDate[] = [];
@@ -95,7 +98,7 @@ export class StudyGoalsService {
       if (chosen !== null) {
         metToday = await repository.recordStudyDay({
           day: today,
-          newWords: counts.newWords,
+          newWords: newDone,
           reviews: counts.reviews,
           newGoal: goals.newWords,
           reviewGoal: goals.reviews,
@@ -116,6 +119,17 @@ export class StudyGoalsService {
       due: { total, overdue },
       streak: streakOf(metDays, today, metToday),
     };
+  }
+
+  /**
+   * How many live words carry `day` as their Date added, the same count the
+   * dashboard shows as added today. Without a word list, `fallback`.
+   */
+  private async addedOn(day: IsoDate, fallback: number): Promise<number> {
+    const { catalog } = this.options;
+    if (catalog === undefined) return fallback;
+    const { entries } = await catalog.listEntries();
+    return entries.filter((entry) => entry.dateAdded === day).length;
   }
 
   /** Changes the goals. Today is judged against the new ones; earlier days keep theirs. */

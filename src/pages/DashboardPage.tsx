@@ -12,7 +12,7 @@ import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { ReviewActivityCard, useReviewActivity } from '../components/ReviewActivity.js';
 import { StatTile } from '../components/StatTile.js';
-import { StudyGoalsCard, useStudyGoals } from '../components/StudyGoals.js';
+import { StudyGoalsCard, StudyGoalsSkeleton, useStudyGoals } from '../components/StudyGoals.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { RECENT_DAYS } from '../lib/bank-query.js';
@@ -112,7 +112,9 @@ export function DashboardPage() {
   const { entries, meta } = state;
   const today = meta?.today ?? null;
   const fsrsOnly = meta?.fsrsOnly === true;
-  const goals = useStudyGoals(fsrsOnly);
+  // Asked for at once, beside the word list, rather than after it says whether FSRS is in charge:
+  // waiting for that made the goals arrive noticeably later than the rest of the page.
+  const goals = useStudyGoals(meta?.fsrsOnly !== false);
 
   const summary = useMemo(() => (today === null ? null : computeSummary(entries, today)), [entries, today]);
   const distribution = useMemo(() => masteryDistribution(entries), [entries]);
@@ -183,8 +185,8 @@ export function DashboardPage() {
               aria-label="Ready to review"
               className="pool pool-top overflow-hidden rounded-2xl border border-line px-6 py-7 md:px-9 md:py-9"
             >
-              <div className="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
-                <div className="min-w-0 max-w-[36rem]">
+              <div className="flex flex-col gap-6 lg:grid lg:grid-cols-12 lg:items-center lg:gap-10">
+                <div className="flex min-w-0 flex-col lg:col-span-7">
                   <h2 className="font-serif text-[2.5rem] font-semibold leading-[1.04] tracking-[-0.025em] text-ink md:text-[3.25rem]">
                     {ready === 0
                       ? pick(language, 'All caught up.', 'Đã ôn xong.')
@@ -213,9 +215,8 @@ export function DashboardPage() {
                               : ''
                           }.`}
                   </p>
-                </div>
-                <div className="flex w-full shrink-0 flex-col gap-3 xl:w-[30rem]">
-                  <div className="flex flex-wrap gap-2 xl:justify-end">
+                  {/* The way to act sits with the headline, so the left side is never left empty. */}
+                  <div className="mt-6 flex flex-wrap gap-2">
                     <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
                       <Icon name="review" className="size-4" />
                       {pick(language, 'Start review', 'Bắt đầu ôn')}
@@ -225,16 +226,33 @@ export function DashboardPage() {
                       {pick(language, 'Add vocabulary', 'Thêm từ')}
                     </Link>
                   </div>
-                  {fsrsOnly && goals.status === 'ready' && goals.data !== null && (
-                    <StudyGoalsCard data={goals.data} onSaved={goals.adopt} compact />
-                  )}
                 </div>
+                {fsrsOnly && (
+                  <div className="w-full min-w-0 lg:col-span-5">
+                    {goals.data !== null ? (
+                      <StudyGoalsCard data={goals.data} onSaved={goals.adopt} compact />
+                    ) : goals.status === 'error' ? (
+                      <div role="alert" className="rounded-xl border border-line bg-surface p-4 text-sm text-muted">
+                        {goals.error}{' '}
+                        <button type="button" className="cursor-pointer font-semibold text-ink underline" onClick={() => void goals.reload()}>
+                          {pick(language, 'Try again', 'Thử lại')}
+                        </button>
+                      </div>
+                    ) : (
+                      <StudyGoalsSkeleton />
+                    )}
+                  </div>
+                )}
               </div>
             </section>
 
-            {!fsrsOnly && plan.status === 'ready' && plan.data.available && (
+            {!fsrsOnly && plan.status === 'ready' && plan.data?.available ? (
               <DashboardGoal plan={plan.data} onSaved={plan.adopt} />
-            )}
+            ) : !fsrsOnly ? (
+              <section aria-label="Daily goal" className={`${CARD} p-4 text-xs text-muted`} aria-hidden="true">
+                Loading daily goal…
+              </section>
+            ) : null}
 
             <ReviewActivityCard activity={activity} />
 

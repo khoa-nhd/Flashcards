@@ -337,18 +337,24 @@ export function createApp({
     return c.json(await requireAnalytics(c).reviewDays(range.data.from, range.data.to));
   });
 
+  /**
+   * A saved answer or a word added may complete today's goals; the day is
+   * recorded so the streak keeps it. What was saved stands whatever happens
+   * here, so a failure is logged, not reported.
+   */
+  const recordDay = async (c: Context<AppEnv>) => {
+    const goals = c.get('scope').studyGoals;
+    if (goals === null) return;
+    await goals.progress().catch((error: unknown) => {
+      const kind = error instanceof DatabaseError ? `database ${error.failure}` : error instanceof Error ? error.name : 'non-error';
+      console.error(`Recording the day's goals failed: ${kind}`);
+    });
+  };
+
   app.post('/api/review-action', async (c) => {
     const request = await parseBody(c, reviewActionRequestSchema);
     const response = await requireService(c).submitAction(request);
-    // A saved answer may complete today's goals; the day is recorded so the streak keeps it.
-    // The answer is saved whatever happens here, so a failure is logged, not reported.
-    const goals = c.get('scope').studyGoals;
-    if (goals !== null && response.outcome === 'applied') {
-      await goals.progress().catch((error: unknown) => {
-        const kind = error instanceof DatabaseError ? `database ${error.failure}` : error instanceof Error ? error.name : 'non-error';
-        console.error(`Recording the day's goals failed: ${kind}`);
-      });
-    }
+    if (response.outcome === 'applied') await recordDay(c);
     return c.json(response);
   });
 
@@ -552,13 +558,16 @@ export function createApp({
   app.post('/api/vocabulary', async (c) => {
     const request = await parseBody(c, createEntryRequestSchema);
     const { entry, created } = await requireVocabulary(c).create(request);
+    if (created) await recordDay(c);
     return c.json({ entry }, created ? 201 : 200);
   });
 
   // A batch of new words, each created exactly as the Add form would create it.
   app.post('/api/vocabulary/import', async (c) => {
     const { items, wordsPerDay, startIndex } = await parseBody(c, importRequestSchema);
-    return c.json(await requireVocabulary(c).importBatch(items, wordsPerDay, startIndex));
+    const result = await requireVocabulary(c).importBatch(items, wordsPerDay, startIndex);
+    if (result.results.some((item) => item.outcome === 'imported')) await recordDay(c);
+    return c.json(result);
   });
 
   // Archives or resumes words in bulk. They stay in the Bank; archived ones leave the review queue.

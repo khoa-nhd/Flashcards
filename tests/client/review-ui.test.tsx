@@ -4,6 +4,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NO_CAPABILITIES, type QueueResponse, type ReviewActionResponse, type ReviewCard } from '../../shared/api.js';
 import { App } from '../../src/App.js';
+import { AppProvider, createAppServices } from '../../src/app-context.js';
 import { Flashcard } from '../../src/components/Flashcard.js';
 import { ApiError } from '../../src/lib/api-client.js';
 import { createSettingsStore } from '../../src/lib/settings.js';
@@ -407,10 +408,17 @@ describe('answering by swiping', () => {
       onGrade,
       onBlockedGrade: vi.fn(),
     };
-    const { rerender } = render(<Flashcard {...props} swipeThresholdPx={200} />);
+    // The card reads the interface language from the app, so it is drawn inside one.
+    const services = createAppServices(createFakeApi().api, createSettingsStore(null));
+    const inApp = (threshold: number) => (
+      <AppProvider value={services}>
+        <Flashcard {...props} swipeThresholdPx={threshold} />
+      </AppProvider>
+    );
+    const { rerender } = render(inApp(200));
     swipe(150);
     expect(onGrade).not.toHaveBeenCalled();
-    rerender(<Flashcard {...props} swipeThresholdPx={100} />);
+    rerender(inApp(100));
     swipe(150);
     expect(onGrade).toHaveBeenCalledExactlyOnceWith('remember');
   });

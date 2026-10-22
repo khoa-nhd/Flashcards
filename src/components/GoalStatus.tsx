@@ -77,6 +77,17 @@ function Bar({ name, text, done, target }: { name: string; text: string; done: n
   );
 }
 
+/** The shape of the progress, drawn before the plan has arrived, so the card holds its place. */
+export function GoalSkeleton() {
+  return (
+    <div className="flex animate-pulse flex-col gap-3" aria-hidden="true">
+      <div className="h-2.5 w-full rounded-full bg-line/70" />
+      <div className="h-2.5 w-2/3 rounded-full bg-line/70" />
+      <div className="h-3 w-3/4 rounded bg-line/50" />
+    </div>
+  );
+}
+
 /** Progress towards today's goal. Renders nothing when no goal is set. */
 export function GoalProgress({
   plan,

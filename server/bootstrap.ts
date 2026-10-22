@@ -104,7 +104,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
   });
   // The sample data has no account either, so its two goals are kept in memory too.
   const studyGoals = fsrsOnly
-    ? new StudyGoalsService({ repository, timeZone, store: createStudyGoalStore() })
+    ? new StudyGoalsService({ repository, catalog: repository, timeZone, store: createStudyGoalStore() })
     : null;
   return { app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals }), config };
 }

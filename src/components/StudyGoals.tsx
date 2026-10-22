@@ -16,10 +16,41 @@ export interface StudyGoalsState {
   error: string | null;
 }
 
+/**
+ * The latest goals each signed-in account was told, kept for as long as the
+ * page is open: coming back to a page shows them at once while a fresh copy is
+ * fetched behind them. Keyed by the account's API object, so one account never
+ * sees another's.
+ */
+const lastGoals = new WeakMap<object, StudyGoalsResponse>();
+/** A request already on its way, shared by every part of the page that asks at the same time. */
+const inFlight = new WeakMap<object, Promise<StudyGoalsResponse>>();
+
+function fetchShared(api: { fetchStudyGoals(): Promise<StudyGoalsResponse> }): Promise<StudyGoalsResponse> {
+  const pending = inFlight.get(api);
+  if (pending !== undefined) return pending;
+  const request = api.fetchStudyGoals().then(
+    (data) => {
+      lastGoals.set(api, data);
+      inFlight.delete(api);
+      return data;
+    },
+    (error: unknown) => {
+      inFlight.delete(api);
+      throw error;
+    },
+  );
+  inFlight.set(api, request);
+  return request;
+}
+
 /** Loads the goals only where the server can keep them, and exposes a reload. */
 export function useStudyGoals(enabled: boolean) {
   const { api } = useApp();
-  const [state, setState] = useState<StudyGoalsState>({ status: 'idle', data: null, error: null });
+  const [state, setState] = useState<StudyGoalsState>(() => {
+    const known = lastGoals.get(api);
+    return known === undefined ? { status: 'idle', data: null, error: null } : { status: 'ready', data: known, error: null };
+  });
 
   const reload = useCallback(async () => {
     if (!enabled) {
@@ -28,7 +59,7 @@ export function useStudyGoals(enabled: boolean) {
     }
     setState((current) => ({ ...current, status: current.data === null ? 'loading' : 'ready', error: null }));
     try {
-      const data = await api.fetchStudyGoals();
+      const data = await fetchShared(api);
       setState({ status: 'ready', data, error: null });
     } catch (cause) {
       setState((current) => ({
@@ -43,7 +74,35 @@ export function useStudyGoals(enabled: boolean) {
     void reload();
   }, [reload]);
 
-  return { ...state, reload, adopt: (data: StudyGoalsResponse) => setState({ status: 'ready', data, error: null }) };
+  const adopt = (data: StudyGoalsResponse) => {
+    lastGoals.set(api, data);
+    setState({ status: 'ready', data, error: null });
+  };
+  return { ...state, reload, adopt };
+}
+
+/** The compact card's shape, drawn while the goals load, so nothing moves when they arrive. */
+export function StudyGoalsSkeleton() {
+  return (
+    <div className="rounded-xl border border-line bg-surface p-4" aria-hidden="true">
+      <div className="flex animate-pulse flex-col gap-4 motion-reduce:animate-none">
+        <div className="flex flex-col gap-2">
+          <div className="h-2.5 w-24 rounded-full bg-line" />
+          <div className="h-3 w-4/5 rounded-full bg-line/70" />
+        </div>
+        <div className="h-7 w-20 rounded-full bg-line/70" />
+        <div className="grid grid-cols-2 gap-4">
+          {[0, 1].map((key) => (
+            <div key={key} className="flex flex-col items-center gap-2">
+              <div className="size-24 rounded-full border-[7px] border-line" />
+              <div className="h-3 w-20 rounded-full bg-line/70" />
+              <div className="h-2.5 w-28 rounded-full bg-line/50" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function partProgress(part: StudyGoalsResponse['newWords']): number {

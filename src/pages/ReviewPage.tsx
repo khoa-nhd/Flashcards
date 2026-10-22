@@ -49,38 +49,48 @@ function CountingSwitch({ fsrsOnly }: { fsrsOnly: boolean }) {
         'Tính lần ôn này vào lịch. Khi tắt, câu trả lời vẫn được lưu nhưng FSRS không thay đổi từ này.',
       )
     : 'Count this review toward mastery. Off, the answers are still recorded, but every word keeps its mastery and review date.';
+  const label = fsrsOnly
+    ? pick(language, 'Count toward schedule', 'Tính vào lịch ôn')
+    : pick(language, 'Count toward mastery', 'Tính vào mức thành thạo');
+  const shortLabel = fsrsOnly
+    ? pick(language, 'Schedule', 'Lịch ôn')
+    : pick(language, 'Mastery', 'Thành thạo');
+  // Counting is the safe default, so it reads as an ordinary control; with it off, the
+  // switch itself warns: answers are recorded, but the words do not move.
+  const tone = counting
+    ? 'border-line-strong bg-transparent text-muted'
+    : 'border-bad/40 bg-bad-soft text-bad-ink';
   return (
     <label
-      className="flex h-9 cursor-pointer items-center gap-2 rounded-full border border-line-strong bg-transparent px-3 text-sm font-medium text-muted"
+      className={`flex h-8 shrink-0 cursor-pointer items-center gap-1.5 rounded-full border px-2.5 text-xs font-medium transition-colors sm:text-sm ${tone}`}
       title={title}
     >
       <input
         type="checkbox"
         className="size-4 accent-[var(--accent)]"
+        aria-label={label}
         checked={counting}
         onChange={(event) => {
-          // Hand the keys back to the card, exactly as the choice of words does: space
-          // should flip the card, not toggle this again.
+          // Hand the keys back to card: space flips card, not toggle this.
           event.currentTarget.blur();
           preference.set(event.target.checked);
         }}
       />
-      {fsrsOnly
-        ? pick(language, 'Count toward schedule', 'Tính vào lịch ôn')
-        : pick(language, 'Count toward mastery', 'Tính vào mức thành thạo')}
+      <span className="hidden sm:inline">{label}</span>
+      <span className="sm:hidden">{shortLabel}</span>
     </label>
   );
 }
 
 const HEADER_BUTTON =
-  'flex h-9 cursor-pointer items-center gap-1.5 rounded-full border border-line-strong px-3 text-sm font-medium text-muted transition-colors hover:text-ink aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
+  'flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-full border border-line-strong px-3 text-xs font-medium text-muted transition-colors hover:text-ink sm:text-sm aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
 
 /**
  * The flashcard review. The session itself lives for the whole app, so leaving
  * this tab and coming back resumes where it was.
  */
 export function ReviewPage() {
-  const { api, session, ensureReviewSession } = useApp();
+  const { api, session, ensureReviewSession, counting: countingChoice } = useApp();
   const settings = useSettings();
   const language = useUiLanguage();
   const counting = useCounting();
@@ -88,7 +98,6 @@ export function ReviewPage() {
   const { status, error } = state;
   const fsrsOnly = state.meta?.capabilities.fsrsOnly === true;
   const [helpOpen, setHelpOpen] = useState(false);
-  const reload = () => void session.load();
   const { query } = useLocation();
   const { collections } = useLibrary();
 
@@ -100,6 +109,13 @@ export function ReviewPage() {
   const asked = scopeFromQuery(query);
   const askedKey = scopeKey(asked);
   const picking = asked.kind === 'selection' || collectionId !== null;
+
+  const reload = () => {
+    // Refresh is a fresh start at the same words, so it counts again by default —
+    // the weakest words keep the sitting's own starting point.
+    if (askedKey !== 'weak') countingChoice.preset(true);
+    void session.load();
+  };
 
   /** The words ticked here, once the reviewer has started on them. */
   const [picked, setPicked] = useState<string[] | null>(() => {
@@ -245,7 +261,7 @@ export function ReviewPage() {
   return (
     <div className="flex h-full flex-col">
       <div
-        className={`mx-auto flex w-full max-w-xl flex-wrap items-center justify-between gap-x-3 gap-y-2 px-4 pb-1 pt-3 ${
+        className={`mx-auto flex w-full max-w-xl flex-nowrap items-center justify-between gap-x-2 px-4 pb-2 pt-2.5 ${
           finishedSession ? 'hidden' : ''
         }`}
       >
@@ -253,7 +269,7 @@ export function ReviewPage() {
           <h1 className="hidden truncate text-sm font-semibold tracking-tight md:block">Review</h1>
           <ModeBadge meta={state.meta} />
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 items-center gap-1.5">
           <label className="sr-only" htmlFor="review-focus">
             Cards to review
           </label>
@@ -261,7 +277,7 @@ export function ReviewPage() {
             id="review-focus"
             value={picking ? SELECT_VALUE : askedKey === 'weak' ? 'weak' : ''}
             title="Choose which words to review. The weakest words and your own picks may be taken before they are due."
-            className="h-9 max-w-[11rem] cursor-pointer rounded-full border border-line-strong bg-transparent px-3 text-sm font-medium text-muted disabled:cursor-not-allowed disabled:opacity-50"
+            className="h-9 max-w-[9.5rem] cursor-pointer rounded-full border border-line-strong bg-transparent px-3 text-xs font-medium text-muted sm:max-w-[11rem] sm:text-sm disabled:cursor-not-allowed disabled:opacity-50"
             onChange={(event) => {
               const { value } = event.target;
               // Hand the keys back to the card: an arrow key should answer, not change this choice.
@@ -299,23 +315,29 @@ export function ReviewPage() {
               type="button"
               onClick={reload}
               aria-disabled={status === 'loading'}
+              aria-label="Refresh"
               title="Reload the queue. Does not change any review data."
               className={HEADER_BUTTON}
             >
               <Icon name="refresh" className="size-4" />
-              Refresh
+              <span className="hidden sm:inline">Refresh</span>
             </button>
           )}
         </div>
       </div>
       {/* The finished screen says this itself, with the same way out. */}
       {banner !== null && status !== 'loading' && status !== 'completed' && !choosing && (
-        <p className="mx-auto w-full max-w-xl px-4 pt-1 text-sm text-muted">
-          {banner}{' '}
-          <Link to={ROUTES.review} className="font-medium text-accent hover:underline">
-            Review everything due
-          </Link>
-        </p>
+        <div className="mx-auto w-full max-w-xl px-4 pt-1.5">
+          <div
+            role="alert"
+            className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 rounded-xl border border-bad/30 bg-bad-soft px-3 py-2 text-xs font-medium text-bad-ink sm:text-sm"
+          >
+            <span>{banner}</span>
+            <Link to={ROUTES.review} className="font-medium text-accent underline-offset-2 hover:underline">
+              Review everything due
+            </Link>
+          </div>
+        </div>
       )}
       <div className="pool min-h-0 flex-1">{content}</div>
       {helpOpen && (

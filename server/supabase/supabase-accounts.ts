@@ -254,6 +254,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         studyGoals: fsrsOnly
           ? new StudyGoalsService({
               repository,
+              catalog: repository,
               timeZone,
               now,
               store: createStudyGoalStore(settings?.studyGoals ?? null, async (goals) => {
