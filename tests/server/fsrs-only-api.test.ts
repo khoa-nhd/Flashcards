@@ -527,3 +527,23 @@ describe('weak words under FSRS alone', () => {
     expect(queue.cards.map((card) => card.word)).toEqual(['fading', 'lapsed', 'fresh', 'unseen']);
   });
 });
+
+describe('editing a word under FSRS alone', () => {
+  it('saves its text, and refuses a schedule set by hand rather than dropping it', async () => {
+    const word = await addWord(alice, 'candid');
+    const text = await call(app, alice, `/api/vocabulary/${word.id}`, { method: 'PATCH', body: { definition: 'Honest.' } });
+    expect(text.status).toBe(200);
+    expect(entryResponseSchema.parse(await text.json()).entry.definition).toBe('Honest.');
+
+    const schedule = await call(app, alice, `/api/vocabulary/${word.id}`, {
+      method: 'PATCH',
+      body: { meaning: 'thẳng', schedule: { mastery: 8, reviewDate: '2026-12-01' } },
+    });
+    expect(schedule.status).toBe(409);
+    expect(apiErrorSchema.parse(await schedule.json()).error.code).toBe('not_editable');
+    // Nothing of that request was saved, the text included.
+    expect(await stored(word.id)).toMatchObject({ mastery: 1, revision: 0 });
+    const after = entryResponseSchema.parse(await (await call(app, alice, `/api/vocabulary/${word.id}`)).json()).entry;
+    expect(after.meaning).toBe('nghĩa');
+  });
+});

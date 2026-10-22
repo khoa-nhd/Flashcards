@@ -273,7 +273,15 @@ export class VocabularyService {
       if (request.dateAdded !== undefined && request.dateAdded !== current.dateAdded) {
         changes.dateAdded = request.dateAdded;
       }
-      if (request.schedule !== undefined && !this.fsrsMode()) {
+      // Under FSRS alone the schedule comes from answers only. Saying so is better than dropping the change.
+      if (request.schedule !== undefined && this.fsrsMode()) {
+        throw new HttpError(
+          409,
+          'not_editable',
+          'FSRS sets when a word is due from your answers, so its schedule cannot be changed by hand. Nothing was saved.',
+        );
+      }
+      if (request.schedule !== undefined) {
         if (request.schedule.mastery !== current.mastery) changes.mastery = request.schedule.mastery;
         // Compared with the date the form was shown, which is the one under the schedule in charge.
         const scheduler = this.scheduler.get();
