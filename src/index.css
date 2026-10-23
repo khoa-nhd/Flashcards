@@ -642,3 +642,77 @@ kbd {
 :root[data-reduce-motion='true'] .moonrise *::after {
   animation-delay: 0ms !important;
 }
+
+/*
+ * ---- Moonset: a streak has ended ----
+ * The moon carrying the old count passes slowly into shadow, the light goes
+ * out of the room, and a thin new crescent lights at its edge. Slow, even
+ * eases throughout: nothing here bounces.
+ */
+.moonset-light {
+  background: radial-gradient(circle at 36% 32%, #f6f9ff 0%, #d9e8f8 30%, var(--accent) 68%, #7ea5cf 100%);
+  animation: moonset-appear 700ms var(--moon-ease) 150ms both;
+}
+
+/* The shadow takes the night's own colour, so the moon goes dark rather than grey. */
+.moonset-shadow {
+  background: radial-gradient(circle at 55% 45%, #121d33 0%, #0b1426 70%);
+  animation: moonset-eclipse 1500ms cubic-bezier(0.45, 0, 0.25, 1) 750ms both;
+}
+
+.moonset-glow {
+  background: radial-gradient(circle, rgb(165 201 238 / 0.36) 0%, rgb(165 201 238 / 0.12) 38%, transparent 66%);
+  animation: moonset-dim 1700ms ease-in-out 650ms both;
+}
+
+.moonset-rim {
+  border: 1px solid rgb(233 238 247 / 0.2);
+  animation: moonset-rim 900ms ease-out 1900ms both;
+}
+
+.moonset-crescent {
+  filter: drop-shadow(0 0 10px rgb(188 217 246 / 0.55));
+  transform-origin: 50% 50%;
+  animation: moonset-crescent 1100ms var(--moon-ease) 2150ms both;
+}
+
+@keyframes moonset-appear {
+  from {
+    opacity: 0;
+    transform: scale(0.92);
+  }
+}
+
+@keyframes moonset-eclipse {
+  from {
+    transform: translateX(108%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@keyframes moonset-dim {
+  0% {
+    opacity: 0;
+  }
+  20% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.08;
+  }
+}
+
+@keyframes moonset-rim {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes moonset-crescent {
+  from {
+    opacity: 0;
+    transform: rotate(-8deg) scale(0.96);
+  }
+}

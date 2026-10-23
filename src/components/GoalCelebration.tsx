@@ -1,21 +1,36 @@
 /**
- * The moment both daily goals are met: the two goal rings draw together into
- * a full moon, the room fills with its light and the streak turns over to the
- * new day. It plays once a day per account, at the moment the day is
- * completed — after the answer, the word added or the import that completes
- * it — or on the next visit when the day was completed somewhere else.
+ * The two streak moments, both drawn in the room's own night.
  *
- * It only reads the goals: nothing here can change what counts or when.
+ * - Moonrise: both daily goals are met. The two goal rings draw together into
+ *   a full moon, the room fills with its light and the streak turns over to
+ *   the new day. It plays once a day per account, at the moment the day is
+ *   completed — after the answer, the word added or the import that completes
+ *   it — or on the next visit when the day was completed somewhere else.
+ * - Moonset: a streak has ended. The moon carrying the old count passes into
+ *   shadow, and a new crescent lights at its edge: a missed day is told
+ *   plainly and gently, never as a punishment. It plays once, on the
+ *   dashboard, never in the middle of a review.
+ *
+ * Both only read the goals: nothing here can change what counts or when.
  */
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
 import type { ReviewActionResponse, StudyGoalsResponse } from '../../shared/api.js';
 import { useApp, useUiLanguage } from '../app-context.js';
 import { pick } from '../lib/i18n.js';
+import { ROUTES } from '../lib/router.js';
+import { Link } from './Link.js';
 import { fetchShared, knownStudyGoals, subscribeGoalWork, subscribeStudyGoals } from './StudyGoals.js';
-import { BUTTON_PRIMARY } from './ui.js';
+import { BUTTON_GHOST, BUTTON_PRIMARY } from './ui.js';
 
 /** The day each account last celebrated, kept on this device so a reload does not play it twice. */
 const celebratedKey = (accountId: string) => `vocab.goals-celebrated.${accountId}`;
+/** The streak this device last saw for each account, and on which day: how an ended streak is noticed. */
+const seenKey = (accountId: string) => `vocab.streak-seen.${accountId}`;
+
+export interface SeenStreak {
+  day: string;
+  current: number;
+}
 
 function celebratedOn(accountId: string): string | null {
   try {
@@ -33,6 +48,35 @@ function markCelebrated(accountId: string, day: string) {
   }
 }
 
+function seenStreak(accountId: string): SeenStreak | null {
+  try {
+    const value: unknown = JSON.parse(window.localStorage.getItem(seenKey(accountId)) ?? 'null');
+    if (typeof value !== 'object' || value === null) return null;
+    const { day, current } = value as Partial<SeenStreak>;
+    return typeof day === 'string' && typeof current === 'number' ? { day, current } : null;
+  } catch {
+    return null;
+  }
+}
+
+function markSeen(accountId: string, goals: StudyGoalsResponse) {
+  try {
+    window.localStorage.setItem(seenKey(accountId), JSON.stringify({ day: goals.today, current: goals.streak.current }));
+  } catch {
+    // Without storage an ended streak simply goes unmarked.
+  }
+}
+
+/**
+ * The streak that has ended since it was last seen, if one has. On the same
+ * day a streak can only grow, since a met day stays met; on a later day a
+ * smaller count means the run was broken.
+ */
+export function endedStreak(seen: SeenStreak | null, goals: StudyGoalsResponse): number | null {
+  if (seen === null || seen.day === goals.today || seen.current === 0) return null;
+  return goals.streak.current < seen.current ? seen.current : null;
+}
+
 function reducedMotion(): boolean {
   if (document.documentElement.dataset.reduceMotion === 'true') return true;
   return typeof window.matchMedia === 'function' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -41,14 +85,17 @@ function reducedMotion(): boolean {
 /** Waits this long after the last saved answer before asking, so a quick run of answers asks once. */
 const SETTLE_MS = 600;
 
+type Moment = { kind: 'met'; goals: StudyGoalsResponse } | { kind: 'ended'; goals: StudyGoalsResponse; days: number };
+
 /**
- * Watches for the day being completed. Asks for the goals only when the work
- * since they were last seen could have completed them, so a long session does
- * not ask after every answer.
+ * Watches for the day being completed, and for a streak that ended while the
+ * app was closed. Asks for the goals only when the work since they were last
+ * seen could have completed them, so a long session does not ask after every
+ * answer.
  */
 export function GoalCelebration() {
   const { api, sync, accountId } = useApp();
-  const [shown, setShown] = useState<StudyGoalsResponse | null>(null);
+  const [moment, setMoment] = useState<Moment | null>(null);
 
   useEffect(() => {
     let last = knownStudyGoals(api);
@@ -60,11 +107,24 @@ export function GoalCelebration() {
       last = goals;
       answers = 0;
       added = 0;
-      // Only goals the reviewer chose make a streak, so only they are celebrated.
-      if (!goals.available || !goals.chosen || !goals.streak.metToday) return;
-      if (celebratedOn(accountId) === goals.today) return;
-      markCelebrated(accountId, goals.today);
-      setShown(goals);
+      // Only goals the reviewer chose make a streak, so only they have these moments.
+      if (!goals.available || !goals.chosen) return;
+      if (goals.streak.metToday && celebratedOn(accountId) !== goals.today) {
+        // A day completed outweighs the run that ended before it: the moonrise says the new one has begun.
+        markCelebrated(accountId, goals.today);
+        markSeen(accountId, goals);
+        setMoment({ kind: 'met', goals });
+        return;
+      }
+      const days = endedStreak(seenStreak(accountId), goals);
+      if (days !== null) {
+        // Kept for the dashboard: an ended streak is not news to break in the middle of a review.
+        if (window.location.pathname !== ROUTES.dashboard) return;
+        markSeen(accountId, goals);
+        setMoment({ kind: 'ended', goals, days });
+        return;
+      }
+      markSeen(accountId, goals);
     };
 
     const couldBeMet = () => {
@@ -112,8 +172,13 @@ export function GoalCelebration() {
     };
   }, [api, sync, accountId]);
 
-  if (shown === null) return null;
-  return <Moonrise goals={shown} onClose={() => setShown(null)} />;
+  if (moment === null) return null;
+  const close = () => setMoment(null);
+  return moment.kind === 'met' ? (
+    <Moonrise goals={moment.goals} onClose={close} />
+  ) : (
+    <Moonset goals={moment.goals} days={moment.days} onClose={close} />
+  );
 }
 
 /** A fixed scatter of stars, the same on every visit: position, size, brightness, timing. */
@@ -141,51 +206,70 @@ const SPARKS = Array.from({ length: 16 }, (_, index) => ({
   tone: index % 3 === 0 ? 'var(--good-ink)' : index % 3 === 1 ? 'var(--accent-hover)' : 'var(--ink)',
 }));
 
-/** When the scene has settled enough that a key press is meant for it, not left over from the card. */
-const READY_MS = 1700;
 const LEAVE_MS = 260;
 
-function Moonrise({ goals, onClose }: { goals: StudyGoalsResponse; onClose: () => void }) {
-  const language = useUiLanguage();
+const delay = (ms: number) => ({ '--d': `${ms}ms` }) as CSSProperties;
+
+/**
+ * The night both moments play in: a modal over a darkened, blurred page, with
+ * the stars. Focus is held on the scene until it has settled, so a key press
+ * left over from the card neither closes it nor reaches the review behind;
+ * then it moves to the first action inside `actions`.
+ */
+function NightScene({
+  titleId,
+  detailId,
+  settleMs,
+  onClose,
+  onOpen,
+  actions,
+  children,
+}: {
+  titleId: string;
+  detailId: string;
+  /** When the scene has settled enough that a key press is meant for it. */
+  settleMs: number;
+  onClose: () => void;
+  /** Runs once the scene is shown, with whether motion is reduced; may return a clean-up. */
+  onOpen?: (calm: boolean) => (() => void) | void;
+  /** Holds the scene's actions; the first one takes focus once it has settled. */
+  actions: RefObject<HTMLElement | null>;
+  children: (close: () => void) => ReactNode;
+}) {
   const dialog = useRef<HTMLDialogElement>(null);
   const stage = useRef<HTMLDivElement>(null);
-  const button = useRef<HTMLButtonElement>(null);
   const [ready, setReady] = useState(false);
   const [leaving, setLeaving] = useState(false);
-
-  const streak = goals.streak.current;
-  const before = Math.max(0, streak - 1);
-  const best = streak > 1 && streak >= goals.streak.longest;
+  const opened = useRef(onOpen);
 
   useEffect(() => {
     const element = dialog.current;
     if (element === null) return;
     if (typeof element.showModal === 'function' && !element.open) element.showModal();
     else element.setAttribute('open', '');
-    // The answer keys are still under the reviewer's fingers: hold focus on the scene, not the button.
+    // The answer keys may still be under the reviewer's fingers: hold focus on the scene, not a button.
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     stage.current?.focus();
     const calm = reducedMotion();
     const settle = setTimeout(
       () => {
         setReady(true);
-        button.current?.focus();
+        actions.current?.querySelector<HTMLElement>('a[href], button')?.focus();
       },
-      calm ? 400 : READY_MS,
+      calm ? 400 : settleMs,
     );
-    // A small knock as the rings meet, where the device has one.
-    const knock = calm ? undefined : setTimeout(() => navigator.vibrate?.([14, 70, 26]), 920);
+    const stopOpen = opened.current?.(calm);
     const overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     return () => {
       clearTimeout(settle);
-      clearTimeout(knock);
+      stopOpen?.();
       document.body.style.overflow = overflow;
       previous?.focus({ preventScroll: true });
       if (typeof element.close === 'function' && element.open) element.close();
       else element.removeAttribute('open');
     };
-  }, []);
+  }, [actions, settleMs]);
 
   // The review shortcuts listen on the window; none of them may reach the card behind.
   useEffect(() => {
@@ -208,15 +292,16 @@ function Moonrise({ goals, onClose }: { goals: StudyGoalsResponse; onClose: () =
   return (
     <dialog
       ref={dialog}
-      aria-labelledby="moonrise-title"
-      aria-describedby="moonrise-detail"
+      aria-labelledby={titleId}
+      aria-describedby={detailId}
       data-leaving={leaving || undefined}
       onCancel={(event) => {
         event.preventDefault();
         close();
       }}
       onClick={(event) => {
-        if (event.target !== button.current) close();
+        // Anywhere in the night closes it; the actions handle their own clicks.
+        if (event.target === dialog.current || event.target === stage.current) close();
       }}
       className="moonrise m-0 h-dvh max-h-none w-screen max-w-none overflow-x-hidden overflow-y-auto border-0 bg-transparent p-0 text-ink"
     >
@@ -244,114 +329,268 @@ function Moonrise({ goals, onClose }: { goals: StudyGoalsResponse; onClose: () =
         tabIndex={-1}
         className="relative flex min-h-full flex-col items-center justify-center px-4 pt-10 pb-[max(2.5rem,env(safe-area-inset-bottom))] text-center outline-none"
       >
-        <div className="relative size-64 shrink-0" aria-hidden="true">
-          <div className="moonrise-glow absolute -inset-16 rounded-full" />
-          <span
-            className="moonrise-halo absolute inset-[3.5rem] rounded-full"
-            style={{ '--d': '940ms' } as CSSProperties}
-          />
-          <span
-            className="moonrise-halo absolute inset-[3.5rem] rounded-full"
-            style={{ '--d': '1140ms' } as CSSProperties}
-          />
-          {SPARKS.map((spark, index) => (
-            <span
-              key={index}
-              className="moonrise-spark"
-              style={
-                {
-                  '--a': `${spark.angle}deg`,
-                  '--r': `${spark.reach}px`,
-                  '--s': `${spark.size}px`,
-                  '--d': `${spark.delay}ms`,
-                  background: spark.tone,
-                } as CSSProperties
-              }
-            />
-          ))}
-          <MeltingRing side="left" color="var(--accent)" label={`${goals.newWords.done}/${goals.newWords.target}`} />
-          <MeltingRing side="right" color="var(--ink)" label={`${goals.reviews.done}/${goals.reviews.target}`} />
-          <div className="moonrise-moon absolute inset-[3.5rem] rounded-full">
-            <span className="absolute left-[22%] top-[26%] size-[22%] rounded-full bg-[rgb(8_16_32_/_0.045)]" />
-            <span className="absolute left-[58%] top-[56%] size-[16%] rounded-full bg-[rgb(8_16_32_/_0.05)]" />
-            <span className="absolute left-[60%] top-[22%] size-[9%] rounded-full bg-[rgb(8_16_32_/_0.045)]" />
-            <svg viewBox="0 0 100 100" className="absolute inset-0 size-full">
-              <path
-                className="moonrise-check"
-                d="M31 52 L45 65 L70 37"
-                fill="none"
-                stroke="var(--on-accent)"
-                strokeOpacity="0.82"
-                strokeWidth="7"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                pathLength={1}
-              />
-            </svg>
-          </div>
-        </div>
-
-        <p
-          className="moonrise-rise mt-2 text-xs font-semibold uppercase tracking-[0.2em] text-faint"
-          style={{ '--d': '1220ms' } as CSSProperties}
-        >
-          {pick(language, 'Both goals met', 'Đạt cả hai mục tiêu')}
-        </p>
-        <h2
-          id="moonrise-title"
-          className="moonrise-rise mt-3 font-serif text-4xl font-semibold tracking-tight text-ink sm:text-5xl"
-          style={{ '--d': '1300ms' } as CSSProperties}
-        >
-          {pick(language, 'Today is complete.', 'Hôm nay đã trọn vẹn.')}
-        </h2>
-        <p
-          id="moonrise-detail"
-          className="moonrise-rise mt-3 max-w-sm text-sm leading-relaxed text-muted"
-          style={{ '--d': '1380ms' } as CSSProperties}
-        >
-          {pick(
-            language,
-            `${goals.newWords.done} new ${goals.newWords.done === 1 ? 'word' : 'words'} and ${goals.reviews.done} ${goals.reviews.done === 1 ? 'review' : 'reviews'} today.`,
-            `Hôm nay: ${goals.newWords.done} từ mới và ${goals.reviews.done} lượt ôn.`,
-          )}
-        </p>
-
-        <div className="moonrise-rise mt-7 flex flex-col items-center" style={{ '--d': '1480ms' } as CSSProperties}>
-          <div className="moonrise-pop relative h-14 overflow-hidden font-serif text-5xl font-semibold leading-[3.5rem] tabular-nums text-ink">
-            <span className="invisible">{streak}</span>
-            {before !== streak && (
-              <span className="moonrise-roll-out absolute inset-0" aria-hidden="true">
-                {before}
-              </span>
-            )}
-            <span className="moonrise-roll-in absolute inset-0">{streak}</span>
-          </div>
-          <p className="mt-1 text-sm font-medium text-muted">
-            {streak === 1
-              ? pick(language, 'Your streak starts today.', 'Chuỗi ngày bắt đầu từ hôm nay.')
-              : pick(language, `days in a row`, `ngày liên tiếp`)}
-          </p>
-          {best && (
-            <p
-              className="moonrise-rise mt-2 rounded-full bg-good-soft px-3 py-1 text-xs font-semibold text-good-ink"
-              style={{ '--d': '2150ms' } as CSSProperties}
-            >
-              {pick(language, 'Your longest streak yet', 'Chuỗi dài nhất của bạn')}
-            </p>
-          )}
-        </div>
-
-        <button
-          ref={button}
-          type="button"
-          className={`moonrise-rise mt-9 min-w-36 ${BUTTON_PRIMARY}`}
-          style={{ '--d': '1600ms' } as CSSProperties}
-          onClick={close}
-        >
-          {pick(language, 'Continue', 'Tiếp tục')}
-        </button>
+        {children(close)}
       </div>
     </dialog>
+  );
+}
+
+function Moonrise({ goals, onClose }: { goals: StudyGoalsResponse; onClose: () => void }) {
+  const language = useUiLanguage();
+  const actions = useRef<HTMLDivElement>(null);
+
+  const streak = goals.streak.current;
+  const before = Math.max(0, streak - 1);
+  const best = streak > 1 && streak >= goals.streak.longest;
+
+  return (
+    <NightScene
+      titleId="moonrise-title"
+      detailId="moonrise-detail"
+      settleMs={1700}
+      onClose={onClose}
+      actions={actions}
+      onOpen={(calm) => {
+        if (calm) return;
+        // A small knock as the rings meet, where the device has one.
+        const knock = setTimeout(() => navigator.vibrate?.([14, 70, 26]), 920);
+        return () => clearTimeout(knock);
+      }}
+    >
+      {(close) => (
+        <>
+          <div className="relative size-64 shrink-0" aria-hidden="true">
+            <div className="moonrise-glow absolute -inset-16 rounded-full" />
+            <span className="moonrise-halo absolute inset-[3.5rem] rounded-full" style={delay(940)} />
+            <span className="moonrise-halo absolute inset-[3.5rem] rounded-full" style={delay(1140)} />
+            {SPARKS.map((spark, index) => (
+              <span
+                key={index}
+                className="moonrise-spark"
+                style={
+                  {
+                    '--a': `${spark.angle}deg`,
+                    '--r': `${spark.reach}px`,
+                    '--s': `${spark.size}px`,
+                    '--d': `${spark.delay}ms`,
+                    background: spark.tone,
+                  } as CSSProperties
+                }
+              />
+            ))}
+            <MeltingRing side="left" color="var(--accent)" label={`${goals.newWords.done}/${goals.newWords.target}`} />
+            <MeltingRing side="right" color="var(--ink)" label={`${goals.reviews.done}/${goals.reviews.target}`} />
+            <div className="moonrise-moon absolute inset-[3.5rem] rounded-full">
+              <Craters />
+              <svg viewBox="0 0 100 100" className="absolute inset-0 size-full">
+                <path
+                  className="moonrise-check"
+                  d="M31 52 L45 65 L70 37"
+                  fill="none"
+                  stroke="var(--on-accent)"
+                  strokeOpacity="0.82"
+                  strokeWidth="7"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  pathLength={1}
+                />
+              </svg>
+            </div>
+          </div>
+
+          <p
+            className="moonrise-rise mt-2 text-xs font-semibold uppercase tracking-[0.2em] text-faint"
+            style={delay(1220)}
+          >
+            {pick(language, 'Both goals met', 'Đạt cả hai mục tiêu')}
+          </p>
+          <h2
+            id="moonrise-title"
+            className="moonrise-rise mt-3 font-serif text-4xl font-semibold tracking-tight text-ink sm:text-5xl"
+            style={delay(1300)}
+          >
+            {pick(language, 'Today is complete.', 'Hôm nay đã trọn vẹn.')}
+          </h2>
+          <p
+            id="moonrise-detail"
+            className="moonrise-rise mt-3 max-w-sm text-sm leading-relaxed text-muted"
+            style={delay(1380)}
+          >
+            {pick(
+              language,
+              `${goals.newWords.done} new ${goals.newWords.done === 1 ? 'word' : 'words'} and ${goals.reviews.done} ${goals.reviews.done === 1 ? 'review' : 'reviews'} today.`,
+              `Hôm nay: ${goals.newWords.done} từ mới và ${goals.reviews.done} lượt ôn.`,
+            )}
+          </p>
+
+          <div className="moonrise-rise mt-7 flex flex-col items-center" style={delay(1480)}>
+            <div className="moonrise-pop relative h-14 overflow-hidden font-serif text-5xl font-semibold leading-[3.5rem] tabular-nums text-ink">
+              <span className="invisible">{streak}</span>
+              {before !== streak && (
+                <span className="moonrise-roll-out absolute inset-0" aria-hidden="true">
+                  {before}
+                </span>
+              )}
+              <span className="moonrise-roll-in absolute inset-0">{streak}</span>
+            </div>
+            <p className="mt-1 text-sm font-medium text-muted">
+              {streak === 1
+                ? pick(language, 'Your streak starts today.', 'Chuỗi ngày bắt đầu từ hôm nay.')
+                : pick(language, `days in a row`, `ngày liên tiếp`)}
+            </p>
+            {best && (
+              <p
+                className="moonrise-rise mt-2 rounded-full bg-good-soft px-3 py-1 text-xs font-semibold text-good-ink"
+                style={delay(2150)}
+              >
+                {pick(language, 'Your longest streak yet', 'Chuỗi dài nhất của bạn')}
+              </p>
+            )}
+          </div>
+
+          <div ref={actions} className="moonrise-rise mt-9" style={delay(1600)}>
+            <button type="button" className={`min-w-36 ${BUTTON_PRIMARY}`} onClick={close}>
+              {pick(language, 'Continue', 'Tiếp tục')}
+            </button>
+          </div>
+        </>
+      )}
+    </NightScene>
+  );
+}
+
+/**
+ * A streak has ended. The moon carrying the old count passes into shadow,
+ * then a new crescent lights at its edge. No red and no knock: a missed day
+ * is a fact to tell kindly, and the way back is the next thing on the page.
+ */
+function Moonset({ goals, days, onClose }: { goals: StudyGoalsResponse; days: number; onClose: () => void }) {
+  const language = useUiLanguage();
+  const actions = useRef<HTMLDivElement>(null);
+  const restarted = goals.streak.metToday;
+  const newLeft = goals.newWords.met ? 0 : goals.newWords.remaining;
+  const reviewsLeft = goals.reviews.met ? 0 : goals.reviews.remaining;
+  const todo = [
+    newLeft > 0 ? pick(language, `${newLeft} new ${newLeft === 1 ? 'word' : 'words'}`, `${newLeft} từ mới`) : null,
+    reviewsLeft > 0
+      ? pick(language, `${reviewsLeft} ${reviewsLeft === 1 ? 'review' : 'reviews'}`, `${reviewsLeft} lượt ôn`)
+      : null,
+  ].filter((item): item is string => item !== null);
+  // The way back is whichever goal is still open, reviews first since they are what is due.
+  const again = reviewsLeft > 0 ? ROUTES.review : ROUTES.add;
+
+  return (
+    <NightScene titleId="moonset-title" detailId="moonset-detail" settleMs={2600} onClose={onClose} actions={actions}>
+      {(close) => (
+        <>
+          <div className="relative size-64 shrink-0" aria-hidden="true">
+            <div className="moonset-glow absolute -inset-16 rounded-full" />
+            <div className="moonset-body absolute inset-[3.5rem] overflow-hidden rounded-full">
+              <div className="moonset-light absolute inset-0 rounded-full">
+                <Craters />
+                <span className="absolute inset-0 flex items-center justify-center font-serif text-5xl font-semibold tabular-nums text-on-accent/80">
+                  {days}
+                </span>
+              </div>
+              <div className="moonset-shadow absolute -inset-px rounded-full" />
+            </div>
+            <span className="moonset-rim absolute inset-[3.5rem] rounded-full" />
+            <svg viewBox="0 0 100 100" className="moonset-crescent absolute inset-[3.5rem] overflow-visible">
+              <defs>
+                <mask id="moonset-crescent-mask">
+                  <rect x="-10" y="-10" width="120" height="120" fill="white" />
+                  <circle cx="61" cy="50" r="50" fill="black" />
+                </mask>
+              </defs>
+              <circle cx="50" cy="50" r="50" fill="var(--accent-hover)" mask="url(#moonset-crescent-mask)" />
+            </svg>
+          </div>
+
+          <p
+            className="moonrise-rise mt-2 text-xs font-semibold uppercase tracking-[0.2em] text-faint"
+            style={delay(2050)}
+          >
+            {pick(language, 'Streak ended', 'Chuỗi ngày đã khép lại')}
+          </p>
+          <h2
+            id="moonset-title"
+            className="moonrise-rise mt-3 font-serif text-4xl font-semibold tracking-tight text-ink sm:text-5xl"
+            style={delay(2130)}
+          >
+            {pick(language, `Your ${days}-day streak has ended.`, `Chuỗi ${days} ngày đã kết thúc.`)}
+          </h2>
+          <p
+            id="moonset-detail"
+            className="moonrise-rise mt-3 max-w-sm text-sm leading-relaxed text-muted"
+            style={delay(2210)}
+          >
+            {pick(
+              language,
+              'Missing a day happens. Every word you have learned is still here, and tonight a new moon starts the next streak.',
+              'Lỡ một ngày là chuyện bình thường. Mọi từ bạn đã học vẫn còn nguyên, và đêm nay trăng non mở đầu chuỗi mới.',
+            )}
+          </p>
+
+          <div className="moonrise-rise mt-6 flex flex-col items-center gap-2" style={delay(2300)}>
+            {(restarted || todo.length > 0) && (
+              <p className="text-sm font-medium text-ink">
+                {restarted
+                  ? pick(
+                      language,
+                      'You have already met today’s goals, so a new streak has begun.',
+                      'Hôm nay bạn đã đạt mục tiêu, chuỗi mới đã bắt đầu.',
+                    )
+                  : pick(
+                      language,
+                      `To start again today: ${todo.join(' and ')}.`,
+                      `Để bắt đầu lại hôm nay: ${todo.join(' và ')}.`,
+                    )}
+              </p>
+            )}
+            {goals.streak.longest > 0 && (
+              <p className="rounded-full border border-line-strong px-3 py-1 text-xs font-semibold tabular-nums text-muted">
+                {pick(
+                  language,
+                  `Longest streak: ${goals.streak.longest} ${goals.streak.longest === 1 ? 'day' : 'days'}`,
+                  `Chuỗi dài nhất: ${goals.streak.longest} ngày`,
+                )}
+              </p>
+            )}
+          </div>
+
+          <div
+            ref={actions}
+            className="moonrise-rise mt-8 flex flex-wrap items-center justify-center gap-2"
+            style={delay(2400)}
+          >
+            {restarted ? (
+              <button type="button" className={`min-w-36 ${BUTTON_PRIMARY}`} onClick={close}>
+                {pick(language, 'Continue', 'Tiếp tục')}
+              </button>
+            ) : (
+              <>
+                <Link to={again} className={`min-w-36 ${BUTTON_PRIMARY}`} onClick={close}>
+                  {pick(language, 'Start again', 'Bắt đầu lại')}
+                </Link>
+                <button type="button" className={BUTTON_GHOST} onClick={close}>
+                  {pick(language, 'Not now', 'Để sau')}
+                </button>
+              </>
+            )}
+          </div>
+        </>
+      )}
+    </NightScene>
+  );
+}
+
+function Craters() {
+  return (
+    <>
+      <span className="absolute left-[22%] top-[26%] size-[22%] rounded-full bg-[rgb(8_16_32_/_0.045)]" />
+      <span className="absolute left-[58%] top-[56%] size-[16%] rounded-full bg-[rgb(8_16_32_/_0.05)]" />
+      <span className="absolute left-[60%] top-[22%] size-[9%] rounded-full bg-[rgb(8_16_32_/_0.045)]" />
+    </>
   );
 }
 
