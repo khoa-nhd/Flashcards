@@ -89,6 +89,100 @@ describe('AI chat page', () => {
     expect(await within(thread()).findByRole('alert')).toHaveTextContent('stopped answering part way through');
   });
 
+  describe('queueing messages', () => {
+    /** A reply that stays open until `finish` is called, as a slow provider's would. */
+    const heldReply = () => {
+      let finish = () => undefined as void;
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"type":"delta","delta":"Slow reply"}\n\n'));
+          finish = () => {
+            controller.enqueue(new TextEncoder().encode('data: {"type":"done"}\n\n'));
+            controller.close();
+          };
+        },
+      });
+      return { stream, finish: () => finish() };
+    };
+    const queuePanel = () => within(thread()).getByRole('region', { name: 'Queued messages' });
+    const sent = (api: Awaited<ReturnType<typeof open>>['api']) => api.sendMessage.mock.calls.map((call) => call[1]);
+
+    it('queues with Ctrl+Enter while a reply arrives, then sends each in turn', async () => {
+      const { user, api } = await open();
+      await user.click(await within(list()).findByRole('button', { name: 'New' }));
+      const first = heldReply();
+      api.sendMessage.mockResolvedValueOnce(first.stream);
+      const box = await within(thread()).findByLabelText('Message');
+      await user.type(box, 'one{Enter}');
+      await within(thread()).findByText('Slow reply');
+
+      await user.type(box, 'two{Control>}{Enter}{/Control}');
+      await user.type(box, 'three{Control>}{Enter}{/Control}');
+      expect(box).toHaveValue('');
+      expect(within(queuePanel()).getAllByRole('listitem').map((item) => item.textContent)).toEqual([
+        expect.stringContaining('two'),
+        expect.stringContaining('three'),
+      ]);
+      expect(sent(api)).toEqual(['one']);
+
+      first.finish();
+      await waitFor(() => expect(sent(api)).toEqual(['one', 'two', 'three']));
+      expect(await within(thread()).findByText((_, element) => element?.tagName === 'P' && element.textContent === 'You said three.')).toBeInTheDocument();
+      await waitFor(() => expect(within(thread()).queryByRole('region', { name: 'Queued messages' })).not.toBeInTheDocument());
+    });
+
+    it('keeps the queue when one fails, with the failed message first, until Send', async () => {
+      const { user, api } = await open();
+      await user.click(await within(list()).findByRole('button', { name: 'New' }));
+      const first = heldReply();
+      api.sendMessage.mockResolvedValueOnce(first.stream);
+      api.sendMessage.mockRejectedValueOnce(new ApiError('rate_limited', 'Rate limit exceeded for minute. Try again in 30 seconds.', 429));
+      const box = await within(thread()).findByLabelText('Message');
+      await user.type(box, 'one{Enter}');
+      await within(thread()).findByText('Slow reply');
+      await user.type(box, 'two{Control>}{Enter}{/Control}');
+      await user.type(box, 'three{Control>}{Enter}{/Control}');
+
+      first.finish();
+      expect(await within(thread()).findByRole('alert')).toHaveTextContent('Try again in 30 seconds.');
+      const items = within(queuePanel()).getAllByRole('listitem');
+      expect(items.map((item) => item.textContent)).toEqual([expect.stringMatching(/two.*Failed/), expect.stringContaining('three')]);
+      // Stopped: nothing more goes until the reader says so.
+      expect(sent(api)).toEqual(['one', 'two']);
+
+      await user.click(within(queuePanel()).getByRole('button', { name: 'Send' }));
+      await waitFor(() => expect(sent(api)).toEqual(['one', 'two', 'two', 'three']));
+      await waitFor(() => expect(within(thread()).queryByRole('region', { name: 'Queued messages' })).not.toBeInTheDocument());
+      expect(within(thread()).queryByRole('alert')).not.toBeInTheDocument();
+    });
+
+    it('has a queue button for a phone, which sends at once when nothing is on its way', async () => {
+      const { user, api } = await open();
+      await user.click(await within(list()).findByRole('button', { name: 'New' }));
+      const box = await within(thread()).findByLabelText('Message');
+      await user.type(box, 'hello');
+      await user.click(within(thread()).getByRole('button', { name: 'Add to queue' }));
+      expect(await within(thread()).findByTestId('message-assistant')).toHaveTextContent('You said hello.');
+      expect(sent(api)).toEqual(['hello']);
+    });
+
+    it('lets a queued message be taken out before it is sent', async () => {
+      const { user, api } = await open();
+      await user.click(await within(list()).findByRole('button', { name: 'New' }));
+      const first = heldReply();
+      api.sendMessage.mockResolvedValueOnce(first.stream);
+      const box = await within(thread()).findByLabelText('Message');
+      await user.type(box, 'one{Enter}');
+      await within(thread()).findByText('Slow reply');
+      await user.type(box, 'two{Control>}{Enter}{/Control}');
+      await user.click(within(queuePanel()).getByRole('button', { name: 'Remove “two” from the queue' }));
+      first.finish();
+      await waitFor(() => expect(within(thread()).getByTestId('message-assistant')).toHaveTextContent('Slow reply'));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(sent(api)).toEqual(['one']);
+    });
+  });
+
   it('says plainly when AI chat is not set up on the server', async () => {
     window.history.replaceState(null, '', '/chat');
     const fake = createFakeApi();

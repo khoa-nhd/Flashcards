@@ -12,13 +12,22 @@ import { Icon } from '../components/Icon.js';
 import { Markdown } from '../components/Markdown.js';
 import { Spinner } from '../components/Spinner.js';
 import { ThinkingIndicator } from '../components/ThinkingIndicator.js';
-import { BUTTON_PRIMARY } from '../components/ui.js';
+import { BUTTON_PRIMARY, BUTTON_SECONDARY } from '../components/ui.js';
 import { ApiError } from '../lib/api-client.js';
 import { readChatStream } from '../lib/chat-stream.js';
 import { buildHref, navigate, ROUTES, useLocation } from '../lib/router.js';
 
 /** The server's default limit for one message. */
 const MESSAGE_MAX_CHARS = 4000;
+
+/** How many messages can wait their turn in one conversation. */
+const QUEUE_MAX = 20;
+
+/** A message written ahead, sent once the replies before it have finished. */
+interface QueuedMessage {
+  id: string;
+  content: string;
+}
 
 /** Message metadata as an object, however the server shaped it. */
 const metadataOf = (metadata: unknown): Record<string, unknown> =>
@@ -97,6 +106,17 @@ export function ChatPage() {
   const [creating, setCreating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState<AiConversation | null>(null);
   const [deleting, setDeleting] = useState<{ busy: boolean; error: string | null }>({ busy: false, error: null });
+
+  // Messages waiting their turn, per conversation, oldest first. A failure stops
+  // that conversation's queue, with the failed message back at its head, until
+  // the reader sends again. The refs are what the sending loop reads; the
+  // state is what the page draws, and the two are always set together.
+  const [queues, setQueues] = useState<Record<string, QueuedMessage[]>>({});
+  const queuesNow = useRef<Record<string, QueuedMessage[]>>({});
+  const [paused, setPaused] = useState<Record<string, true>>({});
+  const pausedNow = useRef<Record<string, true>>({});
+  // A reply is on its way; set at once, before `sending` reaches the page.
+  const busy = useRef(false);
 
   const composer = useRef<HTMLTextAreaElement>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
@@ -202,17 +222,27 @@ export function ChatPage() {
     );
   };
 
-  const send = async () => {
-    const content = draft.trim();
-    if (content === '' || sending || current === null) return;
-    const id = current.id;
+  const setQueue = (id: string, items: QueuedMessage[]) => {
+    queuesNow.current = { ...queuesNow.current, [id]: items };
+    setQueues(queuesNow.current);
+  };
+
+  const setPause = (id: string, on: boolean) => {
+    const next = { ...pausedNow.current };
+    if (on) next[id] = true;
+    else delete next[id];
+    pausedNow.current = next;
+    setPaused(next);
+  };
+
+  /** Sends one message and shows its reply as it arrives. Resolves to why it failed, or null. */
+  const deliver = async (id: string, content: string): Promise<string | null> => {
     const now = new Date().toISOString();
     const question: AiMessage = { id: crypto.randomUUID(), role: 'user', content, metadata: {}, createdAt: now };
     const answer: AiMessage = { id: crypto.randomUUID(), role: 'assistant', content: '', metadata: {}, createdAt: now };
+    busy.current = true;
     setSending(true);
     setSendError(null);
-    setDraft('');
-    resizeComposer('');
     updateMessages(id, (messages) => [...messages, question, answer]);
 
     let text = '';
@@ -231,10 +261,8 @@ export function ChatPage() {
     }
 
     if (failure !== null) {
-      // Nothing of a failed exchange is kept, so the message goes back into the box to send again.
+      // Nothing of a failed exchange is kept; the caller puts the message back to send again.
       updateMessages(id, (messages) => messages.filter((message) => message.id !== question.id && message.id !== answer.id));
-      setDraft((latest) => (latest === '' ? content : latest));
-      setSendError(failure);
     } else {
       // The first message names the conversation; the list shows the new name.
       void loadConversations();
@@ -243,7 +271,83 @@ export function ChatPage() {
         setSendError('The reply took too long and was stopped part way; what arrived is kept. Ask again to continue.');
       }
     }
+    busy.current = false;
     setSending(false);
+    return failure;
+  };
+
+  /** Sends what is queued for a conversation, one reply at a time, until it is empty or a message fails. */
+  const runQueue = async (id: string) => {
+    while (!busy.current && pausedNow.current[id] !== true) {
+      const [next, ...rest] = queuesNow.current[id] ?? [];
+      if (next === undefined) return;
+      setQueue(id, rest);
+      const failure = await deliver(id, next.content);
+      if (failure !== null) {
+        // The rest stays as it was, behind the one that failed.
+        setQueue(id, [next, ...(queuesNow.current[id] ?? [])]);
+        setPause(id, true);
+        setSendError(failure);
+        return;
+      }
+    }
+  };
+
+  const send = async () => {
+    const content = draft.trim();
+    if (content === '' || busy.current || current === null) return;
+    const id = current.id;
+    setDraft('');
+    resizeComposer('');
+    const failure = await deliver(id, content);
+    if (failure === null) {
+      void runQueue(id);
+      return;
+    }
+    setSendError(failure);
+    const waiting = queuesNow.current[id] ?? [];
+    if (waiting.length > 0) {
+      // Messages are waiting behind it: it heads the queue, and the queue waits for Send.
+      setQueue(id, [{ id: crypto.randomUUID(), content }, ...waiting]);
+      setPause(id, true);
+    } else {
+      // On its own, it goes back into the box to send again.
+      setDraft((latest) => (latest === '' ? content : latest));
+    }
+  };
+
+  /** Puts what is written at the end of the queue; with nothing on its way, it goes at once. */
+  const enqueue = () => {
+    const content = draft.trim();
+    if (content === '' || current === null) return;
+    const id = current.id;
+    const waiting = queuesNow.current[id] ?? [];
+    if (waiting.length >= QUEUE_MAX) return;
+    setQueue(id, [...waiting, { id: crypto.randomUUID(), content }]);
+    setDraft('');
+    resizeComposer('');
+    composer.current?.focus();
+    void runQueue(id);
+  };
+
+  /** Goes on with a stopped queue, starting with the message that failed. */
+  const resumeQueue = () => {
+    if (current === null) return;
+    setPause(current.id, false);
+    setSendError(null);
+    void runQueue(current.id);
+  };
+
+  const removeQueued = (itemId: string) => {
+    if (current === null) return;
+    const id = current.id;
+    const left = (queuesNow.current[id] ?? []).filter((item) => item.id !== itemId);
+    setQueue(id, left);
+    if (left.length === 0 && pausedNow.current[id] === true) {
+      // Nothing left to go on with, so nothing is stopped any more.
+      setPause(id, false);
+      setSendError(null);
+    }
   };
 
   const resizeComposer = (value: string) => {
@@ -259,12 +363,21 @@ export function ChatPage() {
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
+    // Ctrl+Enter (Cmd+Enter on a Mac) queues; it works while a reply is still arriving.
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      enqueue();
+      return;
+    }
+    if (!event.shiftKey) {
       event.preventDefault();
       void send();
     }
   };
 
+  const queued = current === null ? [] : (queues[current.id] ?? []);
+  const queueStopped = current !== null && paused[current.id] === true;
   const shown = (conversations ?? []).filter((conversation) => conversation.mode === mode);
   const threadOpen = conversationId !== null;
 
@@ -423,6 +536,53 @@ export function ChatPage() {
                 {sendError}
               </p>
             )}
+            {queued.length > 0 && (
+              <section aria-label="Queued messages" className="mb-2 rounded-xl border border-line bg-surface/60 p-2">
+                <div className="flex min-h-8 items-center justify-between gap-2 px-1 pb-1.5">
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-faint">
+                    Queued <span className="tabular-nums">· {queued.length}</span>
+                  </p>
+                  {queueStopped && (
+                    <button type="button" className={`${BUTTON_PRIMARY} min-h-8 px-3 py-1 text-xs`} onClick={resumeQueue}>
+                      <Icon name="right" className="size-3.5" />
+                      Send
+                    </button>
+                  )}
+                </div>
+                {queueStopped ? (
+                  <p className="px-1 pb-1.5 text-xs leading-relaxed text-muted">
+                    Stopped at the message that failed. Press Send to go on from there.
+                  </p>
+                ) : (
+                  sending && <p className="px-1 pb-1.5 text-xs leading-relaxed text-muted">Each one is sent when the reply before it has finished.</p>
+                )}
+                <ol className="flex max-h-40 flex-col gap-1 overflow-y-auto">
+                  {queued.map((item, index) => {
+                    const failed = queueStopped && index === 0;
+                    return (
+                      <li
+                        key={item.id}
+                        className={`flex items-center gap-2 rounded-lg px-2.5 py-1 text-sm ${failed ? 'bg-bad-soft text-bad-ink' : 'bg-paper/60 text-ink'}`}
+                      >
+                        <span className="w-4 shrink-0 text-xs tabular-nums text-faint">{index + 1}</span>
+                        <span className="min-w-0 flex-1 truncate" title={item.content}>
+                          {item.content}
+                        </span>
+                        {failed && <span className="shrink-0 text-xs font-semibold">Failed</span>}
+                        <button
+                          type="button"
+                          onClick={() => removeQueued(item.id)}
+                          aria-label={`Remove “${item.content.slice(0, 40)}” from the queue`}
+                          className="flex size-8 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted hover:bg-line-strong/50 hover:text-ink"
+                        >
+                          <Icon name="close" className="size-3.5" />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ol>
+              </section>
+            )}
             <div className="flex items-end gap-2">
               <label htmlFor="chat-message" className="sr-only">
                 Message
@@ -442,6 +602,16 @@ export function ChatPage() {
                 className="max-h-[200px] min-h-11 min-w-0 flex-1 resize-none rounded-xl border border-line bg-surface px-3 py-2.5 text-base leading-snug text-ink placeholder:text-muted/70"
               />
               <button
+                type="button"
+                onClick={enqueue}
+                disabled={draft.trim() === '' || queued.length >= QUEUE_MAX}
+                aria-label="Add to queue"
+                title="Add to queue (Ctrl+Enter)"
+                className={`${BUTTON_SECONDARY} size-11 shrink-0 px-0`}
+              >
+                <Icon name="list" className="size-5" />
+              </button>
+              <button
                 type="submit"
                 disabled={sending || draft.trim() === ''}
                 aria-label="Send message"
@@ -450,7 +620,9 @@ export function ChatPage() {
                 {sending ? <Spinner /> : <Icon name="right" className="size-5" />}
               </button>
             </div>
-            <p className="mt-1.5 hidden text-xs text-muted keyboard:block">Enter to send · Shift+Enter for a new line</p>
+            <p className="mt-1.5 hidden text-xs text-muted keyboard:block">
+              Enter to send · Ctrl+Enter to queue · Shift+Enter for a new line
+            </p>
           </form>
         )}
       </section>
