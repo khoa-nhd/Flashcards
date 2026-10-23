@@ -20,6 +20,7 @@ import {
 import { useApp, useVocabulary } from '../app-context.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
+import { studyGoalsMayHaveMoved } from '../components/StudyGoals.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, HELP, INPUT, PAGE, SECTION_TITLE, TEXTAREA } from '../components/ui.js';
 import { ApiError } from '../lib/api-client.js';
@@ -222,6 +223,7 @@ export function ImportPage() {
       const rest = () => chunks.slice(position).flat();
       try {
         const reply = await api.importWords(chunk, spreadPerDay ?? undefined, offset);
+        if (reply.results.some((outcome) => outcome.outcome === 'imported')) studyGoalsMayHaveMoved();
         reply.results.forEach((outcome, index) => {
           if (outcome.outcome === 'imported') result.imported += 1;
           else if (outcome.outcome === 'already_imported') result.alreadyImported += 1;

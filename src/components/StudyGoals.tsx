@@ -8,6 +8,8 @@ import type { StudyGoalsResponse } from '../../shared/api.js';
 import { useApp, useUiLanguage } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { pick, type UiLanguage } from '../lib/i18n.js';
+import { ROUTES } from '../lib/router.js';
+import { Link } from './Link.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY, BUTTON_SECONDARY, INPUT } from './ui.js';
 
 export interface StudyGoalsState {
@@ -26,13 +28,44 @@ const lastGoals = new WeakMap<object, StudyGoalsResponse>();
 /** A request already on its way, shared by every part of the page that asks at the same time. */
 const inFlight = new WeakMap<object, Promise<StudyGoalsResponse>>();
 
-function fetchShared(api: { fetchStudyGoals(): Promise<StudyGoalsResponse> }): Promise<StudyGoalsResponse> {
+type GoalsListener = (api: object, data: StudyGoalsResponse) => void;
+/** Told every time fresh goals arrive, wherever they were asked for: what the celebration watches. */
+const goalsListeners = new Set<GoalsListener>();
+/** Told when something outside the outbox, such as an import, may have moved today's goals. */
+const workListeners = new Set<() => void>();
+
+function remember(api: object, data: StudyGoalsResponse) {
+  lastGoals.set(api, data);
+  for (const listener of goalsListeners) listener(api, data);
+}
+
+export function subscribeStudyGoals(listener: GoalsListener): () => void {
+  goalsListeners.add(listener);
+  return () => goalsListeners.delete(listener);
+}
+
+/** The goals this account was last told, if any, without asking again. */
+export function knownStudyGoals(api: object): StudyGoalsResponse | undefined {
+  return lastGoals.get(api);
+}
+
+/** Says that today's goals may have moved, for work that does not pass through the outbox. */
+export function studyGoalsMayHaveMoved(): void {
+  for (const listener of workListeners) listener();
+}
+
+export function subscribeGoalWork(listener: () => void): () => void {
+  workListeners.add(listener);
+  return () => workListeners.delete(listener);
+}
+
+export function fetchShared(api: { fetchStudyGoals(): Promise<StudyGoalsResponse> }): Promise<StudyGoalsResponse> {
   const pending = inFlight.get(api);
   if (pending !== undefined) return pending;
   const request = api.fetchStudyGoals().then(
     (data) => {
-      lastGoals.set(api, data);
       inFlight.delete(api);
+      remember(api, data);
       return data;
     },
     (error: unknown) => {
@@ -75,7 +108,7 @@ export function useStudyGoals(enabled: boolean) {
   }, [reload]);
 
   const adopt = (data: StudyGoalsResponse) => {
-    lastGoals.set(api, data);
+    remember(api, data);
     setState({ status: 'ready', data, error: null });
   };
   return { ...state, reload, adopt };
@@ -102,6 +135,138 @@ export function StudyGoalsSkeleton() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** The streak warning starts this many minutes before the day ends, and grows urgent at the second. */
+export const STREAK_WARNING_MINUTES = 6 * 60;
+export const STREAK_URGENT_MINUTES = 2 * 60;
+
+/**
+ * Minutes left of `day` in the account's time zone, or `null` when it is
+ * already another day there: goals from before midnight say nothing about now.
+ */
+export function minutesLeftOf(day: string, timeZone: string, now: Date): number | null {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? '';
+  if (`${part('year')}-${part('month')}-${part('day')}` !== day) return null;
+  return 24 * 60 - (Number(part('hour')) * 60 + Number(part('minute')));
+}
+
+/** The time, kept current to the half minute while the card is shown. */
+function useNow(): Date {
+  const [now, setNow] = useState(() => new Date());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 30_000);
+    return () => clearInterval(timer);
+  }, []);
+  return now;
+}
+
+export interface StreakRisk {
+  minutesLeft: number;
+  urgent: boolean;
+}
+
+/**
+ * A streak still standing from yesterday is lost at midnight unless today is
+ * met. Close to midnight that is worth saying; earlier in the day it is not.
+ */
+export function streakRisk(data: StudyGoalsResponse, now: Date): StreakRisk | null {
+  if (!data.available || !data.chosen || data.streak.metToday || data.streak.current === 0) return null;
+  const minutesLeft = minutesLeftOf(data.today, data.timeZone, now);
+  if (minutesLeft === null || minutesLeft <= 0 || minutesLeft > STREAK_WARNING_MINUTES) return null;
+  return { minutesLeft, urgent: minutesLeft <= STREAK_URGENT_MINUTES };
+}
+
+function timeLeft(language: UiLanguage, minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (hours === 0) return pick(language, `${rest} min`, `${rest} phút`);
+  if (rest === 0) return pick(language, `${hours} h`, `${hours} giờ`);
+  return pick(language, `${hours} h ${rest} min`, `${hours} giờ ${rest} phút`);
+}
+
+/** The moon from the celebration, waning as the evening runs out. */
+function WaningMoon({ fraction, urgent }: { fraction: number; urgent: boolean }) {
+  // The shadow slides in from the right: a full moon at six hours left, a sliver at the end.
+  const shadow = 14 + 16 * Math.max(0, Math.min(1, fraction));
+  const id = `waning-${Math.round(shadow * 10)}`;
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className={`mt-0.5 size-6 shrink-0 ${urgent ? 'animate-pulse motion-reduce:animate-none' : ''}`}
+      aria-hidden="true"
+    >
+      <defs>
+        <mask id={id}>
+          <rect width="24" height="24" fill="white" />
+          <circle cx={shadow} cy="12" r="9" fill="black" />
+        </mask>
+      </defs>
+      <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" strokeOpacity="0.3" strokeWidth="1.25" />
+      <circle cx="12" cy="12" r="9" fill="currentColor" mask={`url(#${id})`} />
+    </svg>
+  );
+}
+
+function StreakWarning({ data, risk, language }: { data: StudyGoalsResponse; risk: StreakRisk; language: UiLanguage }) {
+  const days = data.streak.current;
+  const newLeft = data.newWords.met ? 0 : data.newWords.remaining;
+  const reviewsLeft = data.reviews.met ? 0 : data.reviews.remaining;
+  const missing = [
+    newLeft > 0 ? pick(language, `${newLeft} new ${newLeft === 1 ? 'word' : 'words'}`, `${newLeft} từ mới`) : null,
+    reviewsLeft > 0
+      ? pick(language, `${reviewsLeft} ${reviewsLeft === 1 ? 'review' : 'reviews'}`, `${reviewsLeft} lượt ôn`)
+      : null,
+  ].filter((item): item is string => item !== null);
+  const tone = risk.urgent
+    ? 'border-bad/35 bg-bad-soft text-bad-ink'
+    : 'border-[rgb(236_201_143_/_0.3)] bg-warn-soft text-warn-ink';
+  const action =
+    'inline-flex min-h-9 items-center rounded-lg border border-current/30 px-3 text-xs font-semibold transition-colors hover:bg-current/10';
+
+  return (
+    <section
+      aria-label={pick(language, 'Streak at risk', 'Chuỗi ngày sắp mất')}
+      className={`mt-3 flex gap-3 rounded-xl border px-3 py-3 ${tone}`}
+    >
+      <WaningMoon fraction={risk.minutesLeft / STREAK_WARNING_MINUTES} urgent={risk.urgent} />
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-semibold leading-snug">
+          {pick(
+            language,
+            `Your ${days}-day streak ends in ${timeLeft(language, risk.minutesLeft)}.`,
+            `Chuỗi ${days} ngày sẽ mất sau ${timeLeft(language, risk.minutesLeft)}.`,
+          )}
+        </p>
+        {missing.length > 0 && (
+          <p className="mt-0.5 text-xs leading-relaxed opacity-85">
+            {pick(language, `Still to do: ${missing.join(' and ')}.`, `Còn thiếu: ${missing.join(' và ')}.`)}
+          </p>
+        )}
+        <div className="mt-2.5 flex flex-wrap gap-2">
+          {reviewsLeft > 0 && (
+            <Link to={ROUTES.review} className={action}>
+              {pick(language, 'Review now', 'Ôn ngay')}
+            </Link>
+          )}
+          {newLeft > 0 && (
+            <Link to={ROUTES.add} className={action}>
+              {pick(language, 'Add words', 'Thêm từ')}
+            </Link>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -187,6 +352,7 @@ export function StudyGoalsCard({
   const [maintenance, setMaintenance] = useState(data.goals.maintenanceMode);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const risk = streakRisk(data, useNow());
 
   const beginEdit = () => {
     setNewWords(String(data.goals.newWords));
@@ -248,7 +414,15 @@ export function StudyGoalsCard({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="rounded-full border border-line-strong px-3 py-1 text-xs font-semibold tabular-nums text-muted">
+          <span
+            className={`rounded-full border px-3 py-1 text-xs font-semibold tabular-nums ${
+              risk === null
+                ? 'border-line-strong text-muted'
+                : risk.urgent
+                  ? 'border-bad/40 text-bad-ink'
+                  : 'border-[rgb(236_201_143_/_0.4)] text-warn-ink'
+            }`}
+          >
             {pick(language, `Streak ${data.streak.current}`, `Chuỗi ${data.streak.current} ngày`)}
           </span>
           {!compact && (
@@ -263,6 +437,8 @@ export function StudyGoalsCard({
           )}
         </div>
       </div>
+
+      {risk !== null && <StreakWarning data={data} risk={risk} language={language} />}
 
       {!data.chosen && (
         <p className="mt-3 rounded-lg border border-line bg-paper px-3 py-2 text-xs leading-relaxed text-muted">

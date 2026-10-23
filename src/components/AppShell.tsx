@@ -3,6 +3,7 @@ import { useSync, useUiLanguage } from '../app-context.js';
 import { pick } from '../lib/i18n.js';
 import { ROUTES, type RouteKey } from '../lib/router.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
+import { GoalCelebration } from './GoalCelebration.js';
 import { Icon, type IconName } from './Icon.js';
 import { Link } from './Link.js';
 import { Onboarding } from './Onboarding.js';
@@ -195,6 +196,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
         </nav>
       </div>
       <Onboarding />
+      <GoalCelebration />
     </div>
   );
 }

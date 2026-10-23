@@ -29,6 +29,8 @@ export interface AccountControls {
 }
 
 export interface AppServices {
+  /** The signed-in account's id, or `local` without accounts. Names what this device keeps for it. */
+  accountId: string;
   api: AppApi;
   session: SessionController;
   vocabulary: VocabularyStore;
@@ -134,6 +136,7 @@ export function createAppServices(
   };
 
   return {
+    accountId,
     api: client,
     session,
     vocabulary,
