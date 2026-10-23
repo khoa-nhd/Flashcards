@@ -73,6 +73,7 @@ export class StudyGoalsService {
     const { records } = await repository.listLiveRecords();
     let total = 0;
     let overdue = 0;
+    let newWaiting = 0;
     for (const record of records) {
       if (record.suspended === true) continue;
       const state = record.fsrs?.state ?? null;
@@ -81,6 +82,8 @@ export class StudyGoalsService {
       // A word never studied is new, not a review: it counts towards the new-word goal instead.
       if (state !== null && order <= 0) total += 1;
       if (state !== null && order < 0) overdue += 1;
+      // A new word that comes up today is still something to study, so the review goal stays open.
+      if (state === null && order <= 0) newWaiting += 1;
     }
 
     const counts =
@@ -89,7 +92,7 @@ export class StudyGoalsService {
         : { newWords: 0, reviews: 0 };
     // New words are the words added today (the owner's rule), wherever they were added from.
     const newDone = await this.addedOn(today, counts.newWords);
-    const day = evaluateDay({ goals, newDone, reviewsDone: counts.reviews, dueLeft: total });
+    const day = evaluateDay({ goals, newDone, reviewsDone: counts.reviews, dueLeft: total, newWaiting });
 
     let metToday = day.met;
     let metDays: IsoDate[] = [];

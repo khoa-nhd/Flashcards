@@ -32,7 +32,7 @@ Mục tiêu:
 | Chế độ ôn | Giữ Everything due, Weakest words, Select words; weak dựa trên tổng hợp rủi ro FSRS |
 | Mục tiêu ngày | Hai mục tiêu riêng: từ mới + review; hai vòng tròn cạnh nhau; sửa được trong dashboard |
 | Mục tiêu từ mới | Tính khi **thêm từ** (Add, AI Chat, import), theo ngày "Date added" — chủ dự án đổi ngày 2026-10-22 (trước đó: khi đưa vào học) |
-| Mục tiêu review | Tính số từ due đã ôn; nếu đã hết từ due thì mục tiêu review vẫn đạt |
+| Mục tiêu review | Tính số từ due đã ôn; nếu đã hết từ due và không còn từ mới đang chờ học thì mục tiêu review vẫn đạt — chủ dự án thêm ngày 2026-10-23: thêm từ mới khi chưa đủ số lượt thì mục tiêu mở lại (chưa đạt) |
 | Streak | Chỉ tăng khi đạt cả hai mục tiêu |
 | Hết từ mới | Không tự đạt mục tiêu từ mới; có maintenance mode cho phép đặt mục tiêu từ mới = 0 |
 | Phiên ôn | Không dừng khi đạt mục tiêu; mục tiêu chỉ dùng cho streak, vẫn có "ôn thêm" |

@@ -381,17 +381,37 @@ describe('the two daily goals', () => {
     expect(await db.admin('select * from public.study_days')).toEqual([]);
   });
 
-  it('counts a word added today, meets the review goal when nothing is left due, and starts a streak', async () => {
+  it('counts a word added today, meets the review goal when nothing is left to study, and starts a streak', async () => {
     expect((await setGoals(alice, { newWords: 1, reviews: 5 })).status).toBe(200);
     expect(await goalsOf(alice)).toMatchObject({ chosen: true, newWords: { done: 0, met: false }, streak: { current: 0 } });
+    // Nothing at all to study yet, so five reviews are not needed today.
+    expect((await goalsOf(alice)).reviews).toMatchObject({ target: 5, done: 0, met: true, exhausted: true });
 
-    await addWord(alice, 'candid');
-    const goals = await goalsOf(alice);
+    const word = await addWord(alice, 'candid');
+    let goals = await goalsOf(alice);
     // The owner's rule (2026-10-22): adding the word is what counts, not studying it.
     expect(goals.newWords).toEqual({ target: 1, done: 1, remaining: 0, met: true, exhausted: false });
-    // Nothing is due for review, so five reviews are not needed today.
+    // The owner's rule (2026-10-23): the new word is still waiting, so the review goal is open again.
+    expect(goals.reviews).toMatchObject({ target: 5, done: 0, met: false, exhausted: false });
+    expect(goals.streak).toEqual({ current: 0, longest: 0, metToday: false });
+
+    await answer(alice, remember(word.id, 0));
+    goals = await goalsOf(alice);
     expect(goals.reviews).toMatchObject({ target: 5, done: 0, met: true, exhausted: true });
     expect(goals.streak).toEqual({ current: 1, longest: 1, metToday: true });
+  });
+
+  it('reopens a review goal met by running out, when a word is added before it is reached', async () => {
+    await setGoals(alice, { newWords: 1, reviews: 5 });
+    const first = await addWord(alice, 'candid');
+    await answer(alice, remember(first.id, 0));
+    expect((await goalsOf(alice)).reviews.met).toBe(true);
+
+    await addWord(alice, 'lucid');
+    const goals = await goalsOf(alice);
+    expect(goals.reviews).toMatchObject({ done: 0, remaining: 5, met: false, exhausted: false });
+    // The day was already met, and a met day stays met for the streak.
+    expect(goals.streak).toMatchObject({ current: 1, metToday: true });
   });
 
   it('counts only due words as reviews, not words taken early', async () => {
@@ -412,6 +432,7 @@ describe('the two daily goals', () => {
   it('keeps a met day met, even after the word that met it is deleted', async () => {
     await setGoals(alice, { newWords: 1, reviews: 1 });
     const word = await addWord(alice, 'candid');
+    await answer(alice, remember(word.id, 0));
     expect((await goalsOf(alice)).streak.metToday).toBe(true);
     await call(app, alice, `/api/vocabulary/${word.id}`, { method: 'DELETE' });
     const goals = await goalsOf(alice);
@@ -442,12 +463,14 @@ describe('the two daily goals', () => {
     expect(studyGoalsResponseSchema.parse(await maintenance.json()).newWords).toMatchObject({ target: 0, met: true });
   });
 
-  it('records the day as soon as adding a word completes it, without the goals being opened', async () => {
+  it('records the day as soon as it is completed, without the goals being opened', async () => {
     await setGoals(alice, { newWords: 1, reviews: 1 });
-    await addWord(alice, 'candid');
-    expect(await db.admin('select day::text as day, met from public.study_days where user_id = $1', [alice.id])).toEqual([
-      { day: TODAY, met: true },
-    ]);
+    const word = await addWord(alice, 'candid');
+    const recorded = () => db.admin('select day::text as day, met from public.study_days where user_id = $1', [alice.id]);
+    // Added but not studied yet: the review goal is still open.
+    expect(await recorded()).toEqual([{ day: TODAY, met: false }]);
+    await answer(alice, remember(word.id, 0));
+    expect(await recorded()).toEqual([{ day: TODAY, met: true }]);
   });
 
   it('counts a spread-out import by the day its words are added, not the day they first come up', async () => {

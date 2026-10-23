@@ -15,6 +15,11 @@ describe('the two daily goals', () => {
     expect(evaluateDay({ goals, newDone: 10, reviewsDone: 29, dueLeft: 5, newLeft: 50 }).met).toBe(false);
   });
 
+  it('keeps the review goal open while a new word waits, even with nothing due', () => {
+    const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, dueLeft: 0, newWaiting: 1, newLeft: 50 });
+    expect(day.reviews).toEqual({ target: 30, done: 4, remaining: 26, met: false, exhausted: false });
+  });
+
   it('meets the review goal once nothing is left due, however few were due', () => {
     const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, dueLeft: 0, newLeft: 50 });
     expect(day.reviews).toEqual({ target: 30, done: 4, remaining: 26, met: true, exhausted: true });

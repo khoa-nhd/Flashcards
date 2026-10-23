@@ -4,7 +4,9 @@
  *
  * - New words: words added to the vocabulary that day (the owner's rule,
  *   2026-10-22, replacing "brought into study"). Maintenance mode lets it be 0.
- * - Reviews: due words reviewed that day. Met as well once nothing is left due.
+ * - Reviews: due words reviewed that day. Met as well once nothing is left to
+ *   study today: no word due and no new word waiting (the owner's rule,
+ *   2026-10-23: a word added after the reviews ran out reopens the goal).
  * - A day counts towards the streak only when both are met.
  * - The goals never stop a session; they only decide the streak.
  *
@@ -53,6 +55,8 @@ export interface DayInput {
   reviewsDone: number;
   /** Words still due now. */
   dueLeft: number;
+  /** New words that can be studied today, never studied yet. Leave it out to count none. */
+  newWaiting?: number;
   /** Words never studied yet, archived ones left out. Leave it out where it does not limit the goal. */
   newLeft?: number;
 }
@@ -63,7 +67,7 @@ export interface DayResult {
   met: boolean;
 }
 
-export function evaluateDay({ goals, newDone, reviewsDone, dueLeft, newLeft }: DayInput): DayResult {
+export function evaluateDay({ goals, newDone, reviewsDone, dueLeft, newWaiting = 0, newLeft }: DayInput): DayResult {
   const part = (target: number, done: number, met: boolean, exhausted: boolean): GoalPart => ({
     target,
     done,
@@ -73,8 +77,10 @@ export function evaluateDay({ goals, newDone, reviewsDone, dueLeft, newLeft }: D
   });
   // No new words left does not meet the new-word goal: maintenance mode is the way to a goal of 0.
   const newWords = part(goals.newWords, newDone, newDone >= goals.newWords, newLeft === 0);
-  // Nothing left due meets the review goal, however few were due today.
-  const reviews = part(goals.reviews, reviewsDone, reviewsDone >= goals.reviews || dueLeft === 0, dueLeft === 0);
+  // Nothing left to study today meets the review goal, however few were due. A new word
+  // waiting to be studied still leaves something to do, so it keeps the goal open.
+  const nothingLeft = dueLeft === 0 && newWaiting === 0;
+  const reviews = part(goals.reviews, reviewsDone, reviewsDone >= goals.reviews || nothingLeft, nothingLeft);
   return { newWords, reviews, met: newWords.met && reviews.met };
 }
 

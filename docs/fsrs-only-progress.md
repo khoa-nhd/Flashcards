@@ -88,7 +88,9 @@ Cập nhật: 2026-10-21 (lần 2). File này ghi lại phần **đã làm** và
 - Hai mục tiêu ngày (`shared/study-goals.ts`, `server/study-goals-service.ts`, `GET/PUT /api/study-goals`):
   - Từ mới = số từ **thêm vào** trong ngày, theo "Date added" (chủ dự án đổi ngày 2026-10-22; trước đó là "đưa vào học"
     bằng `counted_as_new`). Ngày được ghi nhận ngay sau khi thêm từ / import, không chỉ sau câu trả lời.
-  - Review = số từ **đến hạn** được ôn trong ngày (ôn sớm không tính); đạt luôn khi không còn từ đến hạn.
+  - Review = số từ **đến hạn** được ôn trong ngày (ôn sớm không tính); đạt luôn khi không còn từ đến hạn **và**
+    không còn từ mới đang chờ học hôm nay (chủ dự án 2026-10-23: thêm từ mới khi chưa đủ số lượt thì mục tiêu mở lại).
+    Lượt đầu của từ mới vẫn không tính vào số lượt review. Ngày đã ghi là đạt thì streak vẫn giữ.
   - Hết từ mới không tự đạt; maintenance mode cho phép mục tiêu từ mới = 0. Mục tiêu review ít nhất 1.
   - Ngày đạt cả hai được ghi vào bảng `study_days` (thêm vào v15) ngay sau mỗi câu trả lời. Ngày đã đạt thì giữ là
     đạt (kể cả khi Undo sau đó), đổi mục tiêu không sửa ngày cũ. Streak = chuỗi ngày đạt liên tiếp; còn giữ từ
