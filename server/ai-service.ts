@@ -26,8 +26,14 @@ export interface AiConfig {
   rateLimitPerDay: Record<AiMode, number>;
   /** Max characters in a single user message. */
   maxInputChars: number;
-  /** Request timeout in milliseconds. */
+  /** How long the provider may take to start replying, in milliseconds. */
   requestTimeoutMs: number;
+  /**
+   * How long one whole reply may take, retries and streaming included. It
+   * stays under the hosting function's own limit, so the reply always ends
+   * with something said rather than the host cutting it off silently.
+   */
+  replyDeadlineMs: number;
   /**
    * Optional. Asks an OpenAI-compatible reasoning model to think less (or not
    * at all), which shortens the wait before the first token. Providers that do
@@ -44,7 +50,8 @@ export type ReasoningEffort = typeof REASONING_EFFORTS[number];
 export interface AiResponse {
   content: string;
   usage: { promptTokens: number; completionTokens: number; totalTokens: number } | null;
-  finishReason: 'stop' | 'length' | 'content_filter' | 'error' | null;
+  /** `time_limit`: stopped at the reply deadline, keeping what had arrived. */
+  finishReason: 'stop' | 'length' | 'content_filter' | 'error' | 'time_limit' | null;
 }
 
 /** Streaming chunk from provider. */
@@ -145,12 +152,19 @@ export function loadAiConfig(env: Record<string, string | undefined> = process.e
     issues.push('AI_MAX_INPUT_CHARS must be an integer between 1 and 32000.');
   }
 
+  // How long one whole reply may take. vercel.json lets the function run for
+  // 300 seconds; the reply ends before that so it can still say why it ended.
+  const replyDeadlineMs = Number(env.AI_REPLY_DEADLINE_MS ?? String(REPLY_DEADLINE_DEFAULT_MS));
+  if (!Number.isInteger(replyDeadlineMs) || replyDeadlineMs < 5000 || replyDeadlineMs > REPLY_DEADLINE_MAX_MS) {
+    issues.push(`AI_REPLY_DEADLINE_MS must be an integer between 5000 and ${REPLY_DEADLINE_MAX_MS}.`);
+  }
+
   // How long the provider may take before it starts answering. Thinking models
-  // and free tiers can sit in a queue for a while, so this is generous; the
-  // hosting function's own duration must be longer still.
-  const requestTimeoutMs = Number(env.AI_REQUEST_TIMEOUT_MS ?? '60000');
-  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > 120000) {
-    issues.push('AI_REQUEST_TIMEOUT_MS must be an integer between 1000 and 120000.');
+  // and free tiers can sit in a queue for minutes, so by default it may use the
+  // whole reply deadline.
+  const requestTimeoutMs = Number(env.AI_REQUEST_TIMEOUT_MS ?? String(replyDeadlineMs));
+  if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > REPLY_DEADLINE_MAX_MS) {
+    issues.push(`AI_REQUEST_TIMEOUT_MS must be an integer between 1000 and ${REPLY_DEADLINE_MAX_MS}.`);
   }
 
   const requestedEffort = env.AI_REASONING_EFFORT?.trim().toLowerCase() ?? '';
@@ -185,9 +199,14 @@ export function loadAiConfig(env: Record<string, string | undefined> = process.e
     rateLimitPerDay,
     maxInputChars,
     requestTimeoutMs,
+    replyDeadlineMs,
     reasoningEffort,
   };
 }
+
+/** vercel.json gives the API function 300 seconds; a reply ends well inside that. */
+const REPLY_DEADLINE_DEFAULT_MS = 280_000;
+const REPLY_DEADLINE_MAX_MS = 290_000;
 
 /** System prompts for each mode. */
 export const SYSTEM_PROMPTS: Record<AiMode, string> = {
@@ -297,8 +316,8 @@ async function startRequest(url: string, init: RequestInit, signal: AbortSignal,
   }
 }
 
-/** How long to wait before each retry, in order. Two retries at most. */
-const RETRY_DELAYS_MS = [500, 1000] as const;
+/** How long to wait before each retry, in order. Two retries at most; an overload often lasts a few seconds. */
+const RETRY_DELAYS_MS = [1000, 2000] as const;
 
 /** Waits `ms` milliseconds, or less if the caller's signal aborts first. */
 function sleep(ms: number, signal: AbortSignal): Promise<void> {
@@ -752,17 +771,46 @@ export async function* generateResponse(
   let finalUsage: AiResponse['usage'] = null;
   let finalFinishReason: AiResponse['finishReason'] = null;
 
+  // The whole reply has to end before the host stops the function, which would
+  // cut it off with nothing said. At the deadline the request is stopped here.
+  const deadline = new AbortController();
+  let pastDeadline = false;
+  const timer = setTimeout(() => {
+    pastDeadline = true;
+    deadline.abort();
+  }, config.replyDeadlineMs);
+  const seconds = Math.round(config.replyDeadlineMs / 1000);
+
   try {
-    for await (const chunk of client.stream(context, config, signal)) {
+    for await (const chunk of client.stream(context, config, AbortSignal.any([signal, deadline.signal]))) {
       fullContent += chunk.delta;
       if (chunk.usage) finalUsage = chunk.usage;
       if (chunk.finishReason) finalFinishReason = chunk.finishReason;
       yield chunk;
     }
   } catch (error) {
-    if (error instanceof AiError) throw error;
-    if (signal.aborted) throw new AiError(AiErrorCode.PROVIDER_TIMEOUT, 'Request cancelled by client.', 499);
-    throw new AiError(AiErrorCode.PROVIDER_ERROR, 'The AI provider stopped answering part way through.', 502);
+    if (pastDeadline && !signal.aborted) {
+      if (fullContent.trim() === '') {
+        console.error(`AI reply deadline: provider=${config.provider} model=${config.model} nothing after ${config.replyDeadlineMs}ms`);
+        throw new AiError(
+          AiErrorCode.PROVIDER_TIMEOUT,
+          `The AI provider had not started answering after ${seconds} seconds. Thinking models can take this long when busy; setting AI_REASONING_EFFORT to low on the server makes them answer sooner.`,
+          504,
+        );
+      }
+      // Part of the reply arrived: it is kept, and marked as stopped at the limit.
+      console.error(`AI reply deadline: provider=${config.provider} model=${config.model} stopped part way after ${config.replyDeadlineMs}ms`);
+      finalFinishReason = 'time_limit';
+      yield { delta: '', usage: finalUsage, finishReason: 'time_limit' };
+    } else if (error instanceof AiError) {
+      throw error;
+    } else if (signal.aborted) {
+      throw new AiError(AiErrorCode.PROVIDER_TIMEOUT, 'Request cancelled by client.', 499);
+    } else {
+      throw new AiError(AiErrorCode.PROVIDER_ERROR, 'The AI provider stopped answering part way through.', 502);
+    }
+  } finally {
+    clearTimeout(timer);
   }
 
   if (fullContent.trim() === '') {

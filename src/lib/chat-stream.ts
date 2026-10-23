@@ -4,8 +4,12 @@
  */
 import type { AiStreamChunk } from '../../shared/api.js';
 
-/** How the reply ended: finished, or stopped with the server's reason. */
-export type ChatStreamEnd = { ok: true } | { ok: false; message: string };
+/**
+ * How the reply ended: finished, or stopped with the server's reason. A
+ * finished reply says why it stopped; `time_limit` means it was cut short at
+ * the server's deadline, with what had arrived kept.
+ */
+export type ChatStreamEnd = { ok: true; finishReason: string | null } | { ok: false; message: string };
 
 export async function readChatStream(
   stream: ReadableStream<Uint8Array>,
@@ -25,7 +29,7 @@ export async function readChatStream(
       return;
     }
     if (chunk.type === 'delta') onDelta(chunk.delta);
-    else if (chunk.type === 'done') end = { ok: true };
+    else if (chunk.type === 'done') end = { ok: true, finishReason: chunk.finishReason ?? null };
     else if (chunk.type === 'error') end = { ok: false, message: chunk.message };
   };
 

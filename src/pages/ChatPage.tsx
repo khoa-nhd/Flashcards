@@ -217,6 +217,7 @@ export function ChatPage() {
 
     let text = '';
     let failure: string | null = null;
+    let stopped = false;
     try {
       const stream = await api.sendMessage(id, content);
       const end = await readChatStream(stream, (delta) => {
@@ -224,6 +225,7 @@ export function ChatPage() {
         updateMessages(id, (messages) => messages.map((message) => (message.id === answer.id ? { ...message, content: text } : message)));
       });
       if (!end.ok) failure = end.message;
+      else if (end.finishReason === 'time_limit') stopped = true;
     } catch (error) {
       failure = messageOf(error, 'Could not send the message.');
     }
@@ -236,6 +238,10 @@ export function ChatPage() {
     } else {
       // The first message names the conversation; the list shows the new name.
       void loadConversations();
+      // Kept and saved, but not whole: the reader should know it stops short.
+      if (stopped) {
+        setSendError('The reply took too long and was stopped part way; what arrived is kept. Ask again to continue.');
+      }
     }
     setSending(false);
   };

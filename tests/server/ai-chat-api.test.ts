@@ -275,6 +275,55 @@ describe('AI chat API', () => {
     expect(logged.all().some((line) => line.includes('AI provider timeout') && line.includes('waited=1000ms'))).toBe(true);
   });
 
+  it('ends a reply that never starts before the host would cut it off, and says why', async () => {
+    vi.stubEnv('AI_REPLY_DEADLINE_MS', '5000');
+    const logged = captureServerErrors();
+    provider.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')));
+        }),
+    );
+    const { id } = await newConversation(alice);
+    const events = await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'error', code: 'provider_timeout' });
+    expect(String(events[0]?.message)).toContain('after 5 seconds');
+    expect(String(events[0]?.message)).toContain('AI_REASONING_EFFORT');
+    expect(logged.all().some((line) => line.includes('AI reply deadline') && line.includes('nothing after 5000ms'))).toBe(true);
+  });
+
+  it('keeps what had arrived when the deadline stops a reply part way', async () => {
+    vi.stubEnv('AI_REPLY_DEADLINE_MS', '5000');
+    captureServerErrors();
+    provider.mockImplementation(async (_url: string, init: RequestInit) => {
+      const first = new TextEncoder().encode(`data: ${JSON.stringify({ choices: [{ delta: { content: 'Part of it' } }] })}\n\n`);
+      return new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(first);
+            // Then nothing more, until the request is stopped.
+            init.signal?.addEventListener('abort', () => controller.error(new DOMException('This operation was aborted', 'AbortError')));
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+      );
+    });
+    const { id } = await newConversation(alice);
+    const events = await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+
+    expect(events.filter((event) => event.type === 'delta').map((event) => event.delta).join('')).toBe('Part of it');
+    expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'time_limit' });
+    const opened = (await (await call(app, alice, `/api/ai/conversations/${id}`)).json()) as {
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(opened.messages.map((message) => [message.role, message.content])).toEqual([
+      ['user', 'Hi'],
+      ['assistant', 'Part of it'],
+    ]);
+  });
+
   it('rides out a momentary overload (503) without showing an error', async () => {
     const logged = captureServerErrors();
     let calls = 0;

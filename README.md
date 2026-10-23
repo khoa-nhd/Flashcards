@@ -251,7 +251,8 @@ Copy `.env.example` to `.env` and fill in:
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional. The key for the provider chosen; set only the one in use. `AI_API_KEY` is a generic alias. Server-side only; never sent to the browser. |
 | `AI_BASE_URL` | Optional. Points `openai` at another OpenAI-compatible endpoint, such as Google Gemini's free tier or a local Ollama server. See "Running AI Chat for free". |
 | `AI_REASONING_EFFORT` | Optional. `none`, `minimal`, `low`, `medium` or `high`, for an OpenAI-compatible reasoning model that accepts the field. Lower values shorten the wait before the first token. Unset uses the provider's default. |
-| `AI_REQUEST_TIMEOUT_MS` | Optional. How long the provider may take to *start* replying, in milliseconds. Default `60000`; keep it below the host's function limit (`vercel.json` allows 120 seconds). |
+| `AI_REPLY_DEADLINE_MS` | Optional. How long one whole reply may take, retries and streaming included, in milliseconds. Default `280000`, at most `290000`, inside the 300 seconds `vercel.json` gives the function. A reply still going at the deadline keeps what had arrived and says it was stopped. |
+| `AI_REQUEST_TIMEOUT_MS` | Optional. How long the provider may take to *start* replying, in milliseconds. Defaults to the whole reply deadline. |
 
 Both Supabase values are public by design: the server hands them to the
 browser. **Never use the secret / `service_role` key.** The server refuses to
@@ -409,9 +410,10 @@ links work.
 5. Environment variable changes apply to new deployments only: **Deployments →
    ⋯ → Redeploy**. Every push to `main` also deploys.
 
-`vercel.json` lets the API function run for up to 120 seconds, so the app's own
-60-second wait for the AI provider has room to finish. Keep `AI_REQUEST_TIMEOUT_MS`
-below the function's limit.
+`vercel.json` lets the API function run for up to 300 seconds. An AI reply ends
+by its own deadline (`AI_REPLY_DEADLINE_MS`, 280 seconds by default) before
+that, so it always ends with something said rather than being cut off by the
+host.
 
 To show the app with sample data only, set `DATA_MODE=mock`.
 
@@ -460,10 +462,9 @@ change is needed. Current lists:
 [Anthropic](https://platform.claude.com/docs/en/about-claude/model-deprecations).
 
 Free tiers queue requests, and thinking models can take a while before the
-first token. The server waits up to `AI_REQUEST_TIMEOUT_MS` (60 seconds by
-default) for the provider to start replying, then says it did not answer in
-time. Raise that variable if the provider is merely slow, and keep it below the
-host's function limit. On a reasoning model, `AI_REASONING_EFFORT=low` (or
+first token. The server gives one reply up to `AI_REPLY_DEADLINE_MS` (280
+seconds by default), then says the provider had not started answering, or
+keeps what had arrived if it had. On a reasoning model, `AI_REASONING_EFFORT=low` (or
 `minimal`; `none` where the model allows it) can start the reply sooner. A
 reply that fails is never saved, so sending again is always clean.
 
@@ -628,12 +629,16 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 - **AI Chat says the model or address is missing:** `AI_MODEL` has probably
   been retired, or `AI_BASE_URL` is wrong. The reply names both; set the
   provider's current model and redeploy. No code change is needed.
-- **AI Chat says the provider did not answer in time:** it took longer than
-  `AI_REQUEST_TIMEOUT_MS` (60 seconds by default) to *start* replying. Free
+- **AI Chat says the provider did not answer in time:** it had not started
+  replying within the reply deadline (`AI_REPLY_DEADLINE_MS`, 280 seconds by
+  default) or within `AI_REQUEST_TIMEOUT_MS` where that is set lower. Free
   tiers often queue requests and thinking models pause before the first token.
-  Raise `AI_REQUEST_TIMEOUT_MS` (and keep it below the function limit; see
-  `vercel.json`) or choose a faster model, then redeploy. The server log line
-  `AI provider timeout` records the address and how long it waited.
+  Set `AI_REASONING_EFFORT=low` or choose a faster model, then redeploy. The
+  server log lines `AI provider timeout` and `AI reply deadline` record what
+  was waited for and how long.
+- **"The reply was cut off before it finished":** the host stopped the function
+  before the reply could end. Check the log for `Task timed out`, and keep
+  `AI_REPLY_DEADLINE_MS` below `maxDuration` in `vercel.json`.
 - **The public key may have been swapped for a secret one:** the server
   refuses to start and `/api/health` says why. Replace it with the publishable
   key and rotate the secret key in Supabase.

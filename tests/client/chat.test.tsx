@@ -136,7 +136,15 @@ describe('reading a streamed reply', () => {
     const parts: string[] = [];
     const end = await readChatStream(streamOf('data: {"type":"del', 'ta","delta":"Hel"}\n\ndata: {"type":"delta","delta":"lo"}\n', '\ndata: {"type":"done"}\n\n'), (text) => parts.push(text));
     expect(parts.join('')).toBe('Hello');
-    expect(end).toEqual({ ok: true });
+    expect(end).toEqual({ ok: true, finishReason: null });
+  });
+
+  it('says when a finished reply was stopped at the server deadline', async () => {
+    const end = await readChatStream(
+      streamOf('data: {"type":"delta","delta":"Part"}\n\ndata: {"type":"done","finishReason":"time_limit"}\n\n'),
+      () => undefined,
+    );
+    expect(end).toEqual({ ok: true, finishReason: 'time_limit' });
   });
 
   it('reports an error event with its message', async () => {
