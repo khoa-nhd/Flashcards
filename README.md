@@ -250,6 +250,8 @@ Copy `.env.example` to `.env` and fill in:
 | `AI_MODEL` | Optional. The model id the provider expects, e.g. `gpt-4o-mini`, `gemini-3.8-flash` or `claude-sonnet-5-5`. A retired model answers HTTP 404, which the app reports as a model-or-address problem. |
 | `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` | Optional. The key for the provider chosen; set only the one in use. `AI_API_KEY` is a generic alias. Server-side only; never sent to the browser. |
 | `AI_BASE_URL` | Optional. Points `openai` at another OpenAI-compatible endpoint, such as Google Gemini's free tier or a local Ollama server. See "Running AI Chat for free". |
+| `AI_REASONING_EFFORT` | Optional. `none`, `minimal`, `low`, `medium` or `high`, for an OpenAI-compatible reasoning model that accepts the field. Lower values shorten the wait before the first token. Unset uses the provider's default. |
+| `AI_REQUEST_TIMEOUT_MS` | Optional. How long the provider may take to *start* replying, in milliseconds. Default `60000`; keep it below the host's function limit (`vercel.json` allows 120 seconds). |
 
 Both Supabase values are public by design: the server hands them to the
 browser. **Never use the secret / `service_role` key.** The server refuses to
@@ -407,6 +409,10 @@ links work.
 5. Environment variable changes apply to new deployments only: **Deployments →
    ⋯ → Redeploy**. Every push to `main` also deploys.
 
+`vercel.json` lets the API function run for up to 120 seconds, so the app's own
+60-second wait for the AI provider has room to finish. Keep `AI_REQUEST_TIMEOUT_MS`
+below the function's limit.
+
 To show the app with sample data only, set `DATA_MODE=mock`.
 
 The build includes the service worker (`dist/sw.js`), which is what lets the
@@ -452,6 +458,14 @@ and `AI_BASE_URL` — set the provider's current model and redeploy; no code
 change is needed. Current lists:
 [Gemini](https://ai.google.dev/gemini-api/docs/deprecations),
 [Anthropic](https://platform.claude.com/docs/en/about-claude/model-deprecations).
+
+Free tiers queue requests, and thinking models can take a while before the
+first token. The server waits up to `AI_REQUEST_TIMEOUT_MS` (60 seconds by
+default) for the provider to start replying, then says it did not answer in
+time. Raise that variable if the provider is merely slow, and keep it below the
+host's function limit. On a reasoning model, `AI_REASONING_EFFORT=low` (or
+`minimal`; `none` where the model allows it) can start the reply sooner. A
+reply that fails is never saved, so sending again is always clean.
 
 Momentary overload takes care of itself: when the provider reports its own
 trouble (a 503 means "temporarily overloaded"), the server waits briefly and
@@ -614,6 +628,12 @@ Every route except the first two needs `Authorization: Bearer <access token>`.
 - **AI Chat says the model or address is missing:** `AI_MODEL` has probably
   been retired, or `AI_BASE_URL` is wrong. The reply names both; set the
   provider's current model and redeploy. No code change is needed.
+- **AI Chat says the provider did not answer in time:** it took longer than
+  `AI_REQUEST_TIMEOUT_MS` (60 seconds by default) to *start* replying. Free
+  tiers often queue requests and thinking models pause before the first token.
+  Raise `AI_REQUEST_TIMEOUT_MS` (and keep it below the function limit; see
+  `vercel.json`) or choose a faster model, then redeploy. The server log line
+  `AI provider timeout` records the address and how long it waited.
 - **The public key may have been swapped for a secret one:** the server
   refuses to start and `/api/health` says why. Replace it with the publishable
   key and rotate the secret key in Supabase.

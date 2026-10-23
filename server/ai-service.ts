@@ -28,7 +28,17 @@ export interface AiConfig {
   maxInputChars: number;
   /** Request timeout in milliseconds. */
   requestTimeoutMs: number;
+  /**
+   * Optional. Asks an OpenAI-compatible reasoning model to think less (or not
+   * at all), which shortens the wait before the first token. Providers that do
+   * not know the field would reject it, so it is only sent when set.
+   */
+  reasoningEffort?: ReasoningEffort;
 }
+
+/** The values OpenAI-compatible endpoints accept for `reasoning_effort`. */
+export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high'] as const;
+export type ReasoningEffort = typeof REASONING_EFFORTS[number];
 
 /** Normalized response from any provider. */
 export interface AiResponse {
@@ -135,9 +145,22 @@ export function loadAiConfig(env: Record<string, string | undefined> = process.e
     issues.push('AI_MAX_INPUT_CHARS must be an integer between 1 and 32000.');
   }
 
-  const requestTimeoutMs = Number(env.AI_REQUEST_TIMEOUT_MS ?? '25000');
+  // How long the provider may take before it starts answering. Thinking models
+  // and free tiers can sit in a queue for a while, so this is generous; the
+  // hosting function's own duration must be longer still.
+  const requestTimeoutMs = Number(env.AI_REQUEST_TIMEOUT_MS ?? '60000');
   if (!Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1000 || requestTimeoutMs > 120000) {
     issues.push('AI_REQUEST_TIMEOUT_MS must be an integer between 1000 and 120000.');
+  }
+
+  const requestedEffort = env.AI_REASONING_EFFORT?.trim().toLowerCase() ?? '';
+  let reasoningEffort: ReasoningEffort | undefined;
+  if (requestedEffort !== '') {
+    if (!REASONING_EFFORTS.includes(requestedEffort as ReasoningEffort)) {
+      issues.push(`AI_REASONING_EFFORT must be one of: ${REASONING_EFFORTS.join(', ')}.`);
+    } else {
+      reasoningEffort = requestedEffort as ReasoningEffort;
+    }
   }
 
   // Optional. Points the OpenAI-compatible provider at another compatible
@@ -162,6 +185,7 @@ export function loadAiConfig(env: Record<string, string | undefined> = process.e
     rateLimitPerDay,
     maxInputChars,
     requestTimeoutMs,
+    reasoningEffort,
   };
 }
 
@@ -261,6 +285,9 @@ async function startRequest(url: string, init: RequestInit, signal: AbortSignal,
     return await fetch(url, { ...init, signal: AbortSignal.any([signal, timer.signal]) });
   } catch (error) {
     if (timer.signal.aborted && !signal.aborted) {
+      // The log is the only place that can say how long was actually allowed;
+      // the reader just gets the sentence below.
+      console.error(`AI provider timeout: url=${url} waited=${timeoutMs}ms`);
       throw new AiError(AiErrorCode.PROVIDER_TIMEOUT, 'The AI provider did not answer in time. Try again.', 504);
     }
     if (signal.aborted) throw error;
@@ -490,6 +517,7 @@ export class OpenAiCompatibleClient implements AiProviderClient {
       max_tokens: config.maxTokens,
       temperature: config.temperature,
       stream,
+      ...(config.reasoningEffort === undefined ? {} : { reasoning_effort: config.reasoningEffort }),
     };
 
     const url = `${this.baseUrl}/chat/completions`;

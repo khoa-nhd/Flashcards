@@ -120,9 +120,10 @@ describe('AI chat API', () => {
     const [url, init] = provider.mock.calls[0] as [string, RequestInit];
     expect(url).toBe('https://ai.example.test/v1/chat/completions');
     expect((init.headers as Record<string, string>).Authorization).toBe('Bearer test-key-not-real');
-    const sent = JSON.parse(String(init.body)) as { model: string; stream: boolean; messages: Array<{ role: string; content: string }> };
+    const sent = JSON.parse(String(init.body)) as { model: string; stream: boolean; reasoning_effort?: string; messages: Array<{ role: string; content: string }> };
     expect(sent.model).toBe('test-model');
     expect(sent.stream).toBe(true);
+    expect(sent.reasoning_effort).toBeUndefined();
     expect(sent.messages.map((message) => message.role)).toEqual(['system', 'user']);
     expect(Object.keys(sent.messages[1]!).sort()).toEqual(['content', 'role']);
 
@@ -136,6 +137,16 @@ describe('AI chat API', () => {
       ['assistant', 'Hello **there**'],
     ]);
     expect(opened.conversation.title).toBe('Say hello');
+  });
+
+  it('asks a reasoning model to think less when AI_REASONING_EFFORT is set', async () => {
+    vi.stubEnv('AI_REASONING_EFFORT', 'low');
+    const { id } = await newConversation(alice);
+    await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+
+    const [, init] = provider.mock.calls[0] as [string, RequestInit];
+    const sent = JSON.parse(String(init.body)) as { reasoning_effort?: string };
+    expect(sent.reasoning_effort).toBe('low');
   });
 
   it('sends the earlier messages with the next one', async () => {
@@ -244,6 +255,24 @@ describe('AI chat API', () => {
     expect(logged.providerFailures()[0]).toContain('status=503');
     // An unrelenting overload is retried twice before the error is shown.
     expect(provider).toHaveBeenCalledTimes(3);
+  });
+
+  it('stops waiting when the provider has not started answering in time', async () => {
+    vi.stubEnv('AI_REQUEST_TIMEOUT_MS', '1000');
+    const logged = captureServerErrors();
+    provider.mockImplementation(
+      (_url: string, init: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init.signal?.addEventListener('abort', () => reject(new DOMException('This operation was aborted', 'AbortError')));
+        }),
+    );
+    const { id } = await newConversation(alice);
+    const events = await eventsOf(await call(app, alice, `/api/ai/conversations/${id}/messages`, { method: 'POST', body: { content: 'Hi' } }));
+
+    expect(events).toEqual([{ type: 'error', code: 'provider_timeout', message: 'The AI provider did not answer in time. Try again.' }]);
+    // The wait is one request, not a retry, and the log says how long it allowed.
+    expect(provider).toHaveBeenCalledTimes(1);
+    expect(logged.all().some((line) => line.includes('AI provider timeout') && line.includes('waited=1000ms'))).toBe(true);
   });
 
   it('rides out a momentary overload (503) without showing an error', async () => {

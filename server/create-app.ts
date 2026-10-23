@@ -690,10 +690,24 @@ export function createApp({
     const encoder = new TextEncoder();
     const event = (data: unknown) => encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
     const generator = ai.generateResponse(conversationId, context, c.req.raw.signal);
-    const readable = new ReadableStream<Uint8Array>({
+    const sequence = new ReadableStream<Uint8Array>({
       async start(controller) {
         let usage: unknown = null;
         let finishReason: string | null = null;
+        let closed = false;
+        // A comment at once, then every so often: a long silence while the
+        // provider thinks can make a proxy drop the connection. The page's
+        // reader ignores lines that do not start with "data:".
+        const keepAlive = () => {
+          if (closed) return;
+          try {
+            controller.enqueue(encoder.encode(': keep-alive\n\n'));
+          } catch {
+            closed = true; // The reader has gone; the request signal follows.
+          }
+        };
+        keepAlive();
+        const heartbeat = setInterval(keepAlive, 15_000);
         try {
           for await (const chunk of generator) {
             if (chunk.delta !== '') controller.enqueue(event({ type: 'delta', delta: chunk.delta }));
@@ -711,12 +725,18 @@ export function createApp({
             controller.enqueue(event({ type: 'error', code: 'internal_error', message: 'The reply could not be finished. Try again.' }));
           }
         } finally {
-          controller.close();
+          closed = true;
+          clearInterval(heartbeat);
+          try {
+            controller.close();
+          } catch {
+            // The reader went away before the reply finished.
+          }
         }
       },
     });
 
-    return new Response(readable, {
+    return new Response(sequence, {
       headers: {
         'Content-Type': 'text/event-stream; charset=utf-8',
         'Cache-Control': 'no-store',

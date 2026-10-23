@@ -686,7 +686,7 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
       }),
 
     sendMessage: (id, content) =>
-      openStream(`/api/ai/conversations/${encodeURIComponent(id)}/messages`, { content }, TIMEOUTS.queueMs, auth),
+      openStream(`/api/ai/conversations/${encodeURIComponent(id)}/messages`, { content }, TIMEOUTS.chatMs, auth),
 
     markMessageSaved: (conversationId, messageId, vocabularyId) =>
       call(
