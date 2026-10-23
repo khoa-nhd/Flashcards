@@ -937,6 +937,7 @@ export type UiLanguage = z.infer<typeof uiLanguageSchema>;
 export const studyGoalsSchema = z.object({
   newWords: z.number().int().min(0).max(1000),
   reviews: z.number().int().min(0).max(1000),
+  practice: z.number().int().min(0).max(1000).default(20),
   maintenanceMode: z.boolean().default(false),
 });
 
@@ -944,6 +945,7 @@ export const updateStudyGoalsRequestSchema = z
   .strictObject({
     newWords: z.number().int().min(0).max(1000).optional(),
     reviews: z.number().int().min(0).max(1000).optional(),
+    practice: z.number().int().min(0).max(1000).optional(),
     maintenanceMode: z.boolean().optional(),
   })
   .refine((value) => Object.keys(value).length > 0, 'Nothing to change');
@@ -957,7 +959,7 @@ const goalPartProgressSchema = z.object({
   exhausted: z.boolean(),
 });
 
-/** Today's two goals, their progress, and the streak that needs both. */
+/** Today's three goals, their progress, and the streak that needs all. */
 export const studyGoalsResponseSchema = z.object({
   available: z.boolean(),
   /** False until the reviewer has chosen; `goals` is then the suggested pair, and no day is recorded. */
@@ -967,6 +969,7 @@ export const studyGoalsResponseSchema = z.object({
   goals: studyGoalsSchema,
   newWords: goalPartProgressSchema,
   reviews: goalPartProgressSchema,
+  practice: goalPartProgressSchema,
   due: z.object({ total: z.number().int(), overdue: z.number().int() }),
   streak: z.object({ current: z.number().int(), longest: z.number().int(), metToday: z.boolean() }),
 });

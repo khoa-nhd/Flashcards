@@ -626,33 +626,35 @@ export function createPgVocabularyDatabase(
 
     async saveStudyGoals(goal) {
       const rows = await run((session) =>
-        session.query<{ new_words: number; reviews: number; maintenance: boolean }>(
-          `insert into public.user_settings (study_goal_new_words, study_goal_reviews, maintenance_mode) values ($1, $2, $3)
+        session.query<{ new_words: number; reviews: number; practice: number; maintenance: boolean }>(
+          `insert into public.user_settings (study_goal_new_words, study_goal_reviews, study_goal_practice, maintenance_mode) values ($1, $2, $3, $4)
            on conflict (user_id) do update set study_goal_new_words = excluded.study_goal_new_words,
-             study_goal_reviews = excluded.study_goal_reviews, maintenance_mode = excluded.maintenance_mode
-           returning study_goal_new_words as new_words, study_goal_reviews as reviews, maintenance_mode as maintenance`,
-          [goal.newWords, goal.reviews, goal.maintenanceMode],
+             study_goal_reviews = excluded.study_goal_reviews, study_goal_practice = excluded.study_goal_practice, maintenance_mode = excluded.maintenance_mode
+           returning study_goal_new_words as new_words, study_goal_reviews as reviews, study_goal_practice as practice, maintenance_mode as maintenance`,
+          [goal.newWords, goal.reviews, goal.practice, goal.maintenanceMode],
         ),
       );
       const saved = rows[0];
-      return saved === undefined ? goal : { newWords: saved.new_words, reviews: saved.reviews, maintenanceMode: saved.maintenance };
+      return saved === undefined ? goal : { newWords: saved.new_words, reviews: saved.reviews, practice: saved.practice, maintenanceMode: saved.maintenance };
     },
 
     async studyDayCounts(day) {
       const rows = await run((session) =>
-        session.query<Row>(`select new_words, reviews from public.study_day_counts($1::date)`, [day]),
+        session.query<Row>(`select new_words, reviews, practice from public.study_day_counts($1::date)`, [day]),
       );
-      return studyDayCountsRowSchema.parse(rows[0] ?? { new_words: 0, reviews: 0 });
+      return studyDayCountsRowSchema.parse(rows[0] ?? { new_words: 0, reviews: 0, practice: 0 });
     },
 
     async recordStudyDay(row) {
       const rows = await run((session) =>
-        session.query<{ met: boolean }>(`select public.record_study_day($1::date, $2, $3, $4, $5, $6) as met`, [
+        session.query<{ met: boolean }>(`select public.record_study_day($1::date, $2, $3, $4, $5, $6, $7, $8) as met`, [
           row.day,
           row.newWords,
           row.reviews,
+          row.practice ?? 0,
           row.newGoal,
           row.reviewGoal,
+          row.practiceGoal ?? 0,
           row.met,
         ]),
       );

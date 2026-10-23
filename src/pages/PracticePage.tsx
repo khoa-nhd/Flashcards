@@ -77,6 +77,7 @@ interface Outcome {
 
 interface Run {
   mode: StudyMode;
+  modes: StudyMode[];
   sessionId: string;
   words: PracticeWord[];
   /** Recognition choices, drawn once per question so a re-render never reshuffles them. */
@@ -204,9 +205,63 @@ export function PracticePage() {
     liveSession.current = sessionId;
     setRun({
       mode,
+      modes: words.map(() => mode),
       sessionId,
       words,
       choices: words.map((word) => (mode === 'recognition' ? buildChoices(word, pool, Math.random) : null)),
+      index: 0,
+      shownAt: Date.now(),
+      given: null,
+      requestId: null,
+      durationMs: 0,
+      verdict: null,
+      error: null,
+    });
+  };
+
+  const startComprehensive = () => {
+    const availableModes = STUDY_MODES.filter((m) => m !== 'listening' || canSpeak);
+    if (availableModes.length === 0) return;
+
+    const weakIds = new Set((weak.data?.words ?? []).map((w) => w.id));
+    const sorted = [...pool].sort((a, b) => {
+      const weakA = weakIds.has(a.id) ? 0 : 1;
+      const weakB = weakIds.has(b.id) ? 0 : 1;
+      if (weakA !== weakB) return weakA - weakB;
+      const statsA = statsMap.get(a.id);
+      const statsB = statsMap.get(b.id);
+      const totalA = statsA?.totalAnswers ?? 0;
+      const totalB = statsB?.totalAnswers ?? 0;
+      return totalA - totalB;
+    });
+
+    const sessionWords: PracticeWord[] = [];
+    const sessionModes: StudyMode[] = [];
+
+    for (const word of sorted) {
+      if (sessionWords.length >= length) break;
+      const eligible = availableModes.filter((m) => ineligibility(m, word, pool) === null);
+      if (eligible.length === 0) continue;
+      const modeToUse = eligible[Math.floor(Math.random() * eligible.length)] as StudyMode;
+      sessionWords.push(word);
+      sessionModes.push(modeToUse);
+    }
+
+    if (sessionWords.length === 0) return;
+
+    const sessionId = newRequestId();
+    setFinished(null);
+    weakBefore.current = new Map((weak.data?.words ?? []).map((word) => [word.id, word.word]));
+    setRecovered([]);
+    outcomes.current = new Map();
+    sent.current.clear();
+    liveSession.current = sessionId;
+    setRun({
+      mode: sessionModes[0] ?? 'recognition',
+      modes: sessionModes,
+      sessionId,
+      words: sessionWords,
+      choices: sessionWords.map((word, i) => (sessionModes[i] === 'recognition' ? buildChoices(word, pool, Math.random) : null)),
       index: 0,
       shownAt: Date.now(),
       given: null,
@@ -233,14 +288,15 @@ export function PracticePage() {
   const answer = (current: Run, given: PracticeAnswer, durationMs: number) => {
     const word = current.words[current.index];
     if (word === undefined) return;
-    const judged = judge(current.mode, word, given);
+    const currentMode = current.modes[current.index] ?? current.mode;
+    const judged = judge(currentMode, word, given);
     if (judged === null) return;
     // Judged here, from the same rules the server uses: the verdict does not wait.
     const done = startTiming('practice.verdict');
     rememberOutcome(current.index, { word, correct: judged.correct, recorded: state.meta?.writesEnabled !== false });
     const payload: PracticePayload = {
       pageId: word.id,
-      mode: current.mode,
+      mode: currentMode,
       answer: given,
       sessionId: current.sessionId,
       durationMs,
@@ -363,6 +419,7 @@ export function PracticePage() {
   };
 
   const word = run?.words[run.index] ?? null;
+  const currentMode = run !== null ? (run.modes[run.index] ?? run.mode) : mode;
 
   return (
     <div className={PAGE}>
@@ -393,12 +450,19 @@ export function PracticePage() {
       <VocabularyGate state={state}>
         {run !== null && word !== null ? (
           <div className="mx-auto flex max-w-xl flex-col gap-4">
-            <p className="text-sm text-muted" aria-live="polite">
-              {STUDY_MODE_LABELS[run.mode]} · Question {run.index + 1} of {run.words.length}
-            </p>
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted" aria-live="polite">
+                {STUDY_MODE_LABELS[currentMode]} · Question {run.index + 1} of {run.words.length}
+              </p>
+              {run.verdict === null && (
+                <button type="button" className={BUTTON_SECONDARY} onClick={next}>
+                  Skip question
+                </button>
+              )}
+            </div>
             <PracticeCard
               key={`${run.sessionId}:${run.index}`}
-              mode={run.mode}
+              mode={currentMode}
               word={word}
               choices={run.choices[run.index] ?? null}
               verdict={run.verdict}
@@ -426,7 +490,7 @@ export function PracticePage() {
             )}
             {run.verdict !== null && (
               <Verdict
-                mode={run.mode}
+                mode={currentMode}
                 word={word}
                 verdict={run.verdict}
                 last={run.index + 1 >= run.words.length}
@@ -438,9 +502,30 @@ export function PracticePage() {
           <div className="flex max-w-2xl flex-col gap-6">
             {finished !== null && <Summary mode={finished.mode} outcomes={finished.outcomes} recovered={recovered} />}
 
+            <section className={`${CARD} flex flex-col gap-4 p-6 border-accent/40 bg-accent-soft/20`} aria-labelledby="comprehensive-practice-title">
+              <div className="flex flex-col gap-2">
+                <h2 id="comprehensive-practice-title" className="font-serif text-xl font-semibold">
+                  Start practice
+                </h2>
+                <p className="text-sm text-muted">
+                  Comprehensive mixed practice: mixes all practice modes, prioritizes weak words and words missing data, then picks randomly. You can skip any question (like listening) if needed.
+                </p>
+              </div>
+              <div>
+                <button
+                  type="button"
+                  className={BUTTON_PRIMARY}
+                  onClick={startComprehensive}
+                  disabled={pool.length === 0}
+                >
+                  Start practice
+                </button>
+              </div>
+            </section>
+
             <section className={`${CARD} flex flex-col gap-4 p-5`} aria-labelledby="practice-setup-title">
               <h2 id="practice-setup-title" className={SECTION_TITLE}>
-                {finished === null ? 'Start a practice session' : 'Practise again'}
+                {finished === null ? 'Or choose a specific mode' : 'Practise again'}
               </h2>
 
               <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">

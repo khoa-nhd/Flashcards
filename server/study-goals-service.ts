@@ -89,10 +89,11 @@ export class StudyGoalsService {
     const counts =
       available && repository.studyDayCounts !== undefined
         ? await repository.studyDayCounts(today)
-        : { newWords: 0, reviews: 0 };
+        : { newWords: 0, reviews: 0, practice: 0 };
     // New words are the words added today (the owner's rule), wherever they were added from.
     const newDone = await this.addedOn(today, counts.newWords);
-    const day = evaluateDay({ goals, newDone, reviewsDone: counts.reviews, dueLeft: total, newWaiting });
+    const practiceDone = counts.practice ?? 0;
+    const day = evaluateDay({ goals, newDone, reviewsDone: counts.reviews, dueLeft: total, practiceDone, newWaiting });
 
     let metToday = day.met;
     let metDays: IsoDate[] = [];
@@ -103,8 +104,10 @@ export class StudyGoalsService {
           day: today,
           newWords: newDone,
           reviews: counts.reviews,
+          practice: practiceDone,
           newGoal: goals.newWords,
           reviewGoal: goals.reviews,
+          practiceGoal: goals.practice,
           met: day.met,
         });
       }
@@ -119,6 +122,7 @@ export class StudyGoalsService {
       goals,
       newWords: day.newWords,
       reviews: day.reviews,
+      practice: day.practice,
       due: { total, overdue },
       streak: streakOf(metDays, today, metToday),
     };

@@ -18,19 +18,19 @@ import { addDays, compareDates, type IsoDate } from './dates.js';
 export interface StudyGoals {
   newWords: number;
   reviews: number;
-  /** Lets the new-word goal be 0, for someone with nothing left to add. */
+  practice: number;
   maintenanceMode: boolean;
 }
 
 /** What onboarding suggests. */
-export const SUGGESTED_STUDY_GOALS: StudyGoals = { newWords: 10, reviews: 30, maintenanceMode: false };
+export const SUGGESTED_STUDY_GOALS: StudyGoals = { newWords: 10, reviews: 30, practice: 20, maintenanceMode: false };
 
 export const STUDY_GOAL_MAX = 1000;
 
 /** Why a pair of goals cannot be kept, or `null` when it can. */
 export function studyGoalsProblem(goals: StudyGoals): string | null {
   const whole = (value: number) => Number.isInteger(value) && value >= 0 && value <= STUDY_GOAL_MAX;
-  if (!whole(goals.newWords) || !whole(goals.reviews)) return `Each goal is a whole number from 0 to ${STUDY_GOAL_MAX}.`;
+  if (!whole(goals.newWords) || !whole(goals.reviews) || !whole(goals.practice)) return `Each goal is a whole number from 0 to ${STUDY_GOAL_MAX}.`;
   if (goals.newWords === 0 && !goals.maintenanceMode) {
     return 'A new-word goal of 0 needs maintenance mode, for when there is nothing left to add.';
   }
@@ -55,6 +55,8 @@ export interface DayInput {
   reviewsDone: number;
   /** Words still due now. */
   dueLeft: number;
+  /** Practice answers done today. */
+  practiceDone: number;
   /** New words that can be studied today, never studied yet. Leave it out to count none. */
   newWaiting?: number;
   /** Words never studied yet, archived ones left out. Leave it out where it does not limit the goal. */
@@ -64,10 +66,11 @@ export interface DayInput {
 export interface DayResult {
   newWords: GoalPart;
   reviews: GoalPart;
+  practice: GoalPart;
   met: boolean;
 }
 
-export function evaluateDay({ goals, newDone, reviewsDone, dueLeft, newWaiting = 0, newLeft }: DayInput): DayResult {
+export function evaluateDay({ goals, newDone, reviewsDone, dueLeft, practiceDone, newWaiting = 0, newLeft }: DayInput): DayResult {
   const part = (target: number, done: number, met: boolean, exhausted: boolean): GoalPart => ({
     target,
     done,
@@ -81,7 +84,8 @@ export function evaluateDay({ goals, newDone, reviewsDone, dueLeft, newWaiting =
   // waiting to be studied still leaves something to do, so it keeps the goal open.
   const nothingLeft = dueLeft === 0 && newWaiting === 0;
   const reviews = part(goals.reviews, reviewsDone, reviewsDone >= goals.reviews || nothingLeft, nothingLeft);
-  return { newWords, reviews, met: newWords.met && reviews.met };
+  const practice = part(goals.practice, practiceDone, practiceDone >= goals.practice, false);
+  return { newWords, reviews, practice, met: newWords.met && reviews.met && practice.met };
 }
 
 export interface Streak {

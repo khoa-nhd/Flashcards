@@ -349,6 +349,7 @@ export function StudyGoalsCard({
   const [editing, setEditing] = useState(false);
   const [newWords, setNewWords] = useState(String(data.goals.newWords));
   const [reviews, setReviews] = useState(String(data.goals.reviews));
+  const [practice, setPractice] = useState(String(data.goals.practice));
   const [maintenance, setMaintenance] = useState(data.goals.maintenanceMode);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -357,6 +358,7 @@ export function StudyGoalsCard({
   const beginEdit = () => {
     setNewWords(String(data.goals.newWords));
     setReviews(String(data.goals.reviews));
+    setPractice(String(data.goals.practice));
     setMaintenance(data.goals.maintenanceMode);
     setError(null);
     setEditing(true);
@@ -365,12 +367,13 @@ export function StudyGoalsCard({
   const save = async () => {
     const nextNew = maintenance ? 0 : Number(newWords);
     const nextReviews = Number(reviews);
-    if (!Number.isInteger(nextNew) || nextNew < 0 || !Number.isInteger(nextReviews) || nextReviews < 1) {
+    const nextPractice = Number(practice);
+    if (!Number.isInteger(nextNew) || nextNew < 0 || !Number.isInteger(nextReviews) || nextReviews < 1 || !Number.isInteger(nextPractice) || nextPractice < 0) {
       setError(
         pick(
           language,
-          'New words must be 0 or more, and reviews at least 1.',
-          'Số từ mới phải từ 0 trở lên, và số lần ôn ít nhất là 1.',
+          'New words and practice must be 0 or more, and reviews at least 1.',
+          'Số từ mới và thực hành phải từ 0 trở lên, và số lần ôn ít nhất là 1.',
         ),
       );
       return;
@@ -381,6 +384,7 @@ export function StudyGoalsCard({
       const next = await api.saveStudyGoals({
         newWords: nextNew,
         reviews: nextReviews,
+        practice: nextPractice,
         maintenanceMode: maintenance,
       });
       onSaved(next);
@@ -405,11 +409,11 @@ export function StudyGoalsCard({
           </h2>
           <p className="mt-1 text-sm text-muted">
             {data.streak.metToday
-              ? pick(language, 'Both goals are met today.', 'Hôm nay đã đạt cả hai mục tiêu.')
+              ? pick(language, 'All goals are met today.', 'Hôm nay đã đạt tất cả mục tiêu.')
               : pick(
                   language,
-                  'A streak needs both goals. Reaching them never stops a session.',
-                  'Chuỗi ngày cần cả hai mục tiêu. Đạt mục tiêu không làm dừng buổi ôn.',
+                  'A streak needs all goals. Reaching them never stops a session.',
+                  'Chuỗi ngày cần đủ các mục tiêu. Đạt mục tiêu không làm dừng buổi ôn.',
                 )}
           </p>
         </div>
@@ -450,7 +454,7 @@ export function StudyGoalsCard({
         </p>
       )}
 
-      <div className="mt-4 flex items-start justify-center gap-8 sm:gap-12">
+      <div className="mt-4 grid grid-cols-3 gap-4 sm:gap-6">
         <GoalRing
           label={pick(language, 'New words', 'Từ mới')}
           part={data.newWords}
@@ -463,11 +467,17 @@ export function StudyGoalsCard({
           language={language}
           tone="review"
         />
+        <GoalRing
+          label={pick(language, 'Practice', 'Thực hành')}
+          part={data.practice}
+          language={language}
+          tone="new"
+        />
       </div>
 
       {editing && (
         <div className="mt-4 flex flex-col gap-3 border-t border-line/80 pt-4">
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <label className="flex flex-col gap-1 text-xs font-medium text-muted">
               {pick(language, 'New words a day', 'Từ mới mỗi ngày')}
               <input
@@ -491,6 +501,18 @@ export function StudyGoalsCard({
                 className={INPUT}
                 value={reviews}
                 onChange={(event) => setReviews(event.target.value)}
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs font-medium text-muted">
+              {pick(language, 'Practice questions', 'Câu thực hành')}
+              <input
+                type="number"
+                min={0}
+                max={1000}
+                inputMode="numeric"
+                className={INPUT}
+                value={practice}
+                onChange={(event) => setPractice(event.target.value)}
               />
             </label>
           </div>

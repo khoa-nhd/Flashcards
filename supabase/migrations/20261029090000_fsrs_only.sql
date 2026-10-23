@@ -93,9 +93,10 @@ alter table public.review_logs
 -- ---------------------------------------------------------------------------
 
 alter table public.user_settings
-  -- Null until the reviewer has chosen; the app then suggests 10 and 30.
+  -- Null until the reviewer has chosen; the app then suggests 10, 30 and 20.
   add column if not exists study_goal_new_words integer check (study_goal_new_words between 0 and 1000),
   add column if not exists study_goal_reviews integer check (study_goal_reviews between 0 and 1000),
+  add column if not exists study_goal_practice integer check (study_goal_practice between 0 and 1000),
   -- Lets the new-word goal be 0 for someone who has nothing left to add.
   add column if not exists maintenance_mode boolean not null default false,
   -- Null shows everything that is due.
@@ -505,8 +506,10 @@ create table if not exists public.study_days (
   day date not null,
   new_words integer not null default 0 check (new_words >= 0),
   reviews integer not null default 0 check (reviews >= 0),
+  practice integer not null default 0 check (practice >= 0),
   new_goal integer not null check (new_goal between 0 and 1000),
   review_goal integer not null check (review_goal between 0 and 1000),
+  practice_goal integer not null check (practice_goal between 0 and 1000),
   met boolean not null default false,
   updated_at timestamptz not null default now(),
   primary key (user_id, day)
@@ -535,8 +538,9 @@ create trigger study_days_touch before update on public.study_days
 -- answers saved under FSRS alone that still stand:
 --   new_words  words brought into study that day (their first answer ever)
 --   reviews    other words answered that day that were due when answered
+--   practice   practice answers given that day
 create or replace function public.study_day_counts(p_day date)
-returns table (new_words integer, reviews integer)
+returns table (new_words integer, reviews integer, practice integer)
 language sql
 stable
 security invoker
@@ -564,11 +568,22 @@ as $$
       and l.reviewed_on = p_day
       and l.revision_after is not null
       and not exists (select 1 from public.review_logs u where u.undoes_log_id = l.id)
+  ),
+  counts as (
+    select
+      (count(distinct a.vocabulary_id) filter (where a.is_new))::integer as nw,
+      (count(distinct a.vocabulary_id) filter (where a.was_due))::integer as rev
+    from answers a
+  ),
+  prac as (
+    select count(*)::integer as p
+    from public.review_logs l
+    where l.user_id = (select auth.uid())
+      and l.kind = 'practice'
+      and l.reviewed_on = p_day
   )
-  select
-    (count(distinct a.vocabulary_id) filter (where a.is_new))::integer,
-    (count(distinct a.vocabulary_id) filter (where a.was_due))::integer
-  from answers a
+  select c.nw, c.rev, p.p
+  from counts c, prac p
 $$;
 
 revoke all on function public.study_day_counts(date) from anon, authenticated, public;
@@ -580,8 +595,10 @@ create or replace function public.record_study_day(
   p_day date,
   p_new_words integer,
   p_reviews integer,
+  p_practice integer,
   p_new_goal integer,
   p_review_goal integer,
+  p_practice_goal integer,
   p_met boolean
 )
 returns boolean
@@ -589,19 +606,21 @@ language sql
 security invoker
 set search_path = ''
 as $$
-  insert into public.study_days as d (user_id, day, new_words, reviews, new_goal, review_goal, met)
-  values ((select auth.uid()), p_day, p_new_words, p_reviews, p_new_goal, p_review_goal, p_met)
+  insert into public.study_days as d (user_id, day, new_words, reviews, practice, new_goal, review_goal, practice_goal, met)
+  values ((select auth.uid()), p_day, p_new_words, p_reviews, p_practice, p_new_goal, p_review_goal, p_practice_goal, p_met)
   on conflict (user_id, day) do update
     set new_words = excluded.new_words,
         reviews = excluded.reviews,
+        practice = excluded.practice,
         new_goal = excluded.new_goal,
         review_goal = excluded.review_goal,
+        practice_goal = excluded.practice_goal,
         met = d.met or excluded.met
   returning d.met
 $$;
 
-revoke all on function public.record_study_day(date, integer, integer, integer, integer, boolean) from anon, authenticated, public;
-grant execute on function public.record_study_day(date, integer, integer, integer, integer, boolean) to authenticated;
+revoke all on function public.record_study_day(date, integer, integer, integer, integer, integer, integer, boolean) from anon, authenticated, public;
+grant execute on function public.record_study_day(date, integer, integer, integer, integer, integer, integer, boolean) to authenticated;
 
 -- ---------------------------------------------------------------------------
 -- One-off: every studied word gets an FSRS state

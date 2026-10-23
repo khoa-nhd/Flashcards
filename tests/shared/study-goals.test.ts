@@ -2,40 +2,41 @@ import { describe, expect, it } from 'vitest';
 import { SUGGESTED_STUDY_GOALS, evaluateDay, streakOf, studyGoalsProblem } from '../../shared/study-goals.js';
 import { TODAY } from '../helpers/fixtures.js';
 
-const goals = { newWords: 10, reviews: 30, maintenanceMode: false };
+const goals = { newWords: 10, reviews: 30, practice: 20, maintenanceMode: false };
 
-describe('the two daily goals', () => {
-  it('suggests 10 new words and 30 reviews', () => {
-    expect(SUGGESTED_STUDY_GOALS).toEqual({ newWords: 10, reviews: 30, maintenanceMode: false });
+describe('the three daily goals', () => {
+  it('suggests 10 new words, 30 reviews, and 20 practice questions', () => {
+    expect(SUGGESTED_STUDY_GOALS).toEqual({ newWords: 10, reviews: 30, practice: 20, maintenanceMode: false });
   });
 
-  it('is met only when both are', () => {
-    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 30, dueLeft: 5, newLeft: 50 }).met).toBe(true);
-    expect(evaluateDay({ goals, newDone: 9, reviewsDone: 30, dueLeft: 5, newLeft: 50 }).met).toBe(false);
-    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 29, dueLeft: 5, newLeft: 50 }).met).toBe(false);
+  it('is met only when all three are', () => {
+    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 30, practiceDone: 20, dueLeft: 5, newLeft: 50 }).met).toBe(true);
+    expect(evaluateDay({ goals, newDone: 9, reviewsDone: 30, practiceDone: 20, dueLeft: 5, newLeft: 50 }).met).toBe(false);
+    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 29, practiceDone: 20, dueLeft: 5, newLeft: 50 }).met).toBe(false);
+    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 30, practiceDone: 19, dueLeft: 5, newLeft: 50 }).met).toBe(false);
   });
 
   it('keeps the review goal open while a new word waits, even with nothing due', () => {
-    const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, dueLeft: 0, newWaiting: 1, newLeft: 50 });
+    const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, practiceDone: 20, dueLeft: 0, newWaiting: 1, newLeft: 50 });
     expect(day.reviews).toEqual({ target: 30, done: 4, remaining: 26, met: false, exhausted: false });
   });
 
   it('meets the review goal once nothing is left due, however few were due', () => {
-    const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, dueLeft: 0, newLeft: 50 });
+    const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, practiceDone: 20, dueLeft: 0, newLeft: 50 });
     expect(day.reviews).toEqual({ target: 30, done: 4, remaining: 26, met: true, exhausted: true });
     expect(day.met).toBe(true);
   });
 
   it('does not meet the new-word goal just because no new words are left', () => {
-    const day = evaluateDay({ goals, newDone: 2, reviewsDone: 30, dueLeft: 0, newLeft: 0 });
+    const day = evaluateDay({ goals, newDone: 2, reviewsDone: 30, practiceDone: 20, dueLeft: 0, newLeft: 0 });
     expect(day.newWords).toEqual({ target: 10, done: 2, remaining: 8, met: false, exhausted: true });
     expect(day.met).toBe(false);
   });
 
   it('lets maintenance mode set the new-word goal to 0, which is met at once', () => {
-    const maintenance = { newWords: 0, reviews: 30, maintenanceMode: true };
+    const maintenance = { newWords: 0, reviews: 30, practice: 20, maintenanceMode: true };
     expect(studyGoalsProblem(maintenance)).toBeNull();
-    expect(evaluateDay({ goals: maintenance, newDone: 0, reviewsDone: 30, dueLeft: 3, newLeft: 0 }).met).toBe(true);
+    expect(evaluateDay({ goals: maintenance, newDone: 0, reviewsDone: 30, practiceDone: 20, dueLeft: 3, newLeft: 0 }).met).toBe(true);
   });
 
   it('refuses a goal of 0 new words outside maintenance mode, a review goal of 0, and odd numbers', () => {
@@ -43,6 +44,7 @@ describe('the two daily goals', () => {
     expect(studyGoalsProblem({ ...goals, reviews: 0 })).toContain('at least 1');
     expect(studyGoalsProblem({ ...goals, newWords: 2.5 })).toContain('whole number');
     expect(studyGoalsProblem({ ...goals, reviews: 1001 })).toContain('whole number');
+    expect(studyGoalsProblem({ ...goals, practice: 1500 })).toContain('whole number');
     expect(studyGoalsProblem(goals)).toBeNull();
   });
 });

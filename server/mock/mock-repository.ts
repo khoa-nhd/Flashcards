@@ -467,7 +467,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
 
   private readonly studyDays = new Map<IsoDate, StudyDayRow>();
 
-  async studyDayCounts(day: IsoDate): Promise<{ newWords: number; reviews: number }> {
+  async studyDayCounts(day: IsoDate): Promise<{ newWords: number; reviews: number; practice: number }> {
     const fresh = new Set<string>();
     const reviewed = new Set<string>();
     for (const log of this.logs) {
@@ -476,7 +476,8 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       if (detail.newWord) fresh.add(log.wordId);
       else if (detail.wasDue) reviewed.add(log.wordId);
     }
-    return { newWords: fresh.size, reviews: reviewed.size };
+    const practiceCount = this.practice.filter((p) => p.reviewedOn === day).length;
+    return { newWords: fresh.size, reviews: reviewed.size, practice: practiceCount };
   }
 
   async recordStudyDay(row: StudyDayRow): Promise<boolean> {

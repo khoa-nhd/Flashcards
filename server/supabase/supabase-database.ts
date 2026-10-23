@@ -163,6 +163,7 @@ export type FsrsUndoRow = z.infer<typeof fsrsUndoRowSchema>;
 export const studyDayCountsRowSchema = z.object({
   new_words: z.coerce.number().int().min(0),
   reviews: z.coerce.number().int().min(0),
+  practice: z.coerce.number().int().min(0),
 });
 
 /** One answer as `record_fsrs_review` takes it. */
@@ -522,16 +523,9 @@ export interface VocabularyDatabase {
   /** Takes an answer back under FSRS alone. Needs schema version 15. */
   undoFsrsReview?(args: { reviewRequestId: string; requestId: string }): Promise<FsrsUndoRow>;
   /** Needs schema version 15. */
-  studyDayCounts?(day: IsoDate): Promise<{ new_words: number; reviews: number }>;
+  studyDayCounts?(day: IsoDate): Promise<{ new_words: number; reviews: number; practice: number }>;
   /** Needs schema version 15. Returns whether the day is met now. */
-  recordStudyDay?(row: {
-    day: IsoDate;
-    newWords: number;
-    reviews: number;
-    newGoal: number;
-    reviewGoal: number;
-    met: boolean;
-  }): Promise<boolean>;
+  recordStudyDay?(row: StudyDayRow): Promise<boolean>;
   /** Needs schema version 15. Oldest first. */
   listMetStudyDays?(): Promise<IsoDate[]>;
   setCardTrashed(id: string, trashed: boolean): Promise<boolean>;
@@ -740,6 +734,7 @@ export function settingsFromRow(row: SettingsRow, schemaVersion: number): Stored
         ? {
             newWords: row.study_goal_new_words,
             reviews: row.study_goal_reviews,
+            practice: row.study_goal_practice ?? 20,
             maintenanceMode: row.maintenance_mode === true,
           }
         : null,
@@ -1524,16 +1519,18 @@ export function createSupabaseDatabase(
           {
             study_goal_new_words: goal.newWords,
             study_goal_reviews: goal.reviews,
+            study_goal_practice: goal.practice,
             maintenance_mode: goal.maintenanceMode,
           },
           { onConflict: 'user_id' },
         )
-        .select('study_goal_new_words, study_goal_reviews, maintenance_mode')
+        .select('study_goal_new_words, study_goal_reviews, study_goal_practice, maintenance_mode')
         .single();
       if (error) throw toDatabaseError(error, status);
       return {
         newWords: data.study_goal_new_words ?? 10,
         reviews: data.study_goal_reviews ?? 30,
+        practice: data.study_goal_practice ?? 20,
         maintenanceMode: data.maintenance_mode === true,
       };
     },
@@ -1597,7 +1594,7 @@ export function createSupabaseDatabase(
       if (error) throw toDatabaseError(error, status);
       const rows = z.array(studyDayCountsRowSchema).safeParse(data ?? []);
       if (!rows.success) throw new DatabaseError('unavailable', 'The database returned goal counts in an unexpected shape.');
-      return rows.data[0] ?? { new_words: 0, reviews: 0 };
+      return rows.data[0] ?? { new_words: 0, reviews: 0, practice: 0 };
     },
 
     async recordStudyDay(row) {
@@ -1606,8 +1603,10 @@ export function createSupabaseDatabase(
         p_day: row.day,
         p_new_words: row.newWords,
         p_reviews: row.reviews,
+        p_practice: row.practice ?? 0,
         p_new_goal: row.newGoal,
         p_review_goal: row.reviewGoal,
+        p_practice_goal: row.practiceGoal ?? 0,
         p_met: row.met,
       });
       if (error) throw toDatabaseError(error, status);

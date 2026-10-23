@@ -100,8 +100,10 @@ export interface StudyDayRow {
   day: IsoDate;
   newWords: number;
   reviews: number;
+  practice: number;
   newGoal: number;
   reviewGoal: number;
+  practiceGoal: number;
   met: boolean;
 }
 
@@ -216,7 +218,7 @@ export interface VocabularyRepository {
   /** Takes back one answer under FSRS alone. Only where `capabilities.fsrsOnly`. */
   undoFsrsReview?(input: { reviewRequestId: string; requestId: string }): Promise<FsrsUndoResult>;
   /** What a day's answers count towards the goals: words brought into study, and due words reviewed. */
-  studyDayCounts?(day: IsoDate): Promise<{ newWords: number; reviews: number }>;
+  studyDayCounts?(day: IsoDate): Promise<{ newWords: number; reviews: number; practice: number }>;
   /** Records how a day stands. A met day stays met; returns whether it is met now. */
   recordStudyDay?(row: StudyDayRow): Promise<boolean>;
   /** Every day recorded as met, oldest first. */
