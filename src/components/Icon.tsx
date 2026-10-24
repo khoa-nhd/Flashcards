@@ -29,6 +29,8 @@ const PATHS = {
   database: 'M4 6v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2Zm0 8v6a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-6',
   chat: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v10Z',
   help: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Zm-2.2 6a2.3 2.3 0 1 1 3.5 2c-.8.5-1.3 1-1.3 2M12 17h.01',
+  speaker: 'M11 5 6 9H2v6h4l5 4V5Zm4.5 5.5a2.5 2.5 0 0 1 0 5',
+  'speaker-off': 'M11 5 6 9H2v6h4l5 4V5Zm4.5 5.5m-2.5 0a2.5 2.5 0 0 1 0-5m0 5V5m0 5a2.5 2.5 0 0 1 0 5',
 } as const;
 
 export type IconName = keyof typeof PATHS;

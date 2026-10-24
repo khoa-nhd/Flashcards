@@ -6,6 +6,7 @@ import { ANSWER_KEY_SETS, useReviewShortcuts } from '../hooks/useReviewShortcuts
 import type { SessionController } from '../lib/session-controller.js';
 import { canUndo, currentCard, type SessionState } from '../lib/session-machine.js';
 import { Flashcard } from './Flashcard.js';
+import { Icon } from './Icon.js';
 import { RefusedAnswersPanel } from './RefusedAnswersPanel.js';
 import { ReviewControls } from './ReviewControls.js';
 import { ReviewProgress } from './ReviewProgress.js';
@@ -37,6 +38,7 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
   const canGrade = flipped;
 
   const [hintVisible, setHintVisible] = useState(false);
+  const [muted, setMuted] = useState(false);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const flipButton = useRef<HTMLButtonElement>(null);
   // Remember the strength seen for each card in this sitting. FSRS can lower a
@@ -119,6 +121,18 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
               ? 'Flip the card before answering.'
               : ''}
         </p>
+        <button
+          type="button"
+          onClick={() => setMuted(!muted)}
+          aria-label={muted ? 'Unmute - enable auto-speech' : 'Mute - disable auto-speech'}
+          title={muted ? 'Enable auto-speech' : 'Disable auto-speech'}
+          className="h-8 shrink-0 cursor-pointer rounded-full border border-line-strong px-3 font-medium text-muted transition-colors hover:text-ink"
+        >
+          <span className="flex items-center gap-1.5">
+            <Icon name={muted ? 'speaker-off' : 'speaker'} className="size-4" />
+            <span className="hidden sm:inline">{muted ? 'Unmute' : 'Mute'}</span>
+          </span>
+        </button>
         {undoable !== null && (
           <button
             type="button"
@@ -159,6 +173,7 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
             locked={false}
             pendingAction={null}
             strengthDropped={dropped.has(card.id)}
+            muted={muted}
             onFlip={flip}
             onGrade={grade}
             onBlockedGrade={showFlipHint}

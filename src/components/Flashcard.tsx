@@ -1,14 +1,16 @@
-import { useState, type CSSProperties, type MouseEvent, type Ref } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type Ref } from 'react';
 import type { ReviewCard } from '../../shared/api.js';
 import { daysBetween, type IsoDate } from '../../shared/dates.js';
 import type { ReviewAction } from '../../shared/review-logic.js';
 import { SWIPE } from '../config.js';
 import { useReducedMotion } from '../hooks/useReducedMotion.js';
 import { useSwipe } from '../hooks/useSwipe.js';
-import { useUiLanguage } from '../app-context.js';
+import { useSettings, useUiLanguage } from '../app-context.js';
 import { pick } from '../lib/i18n.js';
 import type { SwipeDirection } from '../lib/gesture.js';
 import { StrengthPill } from './badges.js';
+import { speak, stopSpeaking } from '../lib/speech.js';
+import { SpeakButton } from './SpeakButton.js';
 
 export interface FlashcardProps {
   card: ReviewCard;
@@ -21,6 +23,8 @@ export interface FlashcardProps {
   pendingAction: ReviewAction | null;
   /** The word's strength fell since it was last shown in this session. */
   strengthDropped?: boolean;
+  /** Whether to mute auto-speech (for the whole session, passed from ReviewScreen). */
+  muted?: boolean;
   swipeThresholdPx?: number;
   onFlip: () => void;
   onGrade: (action: ReviewAction) => void;
@@ -58,9 +62,11 @@ export function Flashcard({
   onGrade,
   onBlockedGrade,
   flipButtonRef,
+muted = false,
 }: FlashcardProps) {
   const reducedMotion = useReducedMotion();
   const language = useUiLanguage();
+  const { speechLang } = useSettings();
 
   // The answer is not put in the document until the card is first flipped.
   const [revealed, setRevealed] = useState(flipped);
@@ -71,6 +77,21 @@ export function Flashcard({
   const meaningFields = card.back.filter((field) => field.key === 'meaning');
   const detailFields = card.back.filter((field) => field.key !== 'meaning');
   const visibleFields = detailsCollapsed ? meaningFields : card.back;
+
+  // Auto-speak the word when a new card appears (on first render or when card.id changes)
+  const prevCardId = useRef<string | null>(null);
+  useEffect(() => {
+    // Only speak when it's a new card (card.id changed), not flipped yet, and not muted
+    if (card.id !== prevCardId.current && !flipped && !muted) {
+      prevCardId.current = card.id;
+      // Use the speechLang from settings
+      void speak(card.word, { lang: speechLang }).catch(() => {});
+    }
+    // Stop speaking when leaving the card or when muted
+    return () => {
+      stopSpeaking();
+    };
+  }, [card.id, card.word, speechLang, flipped, muted]);
 
   const handleSwipe = (direction: SwipeDirection) => {
     if (locked) return;
@@ -129,6 +150,7 @@ export function Flashcard({
               <h2 className="font-serif text-[clamp(2.5rem,8vw,4.5rem)] font-semibold leading-[1.05] tracking-[-0.025em] wrap-anywhere">
                 {card.word}
               </h2>
+              <SpeakButton word={card.word} lang={speechLang} />
               {card.front.length > 0 && (
                 <p className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-[0.9375rem] text-muted">
                   {card.front.map((field, index) => (
