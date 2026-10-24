@@ -67,10 +67,10 @@ const remember = (id: string, revision: number, extra: Record<string, unknown> =
 });
 
 describe('the schema version Settings reports', () => {
-  it('asks for version 15 now that its screens exist, and reports a database at 15 as up to date', async () => {
+  it('asks for version 16, where the practice goal is kept, and reports a database at 16 as up to date', async () => {
     const settings = accountSettingsSchema.parse(await (await call(app, alice, '/api/settings')).json());
     expect(settings.database).toEqual({ version: LATEST_SCHEMA_VERSION, latest: RECOMMENDED_SCHEMA_VERSION });
-    expect(RECOMMENDED_SCHEMA_VERSION).toBe(15);
+    expect(RECOMMENDED_SCHEMA_VERSION).toBe(16);
     expect(settings.database!.version >= settings.database!.latest).toBe(true);
   });
 });
@@ -382,7 +382,7 @@ describe('the three daily goals', () => {
   });
 
   it('counts a word added today, meets the review goal when nothing is left to study, and starts a streak', async () => {
-    expect((await setGoals(alice, { newWords: 1, reviews: 5, practice: 20 })).status).toBe(200);
+    expect((await setGoals(alice, { newWords: 1, reviews: 5, practice: 0 })).status).toBe(200);
     expect(await goalsOf(alice)).toMatchObject({ chosen: true, newWords: { done: 0, met: false }, streak: { current: 0 } });
     // Nothing at all to study yet, so five reviews are not needed today.
     expect((await goalsOf(alice)).reviews).toMatchObject({ target: 5, done: 0, met: true, exhausted: true });
@@ -393,7 +393,8 @@ describe('the three daily goals', () => {
     expect(goals.newWords).toEqual({ target: 1, done: 1, remaining: 0, met: true, exhausted: false });
     // The owner's rule (2026-10-23): the new word is still waiting, so the review goal is open again.
     expect(goals.reviews).toMatchObject({ target: 5, done: 0, met: false, exhausted: false });
-    expect(goals.practice).toMatchObject({ target: 20, done: 0, met: false, exhausted: false });
+    // No practice is asked for here, so that goal is met at 0.
+    expect(goals.practice).toMatchObject({ target: 0, done: 0, met: true });
     expect(goals.streak).toEqual({ current: 0, longest: 0, metToday: false });
 
     await answer(alice, remember(word.id, 0));
@@ -403,7 +404,7 @@ describe('the three daily goals', () => {
   });
 
   it('reopens a review goal met by running out, when a word is added before it is reached', async () => {
-    await setGoals(alice, { newWords: 1, reviews: 5, practice: 20 });
+    await setGoals(alice, { newWords: 1, reviews: 5, practice: 0 });
     const first = await addWord(alice, 'candid');
     await answer(alice, remember(first.id, 0));
     expect((await goalsOf(alice)).reviews.met).toBe(true);
@@ -416,7 +417,7 @@ describe('the three daily goals', () => {
   });
 
   it('counts only due words as reviews, not words taken early', async () => {
-    await setGoals(alice, { newWords: 1, reviews: 1, practice: 20 });
+    await setGoals(alice, { newWords: 1, reviews: 1, practice: 0 });
     const due = await addWord(alice, 'candid');
     const early = await addWord(alice, 'lucid');
     await answer(alice, remember(due.id, 0));
@@ -431,7 +432,7 @@ describe('the three daily goals', () => {
   });
 
   it('keeps a met day met, even after the word that met it is deleted', async () => {
-    await setGoals(alice, { newWords: 1, reviews: 1, practice: 20 });
+    await setGoals(alice, { newWords: 1, reviews: 1, practice: 0 });
     const word = await addWord(alice, 'candid');
     await answer(alice, remember(word.id, 0));
     expect((await goalsOf(alice)).streak.metToday).toBe(true);
@@ -442,7 +443,7 @@ describe('the three daily goals', () => {
   });
 
   it('counts the streak back over met days, and keeps it from yesterday until today is met', async () => {
-    await setGoals(alice, { newWords: 1, reviews: 1, practice: 20 });
+    await setGoals(alice, { newWords: 1, reviews: 1, practice: 0 });
     for (const day of ['2026-10-06', '2026-10-07', yesterday]) {
       await db.admin(
         `insert into public.study_days (user_id, day, new_words, reviews, practice, new_goal, review_goal, practice_goal, met) values ($1, $2, 1, 1, 0, 1, 1, 20, true)`,
@@ -456,16 +457,16 @@ describe('the three daily goals', () => {
   });
 
   it('lets the new-word goal be 0 only in maintenance mode', async () => {
-    const refused = await setGoals(alice, { newWords: 0, reviews: 30, practice: 20 });
+    const refused = await setGoals(alice, { newWords: 0, reviews: 30, practice: 0 });
     expect(refused.status).toBe(400);
     expect(apiErrorSchema.parse(await refused.json()).error.message).toContain('maintenance mode');
-    const maintenance = await setGoals(alice, { newWords: 0, reviews: 30, practice: 20, maintenanceMode: true });
+    const maintenance = await setGoals(alice, { newWords: 0, reviews: 30, practice: 0, maintenanceMode: true });
     expect(maintenance.status).toBe(200);
     expect(studyGoalsResponseSchema.parse(await maintenance.json()).newWords).toMatchObject({ target: 0, met: true });
   });
 
   it('records the day as soon as it is completed, without the goals being opened', async () => {
-    await setGoals(alice, { newWords: 1, reviews: 1, practice: 20 });
+    await setGoals(alice, { newWords: 1, reviews: 1, practice: 0 });
     const word = await addWord(alice, 'candid');
     const recorded = () => db.admin('select day::text as day, met from public.study_days where user_id = $1', [alice.id]);
     // Added but not studied yet: the review goal is still open.
@@ -475,7 +476,7 @@ describe('the three daily goals', () => {
   });
 
   it('counts a spread-out import by the day its words are added, not the day they first come up', async () => {
-    await setGoals(alice, { newWords: 3, reviews: 1, practice: 20 });
+    await setGoals(alice, { newWords: 3, reviews: 1, practice: 0 });
     const response = await call(app, alice, '/api/vocabulary/import', {
       method: 'POST',
       body: { items: ['one', 'two', 'three'].map((word) => ({ requestId: newId(), word })), wordsPerDay: 1 },

@@ -31,7 +31,7 @@ export interface AccountSession {
   /** True when FSRS is the only scheduler. */
   fsrsOnly: boolean;
   /** The two daily goals, where the account can keep them. */
-  goals: { newWords: number; reviews: number; maintenanceMode: boolean } | null;
+  goals: { newWords: number; reviews: number; practice: number; maintenanceMode: boolean } | null;
   /** The most reviews offered in one day; `null` means show everything due. */
   maxReviewsPerDay: number | null;
   /** Needs schema version 15. */

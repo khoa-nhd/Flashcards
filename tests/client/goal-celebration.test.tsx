@@ -19,7 +19,7 @@ beforeEach(() => {
 const almost = (overrides: Partial<StudyGoalsResponse> = {}) =>
   studyGoalsResponse({
     chosen: true,
-    goals: { newWords: 1, reviews: 1, maintenanceMode: false },
+    goals: { newWords: 1, reviews: 1, practice: 0, maintenanceMode: false },
     newWords: { target: 1, done: 1, remaining: 0, met: true, exhausted: false },
     reviews: { target: 1, done: 0, remaining: 1, met: false, exhausted: false },
     due: { total: 2, overdue: 0 },

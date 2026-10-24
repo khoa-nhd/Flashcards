@@ -515,6 +515,12 @@ create table if not exists public.study_days (
   primary key (user_id, day)
 );
 
+-- A table made by an earlier form of this file has no practice columns; days
+-- recorded then had no practice goal to meet.
+alter table public.study_days
+  add column if not exists practice integer not null default 0 check (practice >= 0),
+  add column if not exists practice_goal integer not null default 0 check (practice_goal between 0 and 1000);
+
 alter table public.study_days enable row level security;
 
 drop policy if exists study_days_select on public.study_days;
@@ -539,7 +545,10 @@ create trigger study_days_touch before update on public.study_days
 --   new_words  words brought into study that day (their first answer ever)
 --   reviews    other words answered that day that were due when answered
 --   practice   practice answers given that day
-create or replace function public.study_day_counts(p_day date)
+-- A database that ran an earlier form of this file has the old result shape.
+drop function if exists public.study_day_counts(date);
+
+create function public.study_day_counts(p_day date)
 returns table (new_words integer, reviews integer, practice integer)
 language sql
 stable

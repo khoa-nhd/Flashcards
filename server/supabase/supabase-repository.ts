@@ -399,11 +399,11 @@ export class SupabaseVocabularyRepository implements VocabularyRepository, Vocab
     return { outcome: result.outcome, id: result.vocabulary_id, state };
   }
 
-  async studyDayCounts(day: IsoDate): Promise<{ newWords: number; reviews: number }> {
+  async studyDayCounts(day: IsoDate): Promise<{ newWords: number; reviews: number; practice: number }> {
     const count = this.database.studyDayCounts;
-    if (!this.capabilities.fsrsOnly || count === undefined) return { newWords: 0, reviews: 0 };
+    if (!this.capabilities.fsrsOnly || count === undefined) return { newWords: 0, reviews: 0, practice: 0 };
     const row = await count.call(this.database, day);
-    return { newWords: row.new_words, reviews: row.reviews };
+    return { newWords: row.new_words, reviews: row.reviews, practice: row.practice };
   }
 
   async recordStudyDay(row: StudyDayRow): Promise<boolean> {

@@ -13,6 +13,7 @@ import type { ReviewAction } from '../../shared/review-logic.js';
 import { DEFAULT_SCHEDULER, isSchedulerId, type SchedulerId } from '../../shared/scheduler/active.js';
 import { fsrsStateSchema, type FsrsState } from '../../shared/scheduler/fsrs.js';
 import type { DailyGoal } from '../../shared/session-planner.js';
+import type { StudyDayRow } from '../vocabulary-repository.js';
 import type { Database } from './database.types.js';
 
 const dateSchema = z.string().refine(isIsoDate).nullable();
@@ -225,7 +226,7 @@ export interface StoredSettings {
   /** Whether a review moves a word; `null` on a database that cannot keep the choice yet. */
   countReviewsTowardMastery: boolean | null;
   /** FSRS-first goals, where the database keeps them. */
-  studyGoals: { newWords: number; reviews: number; maintenanceMode: boolean } | null;
+  studyGoals: { newWords: number; reviews: number; practice: number; maintenanceMode: boolean } | null;
   maxReviewsPerDay: number | null;
   /** `null` follows the browser. */
   uiLanguage: 'vi' | 'en' | null;
@@ -243,7 +244,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 15;
+export const LATEST_SCHEMA_VERSION = 16;
 
 /**
  * The newest migration Settings asks the owner to run. Version 15 makes FSRS
@@ -251,7 +252,7 @@ export const LATEST_SCHEMA_VERSION = 15;
  * screens for it exist (docs/fsrs-only-progress.md), so the app does not ask
  * for it yet. Raise this to LATEST_SCHEMA_VERSION when they do.
  */
-export const RECOMMENDED_SCHEMA_VERSION = 15;
+export const RECOMMENDED_SCHEMA_VERSION = 16;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -615,9 +616,10 @@ export interface VocabularyDatabase {
   /** Needs schema version 13. */
   saveCountReviewsTowardMastery(value: boolean): Promise<boolean>;
   /** Needs schema version 15. */
-  saveStudyGoals?(goal: { newWords: number; reviews: number; maintenanceMode: boolean }): Promise<{
+  saveStudyGoals?(goal: { newWords: number; reviews: number; practice: number; maintenanceMode: boolean }): Promise<{
     newWords: number;
     reviews: number;
+    practice: number;
     maintenanceMode: boolean;
   }>;
   /** Needs schema version 15. */
@@ -683,6 +685,8 @@ export interface SettingsRow {
   /** From schema version 15. */
   study_goal_new_words?: number | null;
   study_goal_reviews?: number | null;
+  /** From schema version 16. */
+  study_goal_practice?: number | null;
   maintenance_mode?: boolean | null;
   max_reviews_per_day?: number | null;
   ui_language?: string | null;
@@ -705,6 +709,7 @@ export const settingsColumns = (schemaVersion: number): string =>
           'ui_language',
         ]
       : []),
+    ...(schemaVersion >= 16 ? ['study_goal_practice'] : []),
   ].join(', ');
 
 export function settingsFromRow(row: SettingsRow, schemaVersion: number): StoredSettings {
@@ -734,7 +739,8 @@ export function settingsFromRow(row: SettingsRow, schemaVersion: number): Stored
         ? {
             newWords: row.study_goal_new_words,
             reviews: row.study_goal_reviews,
-            practice: row.study_goal_practice ?? 20,
+            // The practice goal is kept from version 16; before that the suggestion stands.
+            practice: schemaVersion >= 16 ? (row.study_goal_practice ?? 20) : 20,
             maintenanceMode: row.maintenance_mode === true,
           }
         : null,

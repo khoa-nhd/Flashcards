@@ -159,6 +159,7 @@ export interface Database {
           /** From schema version 15. The two daily goals, the review limit and the interface language. */
           study_goal_new_words?: number | null;
           study_goal_reviews?: number | null;
+          study_goal_practice?: number | null;
           maintenance_mode?: boolean;
           max_reviews_per_day?: number | null;
           ui_language?: 'vi' | 'en' | null;
@@ -173,6 +174,7 @@ export interface Database {
           count_reviews_toward_mastery?: boolean;
           study_goal_new_words?: number | null;
           study_goal_reviews?: number | null;
+          study_goal_practice?: number | null;
           maintenance_mode?: boolean;
           max_reviews_per_day?: number | null;
           ui_language?: 'vi' | 'en' | null;
@@ -186,6 +188,7 @@ export interface Database {
           count_reviews_toward_mastery?: boolean;
           study_goal_new_words?: number | null;
           study_goal_reviews?: number | null;
+          study_goal_practice?: number | null;
           maintenance_mode?: boolean;
           max_reviews_per_day?: number | null;
           ui_language?: 'vi' | 'en' | null;

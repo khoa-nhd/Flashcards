@@ -220,7 +220,7 @@ export function weakWordsResponse(overrides: Partial<WeakWordsResponse> = {}): W
 
 /** The two FSRS-only goals with the suggested starting targets, unless a test overrides them. */
 export function studyGoalsResponse(overrides: Partial<StudyGoalsResponse> = {}): StudyGoalsResponse {
-  const goals = { newWords: 10, reviews: 30, maintenanceMode: false, ...overrides.goals };
+  const goals = { newWords: 10, reviews: 30, practice: 20, maintenanceMode: false, ...overrides.goals };
   return {
     available: true,
     chosen: false,
@@ -229,6 +229,7 @@ export function studyGoalsResponse(overrides: Partial<StudyGoalsResponse> = {}):
     goals,
     newWords: { target: goals.newWords, done: 0, remaining: goals.newWords, met: false, exhausted: false },
     reviews: { target: goals.reviews, done: 0, remaining: goals.reviews, met: false, exhausted: false },
+    practice: { target: goals.practice, done: 0, remaining: goals.practice, met: goals.practice === 0, exhausted: false },
     due: { total: 0, overdue: 0 },
     streak: { current: 0, longest: 0, metToday: false },
     ...overrides,
@@ -582,6 +583,7 @@ export function createFakeApi({
       const goals = {
         newWords: input.newWords ?? studyGoals.goals.newWords,
         reviews: input.reviews ?? studyGoals.goals.reviews,
+        practice: input.practice ?? studyGoals.goals.practice,
         maintenanceMode: input.maintenanceMode ?? studyGoals.goals.maintenanceMode,
       };
       studyGoals = {
