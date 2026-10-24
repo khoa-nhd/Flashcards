@@ -381,7 +381,7 @@ describe('the three daily goals', () => {
     expect(await db.admin('select * from public.study_days')).toEqual([]);
   });
 
-  it('counts a word added today, meets the review goal when nothing is left to study, and starts a streak', async () => {
+  it('counts a word added today, meets the review goal once nothing is left to study, and starts a streak', async () => {
     expect((await setGoals(alice, { newWords: 1, reviews: 5, practice: 0 })).status).toBe(200);
     expect(await goalsOf(alice)).toMatchObject({ chosen: true, newWords: { done: 0, met: false }, streak: { current: 0 } });
     // Nothing at all to study yet, so five reviews are not needed today.
@@ -435,6 +435,7 @@ describe('the three daily goals', () => {
     await setGoals(alice, { newWords: 1, reviews: 1, practice: 0 });
     const word = await addWord(alice, 'candid');
     await answer(alice, remember(word.id, 0));
+    // With reviews goal = 1, answering 1 review meets the goal
     expect((await goalsOf(alice)).streak.metToday).toBe(true);
     await call(app, alice, `/api/vocabulary/${word.id}`, { method: 'DELETE' });
     const goals = await goalsOf(alice);
@@ -472,6 +473,7 @@ describe('the three daily goals', () => {
     // Added but not studied yet: the review goal is still open.
     expect(await recorded()).toEqual([{ day: TODAY, met: false }]);
     await answer(alice, remember(word.id, 0));
+    // After answering 1 review, both newWords (1) and reviews (1) goals are met
     expect(await recorded()).toEqual([{ day: TODAY, met: true }]);
   });
 

@@ -10,10 +10,10 @@ describe('the three daily goals', () => {
   });
 
   it('is met only when all three are', () => {
-    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 30, practiceDone: 20, dueLeft: 5, newLeft: 50 }).met).toBe(true);
-    expect(evaluateDay({ goals, newDone: 9, reviewsDone: 30, practiceDone: 20, dueLeft: 5, newLeft: 50 }).met).toBe(false);
+    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 30, practiceDone: 20, dueLeft: 0, newLeft: 50 }).met).toBe(true);
+    expect(evaluateDay({ goals, newDone: 9, reviewsDone: 30, practiceDone: 20, dueLeft: 0, newLeft: 50 }).met).toBe(false);
     expect(evaluateDay({ goals, newDone: 10, reviewsDone: 29, practiceDone: 20, dueLeft: 5, newLeft: 50 }).met).toBe(false);
-    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 30, practiceDone: 19, dueLeft: 5, newLeft: 50 }).met).toBe(false);
+    expect(evaluateDay({ goals, newDone: 10, reviewsDone: 30, practiceDone: 19, dueLeft: 0, newLeft: 50 }).met).toBe(false);
   });
 
   it('keeps the review goal open while a new word waits, even with nothing due', () => {
@@ -21,7 +21,7 @@ describe('the three daily goals', () => {
     expect(day.reviews).toEqual({ target: 30, done: 4, remaining: 26, met: false, exhausted: false });
   });
 
-  it('meets the review goal once nothing is left due, however few were due', () => {
+  it('meets the review goal once nothing is left to study, however few were due', () => {
     const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, practiceDone: 20, dueLeft: 0, newLeft: 50 });
     expect(day.reviews).toEqual({ target: 30, done: 4, remaining: 26, met: true, exhausted: true });
     expect(day.met).toBe(true);
@@ -36,7 +36,7 @@ describe('the three daily goals', () => {
   it('lets maintenance mode set the new-word goal to 0, which is met at once', () => {
     const maintenance = { newWords: 0, reviews: 30, practice: 20, maintenanceMode: true };
     expect(studyGoalsProblem(maintenance)).toBeNull();
-    expect(evaluateDay({ goals: maintenance, newDone: 0, reviewsDone: 30, practiceDone: 20, dueLeft: 3, newLeft: 0 }).met).toBe(true);
+    expect(evaluateDay({ goals: maintenance, newDone: 0, reviewsDone: 30, practiceDone: 20, dueLeft: 0, newLeft: 0 }).met).toBe(true);
   });
 
   it('refuses a goal of 0 new words outside maintenance mode, a review goal of 0, and odd numbers', () => {

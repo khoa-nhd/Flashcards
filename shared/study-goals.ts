@@ -80,10 +80,10 @@ export function evaluateDay({ goals, newDone, reviewsDone, dueLeft, practiceDone
   });
   // No new words left does not meet the new-word goal: maintenance mode is the way to a goal of 0.
   const newWords = part(goals.newWords, newDone, newDone >= goals.newWords, newLeft === 0);
-  // Nothing left to study today meets the review goal, however few were due. A new word
-  // waiting to be studied still leaves something to do, so it keeps the goal open.
+  // Review goal is met only when all due words have been reviewed (review hết từ due).
+  // A new word waiting to be studied still leaves something to do, so it keeps the goal open.
   const nothingLeft = dueLeft === 0 && newWaiting === 0;
-  const reviews = part(goals.reviews, reviewsDone, reviewsDone >= goals.reviews || nothingLeft, nothingLeft);
+  const reviews = part(goals.reviews, reviewsDone, nothingLeft, nothingLeft);
   const practice = part(goals.practice, practiceDone, practiceDone >= goals.practice, false);
   return { newWords, reviews, practice, met: newWords.met && reviews.met && practice.met };
 }
