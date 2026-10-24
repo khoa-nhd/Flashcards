@@ -39,7 +39,7 @@ const KEY_HINT = 'hidden rounded border border-current/30 px-1.5 py-0.5 text-xs 
 
 export function ReviewControls({ enabled, onGrade, onBlocked }: ReviewControlsProps) {
   return (
-    <div className="grid grid-cols-2 gap-3" role="group" aria-label="Your answer">
+    <div className="grid grid-cols-2 gap-2" role="group" aria-label="Your answer">
       {BUTTONS.map(({ action, label, shortcut, keyLabel, tone }) => (
         <button
           key={action}
@@ -51,7 +51,7 @@ export function ReviewControls({ enabled, onGrade, onBlocked }: ReviewControlsPr
             if (enabled) onGrade(action);
             else onBlocked();
           }}
-          className={`flex h-14 items-center justify-center gap-2 rounded-xl border text-[0.9375rem] font-semibold tracking-[-0.01em] transition-[color,background-color,border-color,transform] duration-150 ${tone} ${
+          className={`flex h-12 sm:h-14 items-center justify-center gap-1.5 sm:gap-2 rounded-lg sm:rounded-xl border text-[0.875rem] sm:text-[0.9375rem] font-semibold tracking-[-0.01em] transition-[color,background-color,border-color,transform] duration-150 ${tone} ${
             enabled ? 'cursor-pointer active:scale-[0.98]' : 'cursor-not-allowed opacity-45'
           }`}
         >

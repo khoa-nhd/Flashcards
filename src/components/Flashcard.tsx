@@ -47,7 +47,7 @@ function dueLabel(nextReview: IsoDate | null, today: IsoDate | null): string | n
 }
 
 const FACE =
-  'card-face flex min-h-[21rem] flex-col rounded-2xl border px-6 pb-16 pt-5 shadow-[0_30px_80px_-40px_rgba(0,0,0,0.95)] sm:min-h-[25rem] sm:px-8';
+  'card-face flex min-h-[18rem] flex-col rounded-xl border px-4 pb-12 pt-3 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.9)] sm:min-h-[22rem] sm:px-6 sm:pb-16 sm:pt-5 sm:rounded-2xl sm:shadow-[0_30px_80px_-40px_rgba(0,0,0,0.95)]';
 
 export function Flashcard({
   card,

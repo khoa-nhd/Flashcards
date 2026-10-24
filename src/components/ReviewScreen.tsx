@@ -110,10 +110,10 @@ export function ReviewScreen({ state, session, onHelp, paused = false }: ReviewS
   const extraKeys = ANSWER_KEY_SETS[answerKeys];
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-xl flex-col gap-3 px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3">
+    <div className="mx-auto flex h-full w-full max-w-xl flex-col gap-1.5 px-2 sm:px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-1.5">
       <ReviewProgress done={done} total={total} />
 
-      <div className="flex min-h-8 items-center justify-between gap-3 text-sm">
+      <div className="flex min-h-7 items-center justify-between gap-2 text-xs sm:text-sm">
         <p role="status" className="min-w-0 flex-1 truncate text-faint">
           {saving
             ? `Saving ${state.pending.length === 1 ? 'one answer' : `${state.pending.length} answers`}…`

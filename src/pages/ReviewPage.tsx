@@ -83,7 +83,7 @@ function CountingSwitch({ fsrsOnly }: { fsrsOnly: boolean }) {
 }
 
 const HEADER_BUTTON =
-  'flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-full border border-line-strong px-3 text-xs font-medium text-muted transition-colors hover:text-ink sm:text-sm aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
+  'flex h-8 shrink-0 cursor-pointer items-center gap-1 rounded-full border border-line-strong px-2 text-xs font-medium text-muted transition-colors hover:text-ink sm:text-sm sm:px-3 aria-disabled:cursor-not-allowed aria-disabled:opacity-50';
 
 /**
  * The flashcard review. The session itself lives for the whole app, so leaving
@@ -261,15 +261,14 @@ export function ReviewPage() {
   return (
     <div className="flex h-full flex-col">
       <div
-        className={`mx-auto flex w-full max-w-xl flex-nowrap items-center justify-between gap-x-2 px-4 pb-2 pt-2.5 ${
+        className={`mx-auto flex w-full max-w-xl flex-nowrap items-center justify-between gap-x-2 px-2 sm:px-4 pb-1.5 pt-1.5 ${
           finishedSession ? 'hidden' : ''
         }`}
       >
         <div className="flex min-w-0 items-center gap-2">
-          <h1 className="hidden truncate text-sm font-semibold tracking-tight md:block">Review</h1>
           <ModeBadge meta={state.meta} />
         </div>
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1">
           <label className="sr-only" htmlFor="review-focus">
             Cards to review
           </label>
