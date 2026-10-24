@@ -78,6 +78,7 @@ interface Outcome {
 interface Run {
   mode: StudyMode;
   modes: StudyMode[];
+  isComprehensive: boolean;
   sessionId: string;
   words: PracticeWord[];
   /** Recognition choices, drawn once per question so a re-render never reshuffles them. */
@@ -91,6 +92,12 @@ interface Run {
   /** Judged locally at once, then confirmed by the server's own answer. */
   verdict: PracticeVerdict | null;
   error: string | null;
+}
+
+interface FinishedState {
+  mode: StudyMode;
+  outcomes: Outcome[];
+  isComprehensive: boolean;
 }
 
 /**
@@ -115,7 +122,7 @@ export function PracticePage() {
   const { collections } = useLibrary();
   const [length, setLength] = useState<number>(10);
   const [run, setRun] = useState<Run | null>(null);
-  const [finished, setFinished] = useState<{ mode: StudyMode; outcomes: Outcome[] } | null>(null);
+  const [finished, setFinished] = useState<FinishedState | null>(null);
   /** Every answered question's outcome, kept outside `run` so a confirmation still lands after moving on. */
   const outcomes = useRef<Map<number, Outcome>>(new Map());
   /** Where each answer sent to the outbox belongs, so its fate can be applied whenever it comes back. */
@@ -206,6 +213,7 @@ export function PracticePage() {
     setRun({
       mode,
       modes: words.map(() => mode),
+      isComprehensive: false,
       sessionId,
       words,
       choices: words.map((word) => (mode === 'recognition' ? buildChoices(word, pool, Math.random) : null)),
@@ -259,6 +267,7 @@ export function PracticePage() {
     setRun({
       mode: sessionModes[0] ?? 'recognition',
       modes: sessionModes,
+      isComprehensive: true,
       sessionId,
       words: sessionWords,
       choices: sessionWords.map((word, i) => (sessionModes[i] === 'recognition' ? buildChoices(word, pool, Math.random) : null)),
@@ -402,7 +411,11 @@ export function PracticePage() {
     if (run === null) return;
     if (run.index + 1 >= run.words.length) {
       liveSession.current = null;
-      setFinished({ mode: run.mode, outcomes: [...outcomes.current.values()] });
+      setFinished({
+        mode: run.mode,
+        outcomes: [...outcomes.current.values()],
+        isComprehensive: run.isComprehensive,
+      });
       setRun(null);
       return;
     }
@@ -437,7 +450,15 @@ export function PracticePage() {
               className={BUTTON_SECONDARY}
               onClick={() => {
                 liveSession.current = null;
-                setFinished(outcomes.current.size > 0 ? { mode: run.mode, outcomes: [...outcomes.current.values()] } : null);
+                setFinished(
+                  outcomes.current.size > 0
+                    ? {
+                        mode: run.mode,
+                        outcomes: [...outcomes.current.values()],
+                        isComprehensive: run.isComprehensive,
+                      }
+                    : null,
+                );
                 setRun(null);
               }}
             >
@@ -500,7 +521,22 @@ export function PracticePage() {
           </div>
         ) : (
           <div className="flex max-w-2xl flex-col gap-6">
-            {finished !== null && <Summary mode={finished.mode} outcomes={finished.outcomes} recovered={recovered} />}
+            {finished !== null && (
+              <Summary
+                mode={finished.mode}
+                outcomes={finished.outcomes}
+                recovered={recovered}
+                onPracticeAgain={() => {
+                  const wasComprehensive = finished.isComprehensive;
+                  setFinished(null);
+                  if (wasComprehensive) {
+                    startComprehensive();
+                  } else {
+                    start();
+                  }
+                }}
+              />
+            )}
 
             <section className={`${CARD} flex flex-col gap-4 p-6 border-accent/40 bg-accent-soft/20`} aria-labelledby="comprehensive-practice-title">
               <div className="flex flex-col gap-2">
@@ -511,21 +547,40 @@ export function PracticePage() {
                   Comprehensive mixed practice: mixes all practice modes, prioritizes weak words and words missing data, then picks randomly. You can skip any question (like listening) if needed.
                 </p>
               </div>
-              <div>
-                <button
-                  type="button"
-                  className={BUTTON_PRIMARY}
-                  onClick={startComprehensive}
-                  disabled={pool.length === 0}
-                >
-                  Start practice
-                </button>
+              <div className="flex flex-wrap items-end gap-4">
+                <div className="flex flex-col gap-1.5 sm:w-44">
+                  <label htmlFor="comprehensive-length" className="text-sm font-medium">
+                    Number of questions
+                  </label>
+                  <select
+                    id="comprehensive-length"
+                    className={INPUT}
+                    value={length}
+                    onChange={(event) => setLength(Number(event.target.value))}
+                  >
+                    {LENGTHS.map((value) => (
+                      <option key={value} value={value}>
+                        Up to {value}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <button
+                    type="button"
+                    className={BUTTON_PRIMARY}
+                    onClick={startComprehensive}
+                    disabled={pool.length === 0}
+                  >
+                    Start practice
+                  </button>
+                </div>
               </div>
             </section>
 
             <section className={`${CARD} flex flex-col gap-4 p-5`} aria-labelledby="practice-setup-title">
               <h2 id="practice-setup-title" className={SECTION_TITLE}>
-                {finished === null ? 'Or choose a specific mode' : 'Practise again'}
+                {finished === null ? 'Start a practice session' : 'Practise again'}
               </h2>
 
               <fieldset className="m-0 flex flex-col gap-2 border-0 p-0">
@@ -675,19 +730,47 @@ export function PracticePage() {
   );
 }
 
-function Summary({ mode, outcomes, recovered = [] }: { mode: StudyMode; outcomes: Outcome[]; recovered?: readonly string[] }) {
+function Summary({
+  mode,
+  outcomes,
+  recovered = [],
+  onPracticeAgain,
+}: {
+  mode: StudyMode;
+  outcomes: Outcome[];
+  recovered?: readonly string[];
+  onPracticeAgain?: () => void;
+}) {
   const fsrsOnly = useVocabulary().meta?.fsrsOnly === true;
   const correct = outcomes.filter((outcome) => outcome.correct).length;
   const missed = outcomes.filter((outcome) => !outcome.correct);
   const unrecorded = outcomes.filter((outcome) => !outcome.recorded).length;
   return (
-    <section className={`${CARD} flex flex-col gap-3 p-5`} aria-label="Practice summary">
-      <h2 className="font-serif text-2xl font-semibold">Practice finished</h2>
-      <p className="text-sm">
-        {STUDY_MODE_LABELS[mode]}: <strong className="font-semibold tabular-nums">{correct}</strong> of{' '}
-        <span className="tabular-nums">{count(outcomes.length, 'answer')}</span> correct
-        {outcomes.length > 0 && ` (${Math.round((correct / outcomes.length) * 100)}%)`}.
-      </p>
+    <section className={`${CARD} flex flex-col gap-5 p-6 border-good/40 bg-good-soft/10`} aria-label="Practice summary">
+      {onPracticeAgain && (
+        <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-good/30 bg-good-soft/20 p-4">
+          <div className="flex flex-col gap-0.5">
+            <span className="text-sm font-semibold text-good-ink">Practice again</span>
+            <span className="text-xs text-muted">Ready for another session? Keep going to reinforce your vocabulary.</span>
+          </div>
+          <button
+            type="button"
+            className="inline-flex h-10 cursor-pointer items-center justify-center gap-2 rounded-xl px-5 text-sm font-bold tracking-[-0.01em] bg-good text-on-accent hover:brightness-105 shadow-md shadow-good/30 hover:shadow-lg hover:shadow-good/40 hover:-translate-y-0.5 transition-[color,background-color,border-color,transform,box-shadow] duration-150 active:scale-[0.98]"
+            onClick={onPracticeAgain}
+          >
+            Practice again
+          </button>
+        </div>
+      )}
+
+      <div>
+        <h2 className="font-serif text-2xl font-semibold">Practice finished</h2>
+        <p className="mt-1 text-sm text-muted">
+          {STUDY_MODE_LABELS[mode]}: <strong className="font-semibold text-ink tabular-nums">{correct}</strong> of{' '}
+          <span className="tabular-nums">{count(outcomes.length, 'answer')}</span> correct
+          {outcomes.length > 0 && ` (${Math.round((correct / outcomes.length) * 100)}%)`}.
+        </p>
+      </div>
       {recovered.length > 0 && (
         <p className="rounded-2xl bg-good-soft px-3 py-2 text-sm text-good-ink">
           {recovered.length === 1

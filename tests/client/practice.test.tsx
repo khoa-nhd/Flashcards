@@ -344,6 +344,29 @@ describe('a practice session', () => {
     await user.click(main().getByRole('button', { name: 'End practice' }));
     expect(await main().findByText(/judged but not recorded/)).toHaveTextContent('1 answer was judged but not recorded');
   });
+
+  it('allows selecting number of questions in comprehensive practice', async () => {
+    const { user } = await open('/practice');
+    await user.selectOptions(main().getByLabelText('Number of questions'), '5');
+    await user.click(main().getByRole('button', { name: 'Start practice' }));
+    expect(main().getByText(/Question 1 of 5/)).toBeInTheDocument();
+  });
+
+  it('offers a Practice again button at the top of the summary to start another session', async () => {
+    const { user } = await open('/practice?mode=typing');
+    await start(user);
+    await user.type(main().getByLabelText('Your answer'), `${promptedWord().word}{Enter}`);
+    await main().findByRole('status');
+    await user.click(main().getByRole('button', { name: 'End practice' }));
+
+    const region = await main().findByRole('region', { name: 'Practice summary' });
+    const practiceAgainBtn = within(region).getByRole('button', { name: 'Practice again' });
+    expect(practiceAgainBtn).toBeInTheDocument();
+    expect(practiceAgainBtn.className).toContain('bg-good');
+
+    await user.click(practiceAgainBtn);
+    expect(main().getByText(/Question 1 of/)).toBeInTheDocument();
+  });
 });
 
 describe('when an answer cannot be checked', () => {
