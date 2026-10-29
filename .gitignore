@@ -18,3 +18,4 @@ backups/
 
 # Supabase CLI working files (project ref, pooler address)
 supabase/.temp/
+/freebuff-sites-build/
