@@ -85,8 +85,8 @@ export function HelpPage() {
           <p className={`${HELP} mt-2`}>
             {pick(
               language,
-              'There are two goals: new words added that day and reviews answered. Both make a day count towards the streak. A goal never stops a session — you can always review more. When nothing is left to study — no word due and no new word waiting — the review goal is met; adding a word opens it again. On a day you do not want to add words, maintenance mode sets the new-word goal to 0.',
-              'Có hai mục tiêu: số từ mới thêm vào trong ngày và số lượt ôn đã trả lời. Cả hai cùng làm một ngày được tính vào chuỗi. Mục tiêu không bao giờ dừng buổi ôn — bạn luôn có thể ôn thêm. Khi không còn gì để học — không còn từ đến hạn và không có từ mới đang chờ — mục tiêu ôn vẫn đạt; thêm từ mới thì mục tiêu mở lại. Nếu không muốn thêm từ, chế độ duy trì đặt mục tiêu từ mới bằng 0.',
+              'There are two goals: new words added that day, and the day’s due reviews. The review goal is not a number you choose — it is every card that is due, met once nothing is left to study: no word due and no new word waiting; adding a word opens it again. Both make a day count towards the streak. A goal never stops a session — you can always review more. On a day you do not want to add words, maintenance mode sets the new-word goal to 0.',
+              'Có hai mục tiêu: số từ mới thêm vào trong ngày và lượt ôn trong ngày. Mục tiêu ôn không phải con số bạn chọn — đó là toàn bộ từ đến hạn, đạt khi không còn gì để học: không còn từ đến hạn và không có từ mới đang chờ; thêm từ mới thì mục tiêu mở lại. Cả hai cùng làm một ngày được tính vào chuỗi. Mục tiêu không bao giờ dừng buổi ôn — bạn luôn có thể ôn thêm. Nếu không muốn thêm từ, chế độ duy trì đặt mục tiêu từ mới bằng 0.',
             )}
           </p>
         </section>

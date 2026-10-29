@@ -8,6 +8,7 @@ import type { StudyGoalsResponse } from '../shared/api.js';
 import { calendarDateInTimeZone, compareDates, type IsoDate } from '../shared/dates.js';
 import { fsrsDueDay } from '../shared/scheduler/fsrs.js';
 import {
+  STUDY_GOAL_MAX,
   SUGGESTED_STUDY_GOALS,
   evaluateDay,
   streakOf,
@@ -106,7 +107,8 @@ export class StudyGoalsService {
           reviews: counts.reviews,
           practice: practiceDone,
           newGoal: goals.newWords,
-          reviewGoal: goals.reviews,
+          // The review goal is the day's due queue, capped at what the column keeps.
+          reviewGoal: Math.min(STUDY_GOAL_MAX, counts.reviews + total),
           practiceGoal: goals.practice,
           met: day.met,
         });

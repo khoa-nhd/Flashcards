@@ -18,12 +18,20 @@ describe('the three daily goals', () => {
 
   it('keeps the review goal open while a new word waits, even with nothing due', () => {
     const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, practiceDone: 20, dueLeft: 0, newWaiting: 1, newLeft: 50 });
-    expect(day.reviews).toEqual({ target: 30, done: 4, remaining: 26, met: false, exhausted: false });
+    expect(day.reviews).toEqual({ target: 4, done: 4, remaining: 0, met: false, exhausted: false });
+  });
+
+  it('takes the whole due queue as the review target, not the stored number', () => {
+    const day = evaluateDay({ goals, newDone: 3, reviewsDone: 12, practiceDone: 5, dueLeft: 35, newLeft: 50 });
+    expect(day.reviews).toEqual({ target: 47, done: 12, remaining: 35, met: false, exhausted: false });
+    // Whatever the stored goal says, 47 due cards ask for 47 reviews.
+    const smaller = evaluateDay({ goals: { ...goals, reviews: 5 }, newDone: 3, reviewsDone: 12, practiceDone: 5, dueLeft: 35, newLeft: 50 });
+    expect(smaller.reviews.target).toBe(47);
   });
 
   it('meets the review goal once nothing is left to study, however few were due', () => {
     const day = evaluateDay({ goals, newDone: 10, reviewsDone: 4, practiceDone: 20, dueLeft: 0, newLeft: 50 });
-    expect(day.reviews).toEqual({ target: 30, done: 4, remaining: 26, met: true, exhausted: true });
+    expect(day.reviews).toEqual({ target: 4, done: 4, remaining: 0, met: true, exhausted: true });
     expect(day.met).toBe(true);
   });
 

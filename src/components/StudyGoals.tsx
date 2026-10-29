@@ -1,7 +1,9 @@
 /**
- * The two FSRS daily goals: new words and due reviews. They drive the streak
- * and nothing else; a session never stops when a goal is met, and a goal that
- * cannot be reached because nothing is left is explained rather than punished.
+ * The two FSRS daily goals: new words, and everything due today. The review
+ * goal is the day's due queue itself, never a number typed in beforehand. They
+ * drive the streak and nothing else; a session never stops when a goal is met,
+ * and a goal that cannot be reached because nothing is left is explained
+ * rather than punished.
  */
 import { useCallback, useEffect, useState } from 'react';
 import type { StudyGoalsResponse } from '../../shared/api.js';
@@ -319,15 +321,21 @@ function GoalRing({
       <div className="min-w-0">
         <p className="text-sm font-semibold text-ink">{label}</p>
         <p className="mt-0.5 text-xs leading-relaxed text-muted">
-          {part.exhausted && !part.met
-            ? pick(
-                language,
-                'No new words left. Maintenance mode lets this goal be 0.',
-                'Không còn từ mới. Chế độ duy trì cho phép mục tiêu này bằng 0.',
-              )
-            : part.met
-              ? pick(language, 'Goal met', 'Đã đạt')
-              : pick(language, `${part.remaining} left`, `còn ${part.remaining}`)}
+          {tone === 'review'
+            ? part.met
+              ? pick(language, 'All due reviewed', 'Đã ôn hết từ đến hạn')
+              : part.remaining > 0
+                ? pick(language, `${part.remaining} left`, `còn ${part.remaining}`)
+                : pick(language, 'Nothing due', 'Không có từ đến hạn')
+            : part.exhausted && !part.met
+              ? pick(
+                  language,
+                  'No new words left. Maintenance mode lets this goal be 0.',
+                  'Không còn từ mới. Chế độ duy trì cho phép mục tiêu này bằng 0.',
+                )
+              : part.met
+                ? pick(language, 'Goal met', 'Đã đạt')
+                : pick(language, `${part.remaining} left`, `còn ${part.remaining}`)}
         </p>
       </div>
     </div>
@@ -348,7 +356,6 @@ export function StudyGoalsCard({
   const language = useUiLanguage();
   const [editing, setEditing] = useState(false);
   const [newWords, setNewWords] = useState(String(data.goals.newWords));
-  const [reviews, setReviews] = useState(String(data.goals.reviews));
   const [practice, setPractice] = useState(String(data.goals.practice));
   const [maintenance, setMaintenance] = useState(data.goals.maintenanceMode);
   const [saving, setSaving] = useState(false);
@@ -357,7 +364,6 @@ export function StudyGoalsCard({
 
   const beginEdit = () => {
     setNewWords(String(data.goals.newWords));
-    setReviews(String(data.goals.reviews));
     setPractice(String(data.goals.practice));
     setMaintenance(data.goals.maintenanceMode);
     setError(null);
@@ -366,14 +372,13 @@ export function StudyGoalsCard({
 
   const save = async () => {
     const nextNew = maintenance ? 0 : Number(newWords);
-    const nextReviews = Number(reviews);
     const nextPractice = Number(practice);
-    if (!Number.isInteger(nextNew) || nextNew < 0 || !Number.isInteger(nextReviews) || nextReviews < 1 || !Number.isInteger(nextPractice) || nextPractice < 0) {
+    if (!Number.isInteger(nextNew) || nextNew < 0 || !Number.isInteger(nextPractice) || nextPractice < 0) {
       setError(
         pick(
           language,
-          'New words and practice must be 0 or more, and reviews at least 1.',
-          'Số từ mới và thực hành phải từ 0 trở lên, và số lần ôn ít nhất là 1.',
+          'New words and practice must be 0 or more.',
+          'Số từ mới và thực hành phải từ 0 trở lên.',
         ),
       );
       return;
@@ -383,7 +388,8 @@ export function StudyGoalsCard({
     try {
       const next = await api.saveStudyGoals({
         newWords: nextNew,
-        reviews: nextReviews,
+        // The review goal is the day's due queue, so nothing here changes it.
+        reviews: data.goals.reviews,
         practice: nextPractice,
         maintenanceMode: maintenance,
       });
@@ -491,18 +497,16 @@ export function StudyGoalsCard({
                 onChange={(event) => setNewWords(event.target.value)}
               />
             </label>
-            <label className="flex flex-col gap-1 text-xs font-medium text-muted">
-              {pick(language, 'Reviews a day', 'Lượt ôn mỗi ngày')}
-              <input
-                type="number"
-                min={1}
-                max={1000}
-                inputMode="numeric"
-                className={INPUT}
-                value={reviews}
-                onChange={(event) => setReviews(event.target.value)}
-              />
-            </label>
+            <div className="flex flex-col gap-1 text-xs font-medium text-muted">
+              <span>{pick(language, 'Reviews', 'Lượt ôn')}</span>
+              <p className="text-xs leading-relaxed text-faint">
+                {pick(
+                  language,
+                  'Everything due today, so there is no number to set. Met once nothing is left to study.',
+                  'Mọi từ đến hạn hôm nay, nên không cần đặt số. Đạt khi không còn gì để học.',
+                )}
+              </p>
+            </div>
             <label className="flex flex-col gap-1 text-xs font-medium text-muted">
               {pick(language, 'Practice questions', 'Câu thực hành')}
               <input

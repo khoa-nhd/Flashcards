@@ -384,22 +384,22 @@ describe('the three daily goals', () => {
   it('counts a word added today, meets the review goal once nothing is left to study, and starts a streak', async () => {
     expect((await setGoals(alice, { newWords: 1, reviews: 5, practice: 0 })).status).toBe(200);
     expect(await goalsOf(alice)).toMatchObject({ chosen: true, newWords: { done: 0, met: false }, streak: { current: 0 } });
-    // Nothing at all to study yet, so five reviews are not needed today.
-    expect((await goalsOf(alice)).reviews).toMatchObject({ target: 5, done: 0, met: true, exhausted: true });
+    // Nothing at all to study yet, so today's due queue is empty: no reviews are asked for.
+    expect((await goalsOf(alice)).reviews).toMatchObject({ target: 0, done: 0, met: true, exhausted: true });
 
     const word = await addWord(alice, 'candid');
     let goals = await goalsOf(alice);
     // The owner's rule (2026-10-22): adding the word is what counts, not studying it.
     expect(goals.newWords).toEqual({ target: 1, done: 1, remaining: 0, met: true, exhausted: false });
     // The owner's rule (2026-10-23): the new word is still waiting, so the review goal is open again.
-    expect(goals.reviews).toMatchObject({ target: 5, done: 0, met: false, exhausted: false });
+    expect(goals.reviews).toMatchObject({ target: 0, done: 0, remaining: 0, met: false, exhausted: false });
     // No practice is asked for here, so that goal is met at 0.
     expect(goals.practice).toMatchObject({ target: 0, done: 0, met: true });
     expect(goals.streak).toEqual({ current: 0, longest: 0, metToday: false });
 
     await answer(alice, remember(word.id, 0));
     goals = await goalsOf(alice);
-    expect(goals.reviews).toMatchObject({ target: 5, done: 0, met: true, exhausted: true });
+    expect(goals.reviews).toMatchObject({ target: 0, done: 0, met: true, exhausted: true });
     expect(goals.streak).toEqual({ current: 1, longest: 1, metToday: true });
   });
 
@@ -411,7 +411,7 @@ describe('the three daily goals', () => {
 
     await addWord(alice, 'lucid');
     const goals = await goalsOf(alice);
-    expect(goals.reviews).toMatchObject({ done: 0, remaining: 5, met: false, exhausted: false });
+    expect(goals.reviews).toMatchObject({ done: 0, remaining: 0, met: false, exhausted: false });
     // The day was already met, and a met day stays met for the streak.
     expect(goals.streak).toMatchObject({ current: 1, metToday: true });
   });

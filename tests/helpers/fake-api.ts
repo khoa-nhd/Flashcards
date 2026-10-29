@@ -221,6 +221,9 @@ export function weakWordsResponse(overrides: Partial<WeakWordsResponse> = {}): W
 /** The two FSRS-only goals with the suggested starting targets, unless a test overrides them. */
 export function studyGoalsResponse(overrides: Partial<StudyGoalsResponse> = {}): StudyGoalsResponse {
   const goals = { newWords: 10, reviews: 30, practice: 20, maintenanceMode: false, ...overrides.goals };
+  // The review goal is the day's due queue, so it follows what is still due.
+  const due = overrides.due ?? { total: 0, overdue: 0 };
+  const reviewsDone = overrides.reviews?.done ?? 0;
   return {
     available: true,
     chosen: false,
@@ -228,9 +231,15 @@ export function studyGoalsResponse(overrides: Partial<StudyGoalsResponse> = {}):
     timeZone: TIME_ZONE,
     goals,
     newWords: { target: goals.newWords, done: 0, remaining: goals.newWords, met: false, exhausted: false },
-    reviews: { target: goals.reviews, done: 0, remaining: goals.reviews, met: false, exhausted: false },
+    reviews: {
+      target: reviewsDone + due.total,
+      done: reviewsDone,
+      remaining: due.total,
+      met: due.total === 0,
+      exhausted: due.total === 0,
+    },
     practice: { target: goals.practice, done: 0, remaining: goals.practice, met: goals.practice === 0, exhausted: false },
-    due: { total: 0, overdue: 0 },
+    due,
     streak: { current: 0, longest: 0, metToday: false },
     ...overrides,
   };
@@ -591,7 +600,12 @@ export function createFakeApi({
         chosen: true,
         goals,
         newWords: { ...studyGoals.newWords, target: goals.newWords, remaining: Math.max(0, goals.newWords - studyGoals.newWords.done) },
-        reviews: { ...studyGoals.reviews, target: goals.reviews, remaining: Math.max(0, goals.reviews - studyGoals.reviews.done) },
+        // The review goal follows the due queue, so saving changes nothing about it.
+        reviews: {
+          ...studyGoals.reviews,
+          target: studyGoals.reviews.done + studyGoals.due.total,
+          remaining: studyGoals.due.total,
+        },
       };
       return { ...studyGoals, goals: { ...studyGoals.goals } };
     }),

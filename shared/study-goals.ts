@@ -4,8 +4,9 @@
  *
  * - New words: words added to the vocabulary that day (the owner's rule,
  *   2026-10-22, replacing "brought into study"). Maintenance mode lets it be 0.
- * - Reviews: due words reviewed that day. Met as well once nothing is left to
- *   study today: no word due and no new word waiting (the owner's rule,
+ * - Reviews: everything due that day, reviewed. The goal is the day's due queue
+ *   itself, never a number typed in beforehand: it is met once nothing is left
+ *   to study today — no word due and no new word waiting (the owner's rule,
  *   2026-10-23: a word added after the reviews ran out reopens the goal).
  * - A day counts towards the streak only when both are met.
  * - The goals never stop a session; they only decide the streak.
@@ -17,6 +18,11 @@ import { addDays, compareDates, type IsoDate } from './dates.js';
 
 export interface StudyGoals {
   newWords: number;
+  /**
+   * Kept with the account and asked for by the API, but no longer the goal:
+   * the review goal is the day's whole due queue (see `evaluateDay`), so this
+   * is only what an account was told before that rule.
+   */
   reviews: number;
   practice: number;
   maintenanceMode: boolean;
@@ -53,7 +59,7 @@ export interface DayInput {
   newDone: number;
   /** Due words reviewed today. */
   reviewsDone: number;
-  /** Words still due now. */
+  /** Words still due now; with `reviewsDone`, the day's whole due queue. */
   dueLeft: number;
   /** Practice answers done today. */
   practiceDone: number;
@@ -80,10 +86,11 @@ export function evaluateDay({ goals, newDone, reviewsDone, dueLeft, practiceDone
   });
   // No new words left does not meet the new-word goal: maintenance mode is the way to a goal of 0.
   const newWords = part(goals.newWords, newDone, newDone >= goals.newWords, newLeft === 0);
-  // Review goal is met only when all due words have been reviewed (review hết từ due).
-  // A new word waiting to be studied still leaves something to do, so it keeps the goal open.
+  // The review goal is the day's due queue itself, not the stored number: everything
+  // due, reviewed (review hết từ due). A new word waiting to be studied still leaves
+  // something to do, so it keeps the goal open.
   const nothingLeft = dueLeft === 0 && newWaiting === 0;
-  const reviews = part(goals.reviews, reviewsDone, nothingLeft, nothingLeft);
+  const reviews = part(reviewsDone + dueLeft, reviewsDone, nothingLeft, nothingLeft);
   const practice = part(goals.practice, practiceDone, practiceDone >= goals.practice, false);
   return { newWords, reviews, practice, met: newWords.met && reviews.met && practice.met };
 }

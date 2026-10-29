@@ -2,7 +2,8 @@
  * A short first-run introduction for FSRS-only accounts. It is deliberately
  * three screens: what memory strength is, that it can fall, and that FSRS (not
  * the number) decides when a word comes back. It also offers the gentle
- * starting goals of 10 new words and 30 reviews a day.
+ * starting goal of 10 new words a day, with the review goal left to the day's
+ * own due queue.
  */
 import { useEffect, useState } from 'react';
 import { useApp, useUiLanguage, useVocabulary } from '../app-context.js';
@@ -162,8 +163,8 @@ function OnboardingFlow({ onDone }: { onDone: () => void }) {
           <p className="mt-2 border-t border-line pt-2 text-xs leading-relaxed text-muted">
             {pick(
               language,
-              'Suggested start: 10 new words and 30 reviews a day. Both are editable, and a day still counts even if you do more.',
-              'Gợi ý bắt đầu: 10 từ mới và 30 lượt ôn mỗi ngày. Cả hai đều sửa được, và làm thêm vẫn tính.',
+              'Suggested start: 10 new words a day, and every card that is due reviewed. The new-word goal can be changed later, and a day still counts even if you do more.',
+              'Gợi ý bắt đầu: 10 từ mới mỗi ngày và ôn hết từ đến hạn. Mục tiêu từ mới sửa sau được, và làm thêm vẫn tính.',
             )}
           </p>
         </div>
@@ -220,12 +221,20 @@ function OnboardingFlow({ onDone }: { onDone: () => void }) {
         {last && (
           <div className="mt-4 rounded-xl border border-accent/30 bg-accent-soft/40 px-3 py-2.5 text-sm">
             <p className="font-medium text-ink">
-              {pick(language, 'Start with 10 new words + 30 reviews a day.', 'Bắt đầu với 10 từ mới + 30 lượt ôn mỗi ngày.')}
+              {pick(
+                language,
+                'Start with 10 new words a day and all due reviews.',
+                'Bắt đầu với 10 từ mới mỗi ngày và ôn hết từ đến hạn.',
+              )}
             </p>
             <p className="mt-0.5 text-xs text-muted">
               {goals.data?.chosen === true
                 ? pick(language, 'Your current goals stay as they are.', 'Mục tiêu hiện tại của bạn được giữ nguyên.')
-                : pick(language, 'You can change both later in Settings.', 'Bạn có thể sửa cả hai sau trong Cài đặt.')}
+                : pick(
+                    language,
+                    'You can change the new-word goal later in Settings; the review goal is always the whole due queue.',
+                    'Bạn có thể sửa mục tiêu từ mới sau trong Cài đặt; mục tiêu ôn luôn là toàn bộ từ đến hạn.',
+                  )}
             </p>
           </div>
         )}
