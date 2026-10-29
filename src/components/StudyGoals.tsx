@@ -121,17 +121,19 @@ export function StudyGoalsSkeleton() {
   return (
     <div className="rounded-xl border border-line bg-surface p-4" aria-hidden="true">
       <div className="flex animate-pulse flex-col gap-4 motion-reduce:animate-none">
-        <div className="flex flex-col gap-2">
-          <div className="h-2.5 w-24 rounded-full bg-line" />
-          <div className="h-3 w-4/5 rounded-full bg-line/70" />
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex flex-col gap-2">
+            <div className="h-2.5 w-24 rounded-full bg-line" />
+            <div className="h-3 w-4/5 rounded-full bg-line/70" />
+          </div>
+          <div className="h-7 w-20 rounded-full bg-line/70" />
         </div>
-        <div className="h-7 w-20 rounded-full bg-line/70" />
-        <div className="grid grid-cols-2 gap-4">
-          {[0, 1].map((key) => (
+        <div className="grid grid-cols-3 gap-4 sm:gap-6">
+          {[0, 1, 2].map((key) => (
             <div key={key} className="flex flex-col items-center gap-2">
               <div className="size-24 rounded-full border-[7px] border-line" />
-              <div className="h-3 w-20 rounded-full bg-line/70" />
-              <div className="h-2.5 w-28 rounded-full bg-line/50" />
+              <div className="h-3 w-16 rounded-full bg-line/70" />
+              <div className="h-2.5 w-12 rounded-full bg-line/50" />
             </div>
           ))}
         </div>
