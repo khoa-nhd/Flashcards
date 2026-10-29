@@ -134,6 +134,63 @@ export interface Database {
         Update: { new_words?: number; reviews?: number; new_goal?: number; review_goal?: number; met?: boolean };
         Relationships: [];
       };
+      /** From schema version 17. Read only: written through game_commit alone. */
+      game_state: {
+        Row: { user_id: string; version: number; total_xp: number; state: Record<string, unknown>; updated_at: string };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      xp_ledger: {
+        Row: {
+          user_id: string;
+          source: 'answer' | 'goal' | 'reward';
+          source_id: string;
+          amount: number;
+          base: number;
+          bonus: number;
+          reason: string;
+          earned_at: string;
+          earned_on: string;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      game_quests: {
+        Row: {
+          user_id: string;
+          period: 'day' | 'week';
+          period_start: string;
+          slot: number;
+          kind: string;
+          target: number;
+          reward: number;
+          progress: number;
+          completed_at: string | null;
+        };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      game_badges: {
+        Row: { user_id: string; badge: string; tier: number; earned_at: string };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      game_freezes: {
+        Row: { id: string; user_id: string; granted_on: string; used_on: string | null };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      game_rewards: {
+        Row: { id: string; user_id: string; kind: string; payload: Record<string, unknown>; created_at: string; claimed_at: string | null };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       study_sessions: {
         Row: { id: string; user_id: string; mode: string; started_at: string; ended_at: string | null };
         Insert: { id: string; user_id?: string; mode?: string };
@@ -402,6 +459,37 @@ export interface Database {
         Returns: Array<{ outcome: string; vocabulary_id: string | null; revision: number | null; due_on: string | null; fsrs: unknown }>;
       };
       /** From schema version 15. */
+      game_pending_answers: {
+        Args: { p_limit: number };
+        Returns: Array<{
+          id: string;
+          kind: 'review' | 'practice' | 'undo';
+          undoes: string | null;
+          answered_at: string;
+          answered_on: string;
+          is_new: boolean;
+          counted: boolean;
+          was_due: boolean;
+          duration_ms: number | null;
+          mode: string | null;
+          mastered: boolean;
+        }>;
+      };
+      game_badge_metrics: {
+        Args: Record<string, never>;
+        Returns: Array<{
+          words_studied: number;
+          mastered: number;
+          reviews: number;
+          practice: number;
+          duration_ms: number;
+          night_answers: number;
+        }>;
+      };
+      game_commit: {
+        Args: { p_payload: string; p_signature: string };
+        Returns: Array<{ outcome: 'ok' | 'stale'; version: number; total_xp: number }>;
+      };
       study_day_counts: {
         Args: { p_day: string };
         Returns: Array<{ new_words: number; reviews: number }>;

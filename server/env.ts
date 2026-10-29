@@ -19,6 +19,11 @@ export interface AppConfig {
   timeZone: string | null;
   /** False only when saving has been frozen on purpose. */
   writesRequested: boolean;
+  /**
+   * Signs the game's changes, so only this server can write XP (schema
+   * version 17). The database holds the same value. `null` leaves the game off.
+   */
+  gameSigningKey: string | null;
   port: number;
   host: string;
   /** Problems that stop the app from serving reviews. Never contains secret values. */
@@ -97,6 +102,10 @@ export function loadConfig(env: Env = process.env): AppConfig {
     timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
   }
 
+  // Too short a key is as good as none: the game stays off rather than signing with it.
+  const gameKey = read(env, 'GAME_SIGNING_KEY');
+  const gameSigningKey = gameKey !== null && gameKey.length >= 32 ? gameKey : null;
+
   const port = Number(read(env, 'PORT') ?? '8787');
   if (!Number.isInteger(port) || port <= 0 || port > 65535) issues.push('PORT is not a valid port.');
 
@@ -107,6 +116,7 @@ export function loadConfig(env: Env = process.env): AppConfig {
     timeZone,
     // Saving is what the app is for; the switch exists only to freeze changes deliberately.
     writesRequested: mode === 'mock' || read(env, 'REVIEW_WRITES_ENABLED')?.toLowerCase() !== 'false',
+    gameSigningKey,
     port: Number.isInteger(port) ? port : 8787,
     host: read(env, 'HOST') ?? (isProduction ? '0.0.0.0' : '127.0.0.1'),
     issues,

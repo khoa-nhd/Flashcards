@@ -33,6 +33,8 @@ import { createSupabaseLibraryStore } from './supabase-library.js';
 import { SupabaseVocabularyRepository } from './supabase-repository.js';
 import { createAiService, loadAiConfig } from '../ai-service-impl.js';
 import { StudyGoalsService, createStudyGoalStore } from '../study-goals-service.js';
+import { GameService, createDatabaseGameStore } from '../game-service.js';
+import { SUGGESTED_STUDY_GOALS } from '../../shared/study-goals.js';
 import { AiError, AiErrorCode } from '../ai-service.js';
 
 export interface TokenVerifier {
@@ -102,6 +104,8 @@ export interface SupabaseAccountsOptions {
    */
   connect?: (accessToken: string, schemaVersion?: number) => VocabularyDatabase;
   now?: () => Date;
+  /** Signs the game's changes (GAME_SIGNING_KEY). Without it the game stays off. */
+  gameSigningKey?: string | null;
 }
 
 const FALLBACK_TIME_ZONE = 'UTC';
@@ -229,7 +233,29 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           : MASTERY_ONLY;
       // FSRS-only: once the database is at v15, FSRS is the only scheduler.
       const fsrsOnly = repository.capabilities.fsrsOnly;
+      // The game needs its tables (schema version 17) and the key that signs its changes.
+      const gameKey = options.gameSigningKey ?? null;
+      const game =
+        repository.capabilities.game && gameKey !== null
+          ? new GameService({
+              store: createDatabaseGameStore(database, account.id, gameKey),
+              account: account.id,
+              repository,
+              catalog: repository,
+              goals: () => settings?.studyGoals ?? SUGGESTED_STUDY_GOALS,
+              timeZone,
+              now,
+            })
+          : null;
+      const gameReason =
+        game !== null
+          ? null
+          : !repository.capabilities.game
+            ? 'XP and levels need the latest database update (version 17).'
+            : 'XP and levels are not set up on the server yet (GAME_SIGNING_KEY).';
       return {
+        game,
+        gameReason,
         account,
         timeZone,
         database: { version: schemaVersion, latest: RECOMMENDED_SCHEMA_VERSION },
@@ -257,6 +283,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
               catalog: repository,
               timeZone,
               now,
+              coveredDays: game === null ? undefined : (facts) => game.coveredDays(facts),
               store: createStudyGoalStore(settings?.studyGoals ?? null, async (goals) => {
                 const save = database.saveStudyGoals;
                 if (save === undefined) throw new DatabaseError('schema_missing', 'Daily goals need the latest database update.');

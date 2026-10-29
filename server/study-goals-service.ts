@@ -49,6 +49,11 @@ export interface StudyGoalsServiceOptions {
   store: StudyGoalStore;
   timeZone: string;
   now?: () => Date;
+  /**
+   * The days streak freezes covered, given the met days: they carry the streak
+   * over a missed day (the game, schema version 17). Without it no day is covered.
+   */
+  coveredDays?: (facts: { metDays: readonly IsoDate[]; metToday: boolean; addedToday: number }) => Promise<IsoDate[]>;
 }
 
 export class StudyGoalsService {
@@ -115,6 +120,12 @@ export class StudyGoalsService {
       }
       metDays = await repository.listMetStudyDays();
     }
+    // The game settles the streak's freezes against the same days. A failure there is reported:
+    // a streak shown without its freezes could look broken when it is not.
+    const covered =
+      available && this.options.coveredDays !== undefined
+        ? await this.options.coveredDays({ metDays, metToday, addedToday: newDone })
+        : [];
 
     return {
       available,
@@ -126,7 +137,7 @@ export class StudyGoalsService {
       reviews: day.reviews,
       practice: day.practice,
       due: { total, overdue },
-      streak: streakOf(metDays, today, metToday),
+      streak: streakOf(metDays, today, metToday, covered),
     };
   }
 

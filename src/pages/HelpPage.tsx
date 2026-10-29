@@ -92,6 +92,31 @@ export function HelpPage() {
         </section>
 
         <section className={`${CARD} p-5`}>
+          <h2 className={SECTION_TITLE}>{pick(language, 'XP, levels and quests', 'XP, level và nhiệm vụ')}</h2>
+          <p className={`${HELP} mt-2`}>
+            {pick(
+              language,
+              'Every answer earns XP, whether you remembered the word or not, so answering honestly never costs you anything: a due review is 10 XP, a word studied for the first time 17, practice and reviews taken early or at random 5. Meeting your daily goals adds 50. Answering many in a row builds a combo (+10% from 10, +25% from 25, +50% from 50), and coming back after three days or more doubles XP for a day. Bonuses add together. XP never changes when a word is due.',
+              'Mỗi câu trả lời đều được XP, dù bạn nhớ hay quên, nên trả lời thành thật không bao giờ thiệt: ôn đúng hạn 10 XP, học từ mới lần đầu 17, luyện tập và ôn sớm hay ôn ngẫu nhiên 5. Đạt đủ mục tiêu ngày được thêm 50. Trả lời liên tục tạo combo (+10% từ câu 10, +25% từ 25, +50% từ 50), và quay lại sau từ ba ngày nghỉ được nhân đôi XP trong một ngày. Các phần thưởng cộng lại với nhau. XP không bao giờ thay đổi lịch ôn của từ.',
+            )}
+          </p>
+          <p className={`${HELP} mt-2`}>
+            {pick(
+              language,
+              'Each day brings three quests and each week one, with XP of their own. Studying every day moves the seven-day check-in along; a missed day starts it again. Every 7 days of streak gives a streak freeze (you can hold two): a missed day uses one, so the streak carries on. Badges come in tiers and are counted from your whole history. Rewards wait on the dashboard until you claim them.',
+              'Mỗi ngày có ba nhiệm vụ và mỗi tuần một nhiệm vụ, đều có XP riêng. Học mỗi ngày giúp điểm danh 7 ngày đi tiếp; lỡ một ngày thì bắt đầu lại. Cứ mỗi 7 ngày streak được tặng một lần đóng băng (giữ tối đa hai): lỡ một ngày sẽ tự dùng một cái để giữ chuỗi. Huy hiệu có nhiều bậc và được tính từ toàn bộ lịch sử học. Phần thưởng chờ ở Dashboard cho tới khi bạn nhận.',
+            )}
+          </p>
+          <p className={`${HELP} mt-2`}>
+            {pick(
+              language,
+              'Review early takes words due in the next few days (you choose how many) and counts toward the schedule, as any review does. Random review takes studied words at random and, unless you switch counting on, leaves the schedule as it was.',
+              'Ôn sớm lấy các từ sẽ đến hạn trong vài ngày tới (bạn chọn số ngày) và tính vào lịch như mọi lượt ôn. Ôn ngẫu nhiên lấy các từ đã học theo thứ tự ngẫu nhiên và, trừ khi bạn bật tính lịch, giữ nguyên lịch ôn.',
+            )}
+          </p>
+        </section>
+
+        <section className={`${CARD} p-5`}>
           <h2 className={SECTION_TITLE}>{pick(language, 'Archiving, not retiring', 'Lưu trữ, không tự nghỉ')}</h2>
           <p className={`${HELP} mt-2`}>
             {pick(

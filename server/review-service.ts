@@ -16,7 +16,7 @@ import {
   type SimulationResponse,
   type PracticeHistoryRow,
 } from '../shared/api.js';
-import { calendarDateInTimeZone, type IsoDate } from '../shared/dates.js';
+import { addDays, calendarDateInTimeZone, compareDates, type IsoDate } from '../shared/dates.js';
 import {
   applyAction,
   areDetailsVisible,
@@ -99,7 +99,11 @@ const ANSWER_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
  */
 export type QueueFocus =
   | { kind: 'weak'; ids: readonly string[]; recovery?: ReadonlyMap<string, WeakRecoveryView> }
+  | { kind: 'early' | 'random'; ids: readonly string[] }
   | { kind: 'selection'; ids: readonly string[] };
+
+/** How many words a random review takes. */
+export const RANDOM_REVIEW_SIZE = 30;
 
 /** An answer as the service takes it. Without a request id, one is made up for this attempt. */
 export type ReviewSubmission = ReviewActionRequest;
@@ -124,6 +128,31 @@ export class ReviewService {
    * that, mastery is what the store writes, whichever schedule the account
    * reads its due days from, so nothing here may treat FSRS as the only one.
    */
+  /**
+   * The words two narrowings name, worked out here because only the schedule
+   * knows them. Review early: words that come up in the next `days` days, the
+   * nearest first, none of them due yet. Review at random: studied words in a
+   * random order. Archived words are never among them.
+   */
+  async focusIds(kind: 'early' | 'random', days = 3, random: () => number = Math.random): Promise<string[]> {
+    const { records } = await this.options.repository.listLiveRecords();
+    const today = this.today();
+    const scheduler = this.fsrsMode() ? 'fsrs' : this.activeScheduler();
+    const live = records.filter((record) => record.suspended !== true);
+    if (kind === 'early') {
+      const last = addDays(today, Math.min(14, Math.max(1, Math.round(days))));
+      return live
+        .filter((record) => (this.fsrsMode() ? record.fsrs != null : true))
+        .map((record) => ({ id: record.id, due: this.dueDate(record, scheduler) }))
+        .filter((item): item is { id: string; due: IsoDate } => item.due !== null && compareDates(item.due, today) > 0 && compareDates(item.due, last) <= 0)
+        .sort((a, b) => compareDates(a.due, b.due))
+        .map((item) => item.id);
+    }
+    const studied = live.filter((record) => (this.fsrsMode() ? record.fsrs != null : record.nextReview !== null));
+    const shuffled = studied.map((record) => ({ id: record.id, order: random() })).sort((a, b) => a.order - b.order);
+    return shuffled.slice(0, RANDOM_REVIEW_SIZE).map((item) => item.id);
+  }
+
   private fsrsMode(): boolean {
     return this.fsrsRunning() && this.options.repository.capabilities.fsrsOnly === true;
   }
@@ -257,7 +286,7 @@ export class ReviewService {
       scheduler,
       fsrsOnly: false,
       heldBack: 0,
-      focus: focus?.kind === 'weak' ? 'weak' : null,
+      focus: focus === null || focus.kind === 'selection' ? null : focus.kind,
       selection: focus?.kind === 'selection',
       skipped,
       // Only worth asking when there is nothing to review. A narrowed queue being empty says nothing about the rest.
@@ -338,7 +367,7 @@ export class ReviewService {
       scheduler: 'fsrs',
       fsrsOnly: true,
       heldBack,
-      focus: focus?.kind === 'weak' ? 'weak' : null,
+      focus: focus === null || focus.kind === 'selection' ? null : focus.kind,
       selection: focus?.kind === 'selection',
       skipped,
       vocabulary: queue.length > 0 || focus !== null ? 'in_progress' : live > 0 ? 'in_progress' : 'empty',

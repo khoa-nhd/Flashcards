@@ -176,23 +176,33 @@ cũ nhận ngay các bậc đã đủ.
 - Nhận thưởng là gọi API, server đánh dấu đã nhận; nhận lại lần nữa không có
   tác dụng.
 
-### 1.9 Dữ liệu (file `…_gamification_core.sql`, schema v17)
+### 1.9 Dữ liệu (file `20261030090000_gamification_core.sql`, schema v17) — đã làm
+
+**Cách làm thực tế (thay cho trigger dự tính ban đầu):** luật chơi chỉ viết một
+lần, bằng TypeScript (`shared/gamification/engine.ts`), dùng chung cho server,
+bản mẫu và test. Server đọc các câu trả lời chưa tính, chạy engine, rồi ghi kết
+quả qua **một hàm duy nhất `game_commit`**, hàm này chỉ nhận thay đổi có chữ
+ký HMAC-SHA256 bằng khóa bí mật mà server (`GAME_SIGNING_KEY`) và database
+(`game_signing_key`) cùng giữ. Người dùng có khóa public cũng không ghi XP được.
+Không cần bước backfill riêng: lần đọc đầu tiên tự tính toàn bộ lịch sử (theo
+lô 2.000 câu), và một câu trả lời mà bước game lỗi sẽ được bù ở lần đọc sau.
 
 | Bảng / hàm | Vai trò |
 |---|---|
-| `xp_ledger` (user_id, id, source text, source_id, base, bonus_pct, amount, earned_at, earned_on, iso_week) — unique (user_id, source, source_id) | Sổ XP, mỗi dòng một lần được XP; undo ghi dòng âm |
-| `game_state` (user_id pk, total_xp, combo_count, last_answer_at, comeback_until, checkin_day, checkin_last_on, early_days) | Trạng thái chạy, cập nhật cùng sổ XP |
-| `daily_quests` (user_id, day, slot, kind, target, progress, reward, completed_at) | Nhiệm vụ ngày và tuần (`period` day/week) |
-| `user_badges` (user_id, badge_id, tier, earned_at) | Huy hiệu đã đạt |
-| `streak_freezes` (user_id, id, granted_on, used_on) | Đóng băng |
-| `pending_rewards` (user_id, id, kind, payload jsonb, created_at, claimed_at) | Phần thưởng chờ nhận |
-| Trigger `review_logs` after insert → `game_award_answer()` | Tính XP, combo, nhiệm vụ cho câu trả lời và câu undo |
-| Trigger `study_days` after update (met false→true) | +50 XP và tiến độ nhiệm vụ |
-| `game_backfill()` | Chạy một lần khi cài: quy đổi toàn bộ lịch sử thành XP (không combo, không quay lại), cấp huy hiệu đã đủ; chạy lại không cộng hai lần nhờ unique key |
-| `game_claim(reward_id)` / `game_claim_all()` | Nhận thưởng |
+| `xp_ledger` (user_id, source, source_id, amount, base, bonus, reason, earned_at, earned_on) — khóa (user_id, source, source_id) | Sổ XP; undo là dòng âm; không thể tính một câu hai lần |
+| `game_state` (user_id, version, total_xp, state jsonb) | Trạng thái engine; `version` chặn hai thay đổi từ cùng một bản đọc (và chặn dùng lại một thay đổi đã ký) |
+| `game_quests`, `game_badges`, `game_freezes`, `game_rewards` | Nhiệm vụ, huy hiệu, đóng băng, phần thưởng chờ nhận |
+| `game_signing_key` | Khóa ký; không ai đọc được ngoài `game_commit` |
+| `game_pending_answers(limit)` | Câu trả lời chưa có trong sổ, đã phân loại mới / đúng hạn / tính lịch như `study_day_counts` |
+| `game_badge_metrics()` | Các tổng mà huy hiệu đọc |
+| `game_hmac`, `game_commit(payload, signature)` | Kiểm chữ ký rồi ghi |
 
 RLS: mỗi người chỉ đọc dòng của mình; **không cấp insert/update/delete** cho
-`authenticated` trên các bảng trên. Chỉ trigger và hàm `security definer` ghi.
+`authenticated` trên các bảng game.
+
+Khác biệt nhỏ so với kế hoạch: huy hiệu "Thợ sửa" (từ yếu hồi phục) chưa làm ở
+giai đoạn 1; nhiệm vụ "ôn N từ yếu" được thay bằng "ôn thêm N từ (sớm hoặc ngẫu
+nhiên)" vì lịch sử không ghi lượt ôn đến từ chế độ nào.
 
 ### 1.10 Server và giao diện
 
@@ -227,8 +237,12 @@ RLS: mỗi người chỉ đọc dòng của mình; **không cấp insert/update
 
 ### 1.12 Chủ dự án làm
 
-- Chạy `…_gamification_core.sql` trên Supabase, rồi `select public.game_backfill();`
-  một lần.
+1. Tạo một khóa: `openssl rand -hex 32` (hoặc 64 ký tự hex bất kỳ).
+2. Supabase → SQL Editor: chạy `supabase/migrations/20261030090000_gamification_core.sql`,
+   rồi lưu khóa:
+   `insert into public.game_signing_key (key) values ('<khóa>') on conflict (id) do update set key = excluded.key;`
+3. Vercel → Environment Variables: `GAME_SIGNING_KEY=<cùng khóa đó>`, rồi Redeploy.
+4. Mở Dashboard: lịch sử cũ được quy đổi thành XP ở lần mở đầu tiên.
 
 ---
 

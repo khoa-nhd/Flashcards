@@ -14,6 +14,8 @@ import { ReviewService } from './review-service.js';
 import { createSchedulerStore } from './scheduler-store.js';
 import { createSupabaseAccounts } from './supabase/supabase-accounts.js';
 import { StudyGoalsService, createStudyGoalStore } from './study-goals-service.js';
+import { GameService, createMemoryGameStore } from './game-service.js';
+import { SUGGESTED_STUDY_GOALS } from '../shared/study-goals.js';
 import { VocabularyService } from './vocabulary-service.js';
 
 /** Wires configuration, data source and routes together. Shared by every entry point. */
@@ -39,6 +41,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
             ratingMap: fsrsRatingMap,
             defaultTimeZone: config.timeZone,
             writesRequested: config.writesRequested,
+            gameSigningKey: config.gameSigningKey,
           });
     return { app: createApp({ config, service: null, accounts }), config };
   }
@@ -102,11 +105,26 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
       countReviewsTowardMastery: true,
     }),
   });
-  // The sample data has no account either, so its two goals are kept in memory too.
+  // The sample data has no account either, so its goals and its game are kept in memory too.
+  const goalStore = createStudyGoalStore();
+  const game = new GameService({
+    store: createMemoryGameStore({ answers: () => repository.gameAnswers(), metrics: () => repository.gameMetrics() }),
+    account: 'sample',
+    repository,
+    catalog: repository,
+    goals: () => goalStore.get() ?? SUGGESTED_STUDY_GOALS,
+    timeZone,
+  });
   const studyGoals = fsrsOnly
-    ? new StudyGoalsService({ repository, catalog: repository, timeZone, store: createStudyGoalStore() })
+    ? new StudyGoalsService({
+        repository,
+        catalog: repository,
+        timeZone,
+        store: goalStore,
+        coveredDays: (facts) => game.coveredDays(facts),
+      })
     : null;
-  return { app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals }), config };
+  return { app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game }), config };
 }
 
 let shared: ReturnType<typeof buildApp> | undefined;

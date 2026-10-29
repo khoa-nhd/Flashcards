@@ -5,6 +5,9 @@ import { z } from 'zod';
 import type { ZodType } from 'zod';
 import {
   REVIEW_FOCUSES,
+  gameClaimRequestSchema,
+  gameSettingsRequestSchema,
+  type AnswerGame,
   aiMessageSavedRequestSchema,
   collectionNameRequestSchema,
   createEntryRequestSchema,
@@ -44,6 +47,8 @@ import type { VocabularyService } from './vocabulary-service.js';
 import { type AiService } from './ai-service-impl.js';
 import { AiError, AiErrorCode } from './ai-service.js';
 import type { StudyGoalsService } from './study-goals-service.js';
+import { unavailableGame, type GameService } from './game-service.js';
+import { calendarDateInTimeZone } from '../shared/dates.js';
 import { AI_MODES } from './ai-service.js';
 
 export interface AppDependencies {
@@ -64,6 +69,8 @@ export interface AppDependencies {
   exporter?: ExportService | null;
   /** The two daily goals and the streak, under FSRS alone; `null` where there are none. */
   studyGoals?: StudyGoalsService | null;
+  /** XP, levels, quests and badges; `null` where they cannot be kept. */
+  game?: GameService | null;
 }
 
 /** What the current request may use. With accounts, all of it belongs to one signed-in user. */
@@ -76,6 +83,11 @@ interface Scope {
   session: AccountSession | null;
   ai: AiService | null;
   studyGoals: StudyGoalsService | null;
+  game: GameService | null;
+  /** Why there is no game, where there is none. */
+  gameReason: string | null;
+  /** The zone the account's days are counted in. */
+  timeZone: string | null;
 }
 
 type AppEnv = { Variables: { scope: Scope } };
@@ -144,6 +156,7 @@ export function createApp({
   library = null,
   exporter = null,
   studyGoals = null,
+  game = null,
 }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
@@ -262,11 +275,26 @@ export function createApp({
         exporter: session.exporter,
         ai: session.ai,
         studyGoals: session.studyGoals ?? null,
+        game: session.game ?? null,
+        gameReason: session.gameReason ?? null,
+        timeZone: session.timeZone,
         session,
       });
       return next();
     }
-    c.set('scope', { review: service, vocabulary, analytics, library, exporter, ai: null, session: null, studyGoals });
+    c.set('scope', {
+      review: service,
+      vocabulary,
+      analytics,
+      library,
+      exporter,
+      ai: null,
+      session: null,
+      studyGoals,
+      game,
+      gameReason: game === null ? 'XP and levels are not kept with this data.' : null,
+      timeZone: config.timeZone,
+    });
     await next();
   });
 
@@ -295,8 +323,18 @@ export function createApp({
     if (!parsed.success) {
       throw new HttpError(400, 'invalid_request', `Unknown focus. Use one of: ${REVIEW_FOCUSES.join(', ')}.`);
     }
-    // The one narrowing the server can work out for itself: the weak words, weakest first,
-    // whether or not they are due. Each carries its recovery, so the session can show it.
+    // Review early and review at random: the schedule names the words.
+    if (parsed.data === 'early' || parsed.data === 'random') {
+      const rawDays = c.req.query('days');
+      const days = rawDays === undefined ? 3 : Number(rawDays);
+      if (!Number.isInteger(days) || days < 1 || days > 14) {
+        throw new HttpError(400, 'invalid_request', 'Review early reaches 1 to 14 days ahead.');
+      }
+      const service = requireService(c);
+      return c.json(await service.getQueue({ kind: parsed.data, ids: await service.focusIds(parsed.data, days) }));
+    }
+    // The weak words, weakest first, whether or not they are due. Each carries its recovery,
+    // so the session can show it.
     const { words } = await requireAnalytics(c).weakWords();
     const recovery = new Map(
       words.flatMap((word) => (word.recovery === undefined ? [] : [[word.id, word.recovery]])),
@@ -351,11 +389,31 @@ export function createApp({
     });
   };
 
+  /**
+   * What a saved answer did to the game, for its reply. The answer is saved
+   * whatever happens here, so a failure is logged and the reply goes without it.
+   */
+  const gameAfter = async (c: Context<AppEnv>, mark: { gained: number; syncs: number } | null): Promise<AnswerGame | undefined> => {
+    const game = c.get('scope').game;
+    if (game === null || mark === null) return undefined;
+    try {
+      return await game.answerSince(mark);
+    } catch (error) {
+      const kind = error instanceof DatabaseError ? `database ${error.failure}` : error instanceof Error ? error.name : 'non-error';
+      console.error(`Counting the answer's XP failed: ${kind}`);
+      return undefined;
+    }
+  };
+  const markGame = (c: Context<AppEnv>) => c.get('scope').game?.mark() ?? null;
+
   app.post('/api/review-action', async (c) => {
     const request = await parseBody(c, reviewActionRequestSchema);
     const response = await requireService(c).submitAction(request);
-    if (response.outcome === 'applied') await recordDay(c);
-    return c.json(response);
+    if (response.outcome !== 'applied') return c.json(response);
+    const mark = markGame(c);
+    await recordDay(c);
+    const game = await gameAfter(c, mark);
+    return c.json(game === undefined ? response : { ...response, game });
   });
 
   // The two daily goals and the streak (FSRS as the only schedule).
@@ -375,12 +433,48 @@ export function createApp({
   // Practice in another study mode: judged and recorded, never moving a word's schedule.
   app.post('/api/practice', async (c) => {
     const request = await parseBody(c, practiceRequestSchema);
-    return c.json(await requireService(c).submitPractice(request));
+    const response = await requireService(c).submitPractice(request);
+    if (response.outcome !== 'recorded') return c.json(response);
+    // Practice counts towards the day's practice goal, so the day is recorded as for a review.
+    const mark = markGame(c);
+    await recordDay(c);
+    const game = await gameAfter(c, mark);
+    return c.json(game === undefined ? response : { ...response, game });
   });
 
   app.post('/api/review-undo', async (c) => {
     const request = await parseBody(c, reviewUndoRequestSchema);
-    return c.json(await requireService(c).undo(request));
+    const response = await requireService(c).undo(request);
+    if (response.outcome !== 'undone') return c.json(response);
+    const game = await gameAfter(c, markGame(c));
+    return c.json(game === undefined ? response : { ...response, game });
+  });
+
+  // ---- The game: XP, levels, quests, badges and streak freezes. Reads saved answers only. ----
+
+  const requireGame = (c: Context<AppEnv>): GameService => {
+    const { game, gameReason } = c.get('scope');
+    if (game === null) throw new HttpError(409, 'not_supported', gameReason ?? 'XP and levels are not available.');
+    return game;
+  };
+
+  app.get('/api/game', async (c) => {
+    const { game, gameReason, timeZone } = c.get('scope');
+    if (game === null) {
+      const today = calendarDateInTimeZone(new Date(), timeZone ?? 'UTC');
+      return c.json(unavailableGame(today, gameReason ?? 'XP and levels are not available.'));
+    }
+    return c.json(await game.state());
+  });
+
+  app.post('/api/game/claim', async (c) => {
+    const { ids } = await parseBody(c, gameClaimRequestSchema);
+    return c.json(await requireGame(c).claim(ids));
+  });
+
+  app.put('/api/game/settings', async (c) => {
+    const settings = await parseBody(c, gameSettingsRequestSchema);
+    return c.json(await requireGame(c).saveSettings(settings));
   });
 
   app.get('/api/sessions/:id/summary', async (c) => {

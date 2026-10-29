@@ -13,6 +13,9 @@ import { PageHeader } from '../components/PageHeader.js';
 import { ReviewActivityCard, useReviewActivity } from '../components/ReviewActivity.js';
 import { StatTile } from '../components/StatTile.js';
 import { StudyGoalsCard, StudyGoalsSkeleton, useStudyGoals } from '../components/StudyGoals.js';
+import { QuestsCard } from '../components/Quests.js';
+import { knownGame } from '../lib/game-state.js';
+import { EARLY_DAYS_DEFAULT } from '../lib/review-scope.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
 import { BUTTON_PRIMARY, BUTTON_SECONDARY, CARD, PAGE, SECTION_TITLE } from '../components/ui.js';
 import { RECENT_DAYS } from '../lib/bank-query.js';
@@ -103,7 +106,7 @@ function DashboardGoal({ plan, onSaved }: { plan: DayPlanResponse; onSaved: (nex
 
 export function DashboardPage() {
   const state = useVocabulary();
-  const { vocabulary } = useApp();
+  const { vocabulary, api } = useApp();
   const settings = useSettings();
   const language = useUiLanguage();
   const activity = useReviewActivity();
@@ -217,10 +220,30 @@ export function DashboardPage() {
                   </p>
                   {/* The way to act sits with the headline, so the left side is never left empty. */}
                   <div className="mt-6 flex flex-wrap gap-2">
-                    <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
-                      <Icon name="review" className="size-4" />
-                      {pick(language, 'Start review', 'Bắt đầu ôn')}
-                    </Link>
+                    {ready === 0 ? (
+                      // Nothing due: the way to keep going is to take words early, or at random.
+                      <>
+                        <Link
+                          to={buildHref(ROUTES.review, {
+                            focus: 'early',
+                            days: String(knownGame(api)?.earlyDays ?? EARLY_DAYS_DEFAULT),
+                          })}
+                          className={BUTTON_PRIMARY}
+                        >
+                          <Icon name="review" className="size-4" />
+                          {pick(language, 'Review early', 'Ôn sớm')}
+                        </Link>
+                        <Link to={buildHref(ROUTES.review, { focus: 'random' })} className={BUTTON_SECONDARY}>
+                          <Icon name="refresh" className="size-4" />
+                          {pick(language, 'Random review', 'Ôn ngẫu nhiên')}
+                        </Link>
+                      </>
+                    ) : (
+                      <Link to={ROUTES.review} className={BUTTON_PRIMARY}>
+                        <Icon name="review" className="size-4" />
+                        {pick(language, 'Start review', 'Bắt đầu ôn')}
+                      </Link>
+                    )}
                     <Link to={ROUTES.add} className={BUTTON_SECONDARY}>
                       <Icon name="add" className="size-4" />
                       {pick(language, 'Add vocabulary', 'Thêm từ')}
@@ -253,6 +276,8 @@ export function DashboardPage() {
                 Loading daily goal…
               </section>
             ) : null}
+
+            <QuestsCard />
 
             <ReviewActivityCard activity={activity} />
 

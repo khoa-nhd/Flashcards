@@ -130,7 +130,9 @@ export function createAppServices(
       reviewStarted = true;
       // The weakest words arrive with counting off: taking a weak word early is meant to be
       // extra practice unless the reviewer says otherwise, and their own choice then sticks.
-      if (scope.kind === 'weak') counting.preset(false);
+      // Weak and random words are taken out of turn: they start not counting. Review early counts.
+      if (scope.kind === 'weak' || scope.kind === 'random') counting.preset(false);
+      if (scope.kind === 'early') counting.preset(true);
       void session.load({ scope });
     }
   };

@@ -105,18 +105,29 @@ export interface Streak {
  * The run of met days. Today only adds to it once met; until then the streak
  * still stands from yesterday, so it is not lost before the day is over.
  */
-export function streakOf(metDays: readonly IsoDate[], today: IsoDate, metToday: boolean): Streak {
+export function streakOf(
+  metDays: readonly IsoDate[],
+  today: IsoDate,
+  metToday: boolean,
+  /** Days a streak freeze covered: they keep the run going without adding to it. */
+  covered: readonly IsoDate[] = [],
+): Streak {
   const met = new Set(metDays.filter((day) => compareDates(day, today) < 0));
   if (metToday) met.add(today);
+  const kept = new Set(covered.filter((day) => compareDates(day, today) < 0 && !met.has(day)));
+  const stands = (day: IsoDate) => met.has(day) || kept.has(day);
 
   let current = 0;
-  for (let day = metToday ? today : addDays(today, -1); met.has(day); day = addDays(day, -1)) current += 1;
+  for (let day = metToday ? today : addDays(today, -1); stands(day); day = addDays(day, -1)) {
+    if (met.has(day)) current += 1;
+  }
 
   let longest = 0;
   let run = 0;
   let previous: IsoDate | null = null;
-  for (const day of [...met].sort(compareDates)) {
-    run = previous !== null && addDays(previous, 1) === day ? run + 1 : 1;
+  for (const day of [...met, ...kept].sort(compareDates)) {
+    run = previous !== null && addDays(previous, 1) === day ? run : 0;
+    if (met.has(day)) run += 1;
     longest = Math.max(longest, run);
     previous = day;
   }

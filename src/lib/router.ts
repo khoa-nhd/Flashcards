@@ -16,6 +16,7 @@ export const ROUTES = {
   weak: '/weak',
   insights: '/insights',
   settings: '/settings',
+  achievements: '/achievements',
   chat: '/chat',
   help: '/help',
 } as const;

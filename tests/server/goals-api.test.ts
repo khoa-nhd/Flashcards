@@ -389,7 +389,7 @@ describe('narrowing a review', () => {
     const response = await call(on(TODAY), alice, '/api/review-queue?focus=everything');
     expect(response.status).toBe(400);
     expect(((await response.json()) as { error: { message: string } }).error.message).toBe(
-      'Unknown focus. Use one of: weak.',
+      'Unknown focus. Use one of: weak, early, random.',
     );
   });
 });

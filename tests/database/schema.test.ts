@@ -101,6 +101,12 @@ describe('schema', () => {
       { relname: 'card_states', relrowsecurity: true },
       { relname: 'collection_items', relrowsecurity: true },
       { relname: 'collections', relrowsecurity: true },
+      { relname: 'game_badges', relrowsecurity: true },
+      { relname: 'game_freezes', relrowsecurity: true },
+      { relname: 'game_quests', relrowsecurity: true },
+      { relname: 'game_rewards', relrowsecurity: true },
+      { relname: 'game_signing_key', relrowsecurity: true },
+      { relname: 'game_state', relrowsecurity: true },
       { relname: 'review_logs', relrowsecurity: true },
       { relname: 'study_days', relrowsecurity: true },
       { relname: 'study_sessions', relrowsecurity: true },
@@ -109,6 +115,7 @@ describe('schema', () => {
       { relname: 'vocabulary_analysis', relrowsecurity: true },
       { relname: 'vocabulary_examples', relrowsecurity: true },
       { relname: 'vocabulary_relations', relrowsecurity: true },
+      { relname: 'xp_ledger', relrowsecurity: true },
     ]);
   });
 
@@ -180,6 +187,12 @@ describe('schema', () => {
       'collections INSERT {authenticated}',
       'collections SELECT {authenticated}',
       'collections UPDATE {authenticated}',
+      // The game is read only: it is written through signed changes alone (game_commit).
+      'game_badges SELECT {authenticated}',
+      'game_freezes SELECT {authenticated}',
+      'game_quests SELECT {authenticated}',
+      'game_rewards SELECT {authenticated}',
+      'game_state SELECT {authenticated}',
       'review_logs INSERT {authenticated}',
       'review_logs SELECT {authenticated}',
       'study_days INSERT {authenticated}',
@@ -205,6 +218,7 @@ describe('schema', () => {
       'vocabulary_relations DELETE {authenticated}',
       'vocabulary_relations INSERT {authenticated}',
       'vocabulary_relations SELECT {authenticated}',
+      'xp_ledger SELECT {authenticated}',
     ]);
   });
 

@@ -30,6 +30,15 @@ import {
   fsrsReviewRowSchema,
   fsrsUndoRowSchema,
   studyDayCountsRowSchema,
+  gameAnswerRowSchema,
+  gameBadgeRowSchema,
+  gameCommitRowSchema,
+  gameFreezeRowSchema,
+  gameLedgerRowSchema,
+  gameMetricsRowSchema,
+  gameQuestRowSchema,
+  gameRewardRowSchema,
+  gameStateRowSchema,
   practiceEvent,
   practiceOutcomeSchema,
   practiceStatRowSchema,
@@ -666,6 +675,63 @@ export function createPgVocabularyDatabase(
         session.query<{ day: string }>(`select day::text as day from public.study_days where met order by day`),
       );
       return rows.map((row) => row.day);
+    },
+
+    // Read as JSON, so timestamps and dates have the text form the hosted API gives.
+    async gameSnapshot(today, weekStart) {
+      const json = (sql: string, params: unknown[] = []) =>
+        run((session) => session.query<{ row: unknown }>(`select to_jsonb(t) as row from (${sql}) t`, params)).then((rows) =>
+          rows.map((each) => each.row),
+        );
+      const [state] = await json('select version, total_xp, state from public.game_state');
+      return {
+        state: state === undefined ? null : gameStateRowSchema.parse(state),
+        quests: (
+          await json(
+            `select period, period_start, slot, kind, target, reward, progress, completed_at from public.game_quests
+              where (period = 'day' and period_start = $1::date) or (period = 'week' and period_start = $2::date) order by period, slot`,
+            [today, weekStart],
+          )
+        ).map((row) => gameQuestRowSchema.parse(row)),
+        badges: (await json('select badge, tier, earned_at from public.game_badges order by earned_at')).map((row) =>
+          gameBadgeRowSchema.parse(row),
+        ),
+        freezes: (await json('select id, granted_on, used_on from public.game_freezes order by granted_on')).map((row) =>
+          gameFreezeRowSchema.parse(row),
+        ),
+        rewards: (
+          await json('select id, kind, payload, created_at from public.game_rewards where claimed_at is null order by created_at limit 200')
+        ).map((row) => gameRewardRowSchema.parse(row)),
+      };
+    },
+
+    async gamePendingAnswers(limit) {
+      const rows = await run((session) =>
+        session.query<{ row: unknown }>('select to_jsonb(a) as row from public.game_pending_answers($1) a', [limit]),
+      );
+      return rows.map((each) => gameAnswerRowSchema.parse(each.row));
+    },
+
+    async gameLedger(answerIds) {
+      if (answerIds.length === 0) return [];
+      const rows = await run((session) =>
+        session.query<{ row: unknown }>(
+          `select to_jsonb(x) as row from (select source_id, amount, reason, earned_on from public.xp_ledger
+            where source = 'answer' and source_id = any($1::text[])) x`,
+          [answerIds],
+        ),
+      );
+      return rows.map((each) => gameLedgerRowSchema.parse(each.row));
+    },
+
+    async gameBadgeMetrics() {
+      const rows = await run((session) => session.query<Row>('select * from public.game_badge_metrics()'));
+      return gameMetricsRowSchema.parse(rows[0]);
+    },
+
+    async gameCommit(payload, signature) {
+      const rows = await run((session) => session.query<Row>('select * from public.game_commit($1, $2)', [payload, signature]));
+      return gameCommitRowSchema.parse(rows[0]);
     },
 
     async saveMaxReviewsPerDay(value) {

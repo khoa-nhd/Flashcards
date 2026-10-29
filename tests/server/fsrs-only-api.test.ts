@@ -67,10 +67,10 @@ const remember = (id: string, revision: number, extra: Record<string, unknown> =
 });
 
 describe('the schema version Settings reports', () => {
-  it('asks for version 16, where the practice goal is kept, and reports a database at 16 as up to date', async () => {
+  it('asks for version 17, where the game is kept, and reports a database at 17 as up to date', async () => {
     const settings = accountSettingsSchema.parse(await (await call(app, alice, '/api/settings')).json());
     expect(settings.database).toEqual({ version: LATEST_SCHEMA_VERSION, latest: RECOMMENDED_SCHEMA_VERSION });
-    expect(RECOMMENDED_SCHEMA_VERSION).toBe(16);
+    expect(RECOMMENDED_SCHEMA_VERSION).toBe(17);
     expect(settings.database!.version >= settings.database!.latest).toBe(true);
   });
 });

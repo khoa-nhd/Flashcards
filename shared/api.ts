@@ -145,6 +145,8 @@ export const capabilitiesSchema = z.object({
    * can be archived, and mastery is no longer written (schema version 15).
    */
   fsrsOnly: z.boolean().default(false),
+  /** XP, levels, quests, badges and streak freezes are kept (schema version 17). */
+  game: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -161,6 +163,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   aiChat: false,
   weakRecovery: false,
   fsrsOnly: false,
+  game: false,
 };
 
 /**
@@ -170,7 +173,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
  * here — only the device knows which ones were ticked — so they travel as ids
  * on the queue request instead.
  */
-export const REVIEW_FOCUSES = ['weak'] as const;
+export const REVIEW_FOCUSES = ['weak', 'early', 'random'] as const;
 export const reviewFocusSchema = z.enum(REVIEW_FOCUSES);
 export type ReviewFocus = z.infer<typeof reviewFocusSchema>;
 
@@ -271,10 +274,23 @@ export const reviewActionRequestSchema = z.strictObject({
   expectedRevision: z.number().int().min(0).optional(),
 });
 
+/** What one saved answer did to the game: shown beside the card as it is saved. */
+export const answerGameSchema = z.object({
+  /** XP this answer earned, bonuses included. */
+  xp: z.number().int(),
+  totalXp: z.number().int(),
+  level: z.number().int(),
+  /** Answers in a row so far, and the bonus that gives, in percent. */
+  combo: z.number().int(),
+  comboBonus: z.number().int(),
+});
+
 export const reviewActionResponseSchema = z.object({
   outcome: z.enum(['applied', 'already_applied', 'dry_run']),
   /** The record's confirmed state. For `dry_run`, what would have been written (if known). */
   state: reviewStateSchema.nullable(),
+  /** Present where the game is kept (schema version 17) and the answer was counted. */
+  game: answerGameSchema.optional(),
 });
 
 /** Takes back one saved answer, named by the request id it was sent with. */
@@ -289,6 +305,8 @@ export const reviewUndoResponseSchema = z.object({
   pageId: z.string(),
   /** The state the word is back in. */
   state: reviewStateSchema,
+  /** Present where the game is kept: the XP taken back with the answer, as a negative amount. */
+  game: answerGameSchema.optional(),
 });
 
 /** What one review session actually saved. Undone and unsaved answers are not in it. */
@@ -611,6 +629,8 @@ export const practiceResponseSchema = z.object({
    * 0 to the ceiling. `null` when the answer was not recorded, so nothing changed.
    */
   modeMastery: z.number().int().min(0).max(PRACTICE_MASTERY_MAX).nullable().default(null),
+  /** Present where the game is kept and the answer was recorded. */
+  game: answerGameSchema.optional(),
 });
 
 /** A word's practice mastery in every mode. Read-only; it follows from the recorded practice answers. */
@@ -1080,6 +1100,60 @@ export type AccountSettings = z.infer<typeof accountSettingsSchema>;
 export type StudyGoals = z.infer<typeof studyGoalsSchema>;
 export type UpdateStudyGoalsInput = z.input<typeof updateStudyGoalsRequestSchema>;
 export type StudyGoalsResponse = z.infer<typeof studyGoalsResponseSchema>;
+export type AnswerGame = z.infer<typeof answerGameSchema>;
+export type GameResponse = z.infer<typeof gameResponseSchema>;
+export type GameQuestView = z.infer<typeof gameQuestSchema>;
+export type GameRewardView = z.infer<typeof gameRewardSchema>;
+
+// ---- The game (docs/gamification-plan.md, phase 1) ----
+
+export const gameQuestSchema = z.object({
+  period: z.enum(['day', 'week']),
+  kind: z.string(),
+  target: z.number().int(),
+  progress: z.number().int(),
+  reward: z.number().int(),
+  completed: z.boolean(),
+});
+
+export const gameRewardSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['level', 'badge', 'quest', 'quests_all', 'checkin', 'freeze_granted', 'freeze_used', 'comeback']),
+  payload: z.record(z.string(), z.unknown()),
+  createdAt: z.string(),
+});
+
+export const gameResponseSchema = z.object({
+  /** False where the game cannot be kept: the database predates version 17, or the server is not set up for it. */
+  available: z.boolean(),
+  /** Why it is not available, in a sentence for the owner. */
+  reason: z.string().nullable(),
+  today: isoDateSchema,
+  totalXp: z.number().int(),
+  level: z.object({ level: z.number().int(), into: z.number().int(), needed: z.number().int() }),
+  combo: z.object({ count: z.number().int(), bonus: z.number().int(), longest: z.number().int() }),
+  /** Until when coming back doubles XP, if it does now. */
+  comebackUntil: z.string().nullable(),
+  quests: z.object({ day: z.array(gameQuestSchema), week: gameQuestSchema.nullable() }),
+  badges: z.array(z.object({ badge: z.string(), tier: z.number().int(), earnedAt: z.string() })),
+  /** Where each badge's count stands now, for the way to its next tier. */
+  badgeValues: z.record(z.string(), z.number()),
+  freezes: z.object({ held: z.number().int(), max: z.number().int() }),
+  checkin: z.object({ day: z.number().int(), lastOn: isoDateSchema.nullable() }),
+  /** How many days ahead "review early" reaches. */
+  earlyDays: z.number().int().min(1).max(14),
+  /** Rewards waiting to be claimed, oldest first. */
+  rewards: z.array(gameRewardSchema),
+});
+
+export const gameClaimRequestSchema = z.strictObject({
+  /** The rewards to claim; `all` claims every one waiting. */
+  ids: z.union([z.array(z.uuid()).min(1).max(200), z.literal('all')]),
+});
+
+export const gameSettingsRequestSchema = z.strictObject({
+  earlyDays: z.number().int().min(1).max(14),
+});
 export type ArchiveEntriesRequest = z.infer<typeof archiveEntriesRequestSchema>;
 export type ArchiveEntriesResponse = z.infer<typeof archiveEntriesResponseSchema>;
 

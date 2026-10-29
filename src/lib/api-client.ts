@@ -28,6 +28,7 @@ import {
   sessionSummarySchema,
   simulationResponseSchema,
   studyGoalsResponseSchema,
+  gameResponseSchema,
   trashResponseSchema,
   vocabularyListResponseSchema,
   weakWordsResponseSchema,
@@ -57,6 +58,7 @@ import {
   type SessionSummary,
   type SimulationResponse,
   type StudyGoalsResponse,
+  type GameResponse,
   type UpdateStudyGoalsInput,
   type UpdateEntryInput,
   type VocabularyEntry,
@@ -143,6 +145,12 @@ export interface AnalyticsApi {
   fetchStudyGoals(): Promise<StudyGoalsResponse>;
   /** Changes one or both goals and returns the new progress. */
   saveStudyGoals(input: UpdateStudyGoalsInput): Promise<StudyGoalsResponse>;
+  /** XP, level, quests, badges and the rewards waiting to be claimed. */
+  fetchGame(): Promise<GameResponse>;
+  /** Claims rewards (or every one waiting) and returns the game after. */
+  claimGameRewards(ids: readonly string[] | 'all'): Promise<GameResponse>;
+  /** How many days ahead "review early" reaches. */
+  saveGameSettings(settings: { earlyDays: number }): Promise<GameResponse>;
 }
 
 /** Collections, further examples and relationships. None of these calls can change a word or its schedule. */
@@ -376,7 +384,9 @@ export function fetchAppConfig(): Promise<AppConfigResponse> {
 
 /** The queue's address for the one narrowing the server can work out for itself. */
 function queuePath(scope: ReviewScope): string {
-  return scope.kind === 'weak' ? '/api/review-queue?focus=weak' : '/api/review-queue';
+  if (scope.kind === 'weak' || scope.kind === 'random') return `/api/review-queue?focus=${scope.kind}`;
+  if (scope.kind === 'early') return `/api/review-queue?focus=early&days=${scope.days}`;
+  return '/api/review-queue';
 }
 
 /** Enough to know the reply is an export of the kind this app writes; the rest is passed through untouched. */
@@ -518,6 +528,29 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
 
     saveStudyGoals: (body) =>
       call('/api/study-goals', studyGoalsResponseSchema, {
+        method: 'PUT',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    fetchGame: () =>
+      call('/api/game', gameResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.quickMs,
+        timeoutMessage: 'Loading your XP took too long.',
+      }),
+
+    claimGameRewards: (ids) =>
+      call('/api/game/claim', gameResponseSchema, {
+        method: 'POST',
+        body: { ids: ids === 'all' ? 'all' : [...ids] },
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: SAVE_TIMEOUT_MESSAGE,
+      }),
+
+    saveGameSettings: (body) =>
+      call('/api/game/settings', gameResponseSchema, {
         method: 'PUT',
         body,
         timeoutMs: TIMEOUTS.actionMs,

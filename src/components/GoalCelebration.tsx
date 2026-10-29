@@ -14,10 +14,14 @@
  * Both only read the goals: nothing here can change what counts or when.
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import type { ReviewActionResponse, StudyGoalsResponse } from '../../shared/api.js';
+import type { GameRewardView, ReviewActionResponse, StudyGoalsResponse } from '../../shared/api.js';
 import { useApp, useUiLanguage } from '../app-context.js';
+import { ApiError } from '../lib/api-client.js';
+import { adoptGame, useGame } from '../lib/game-state.js';
+import { rewardText } from '../lib/game-text.js';
 import { pick } from '../lib/i18n.js';
-import { ROUTES } from '../lib/router.js';
+import { ROUTES, useLocation } from '../lib/router.js';
+import { Icon, type IconName } from './Icon.js';
 import { Link } from './Link.js';
 import { fetchShared, knownStudyGoals, subscribeGoalWork, subscribeStudyGoals } from './StudyGoals.js';
 import { BUTTON_GHOST, BUTTON_PRIMARY } from './ui.js';
@@ -172,7 +176,7 @@ export function GoalCelebration() {
     };
   }, [api, sync, accountId]);
 
-  if (moment === null) return null;
+  if (moment === null) return <RewardsOnDashboard />;
   const close = () => setMoment(null);
   return moment.kind === 'met' ? (
     <Moonrise goals={moment.goals} onClose={close} />
@@ -216,6 +220,112 @@ const delay = (ms: number) => ({ '--d': `${ms}ms` }) as CSSProperties;
  * left over from the card neither closes it nor reaches the review behind;
  * then it moves to the first action inside `actions`.
  */
+/**
+ * Rewards waiting to be claimed, opened full screen each time the dashboard is
+ * reached (the owner's choice), after any moonrise or moonset has been seen.
+ * "Later" puts them away until the next visit.
+ */
+function RewardsOnDashboard() {
+  const { api } = useApp();
+  const { pathname: path } = useLocation();
+  const game = useGame(api);
+  const onDashboard = path === ROUTES.dashboard;
+  // Put away for this visit; reaching the dashboard again brings them back.
+  const [putAway, setPutAway] = useState(false);
+  const [visit, setVisit] = useState(path);
+  if (visit !== path) {
+    setVisit(path);
+    if (onDashboard) setPutAway(false);
+  }
+  const rewards = game.data?.available === true ? game.data.rewards : [];
+  if (!onDashboard || putAway || rewards.length === 0) return null;
+  return <RewardsScene rewards={rewards} onClose={() => setPutAway(true)} />;
+}
+
+const REWARD_ICON: Record<GameRewardView['kind'], IconName> = {
+  level: 'trophy',
+  badge: 'trophy',
+  quest: 'check',
+  quests_all: 'check',
+  checkin: 'calendar',
+  freeze_granted: 'snow',
+  freeze_used: 'snow',
+  comeback: 'refresh',
+};
+
+function RewardsScene({ rewards, onClose }: { rewards: readonly GameRewardView[]; onClose: () => void }) {
+  const { api, toasts } = useApp();
+  const language = useUiLanguage();
+  const actions = useRef<HTMLDivElement>(null);
+  const [busy, setBusy] = useState(false);
+  const reward = rewards[0]!;
+  const { title, detail } = rewardText(language, reward);
+  const xp = typeof reward.payload.xp === 'number' ? reward.payload.xp : 0;
+
+  const claim = async (ids: readonly string[] | 'all') => {
+    setBusy(true);
+    try {
+      adoptGame(api, await api.claimGameRewards(ids));
+    } catch (cause) {
+      toasts.show({
+        message: cause instanceof ApiError ? cause.message : pick(language, 'Could not claim the reward.', 'Không nhận được phần thưởng.'),
+      });
+      onClose();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <NightScene titleId="rewards-title" detailId="rewards-detail" settleMs={700} onClose={onClose} actions={actions}>
+      {() => (
+        <>
+          <p className="moonrise-rise text-xs font-semibold uppercase tracking-[0.2em] text-faint" style={delay(150)}>
+            {pick(language, 'Rewards to claim', 'Phần thưởng chờ nhận')}
+            {rewards.length > 1 && <span className="tabular-nums"> · 1/{rewards.length}</span>}
+          </p>
+          <div
+            key={reward.id}
+            className="moonrise-rise mt-8 flex size-36 items-center justify-center rounded-full border border-accent/40 bg-accent-soft text-accent shadow-[0_0_80px_-10px_rgb(165_201_238_/_0.45)]"
+            style={delay(250)}
+            aria-hidden="true"
+          >
+            {reward.kind === 'level' ? (
+              <span className="font-serif text-6xl font-semibold tabular-nums text-ink">{String(reward.payload.level)}</span>
+            ) : (
+              <Icon name={REWARD_ICON[reward.kind]} className="size-14" />
+            )}
+          </div>
+          <h2
+            id="rewards-title"
+            key={`title-${reward.id}`}
+            className="moonrise-rise mt-8 font-serif text-3xl font-semibold tracking-tight text-ink sm:text-4xl"
+            style={delay(350)}
+          >
+            {title}
+          </h2>
+          <p id="rewards-detail" key={`detail-${reward.id}`} className="moonrise-rise mt-3 max-w-sm text-sm leading-relaxed text-muted" style={delay(430)}>
+            {detail}
+          </p>
+          <div ref={actions} className="moonrise-rise mt-9 flex flex-wrap items-center justify-center gap-2" style={delay(520)}>
+            <button type="button" className={`min-w-36 ${BUTTON_PRIMARY}`} disabled={busy} onClick={() => void claim([reward.id])}>
+              {xp > 0 ? pick(language, `Claim +${xp} XP`, `Nhận +${xp} XP`) : pick(language, 'Claim', 'Nhận')}
+            </button>
+            {rewards.length > 1 && (
+              <button type="button" className={BUTTON_GHOST} disabled={busy} onClick={() => void claim('all')}>
+                {pick(language, `Claim all ${rewards.length}`, `Nhận tất cả ${rewards.length}`)}
+              </button>
+            )}
+            <button type="button" className={BUTTON_GHOST} disabled={busy} onClick={onClose}>
+              {pick(language, 'Later', 'Để sau')}
+            </button>
+          </div>
+        </>
+      )}
+    </NightScene>
+  );
+}
+
 function NightScene({
   titleId,
   detailId,

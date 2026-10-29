@@ -167,6 +167,79 @@ export const studyDayCountsRowSchema = z.object({
   practice: z.coerce.number().int().min(0),
 });
 
+// ---- The game (schema version 17) ----
+
+const timestamp = z.string().min(1);
+const isoDay = z.string().refine(isIsoDate);
+
+export const gameAnswerRowSchema = z.object({
+  id: z.string(),
+  kind: z.enum(['review', 'practice', 'undo']),
+  undoes: z.string().nullable(),
+  answered_at: timestamp,
+  answered_on: isoDay,
+  is_new: z.boolean(),
+  counted: z.boolean(),
+  was_due: z.boolean(),
+  duration_ms: z.number().int().nullable(),
+  mode: z.string().nullable(),
+  mastered: z.boolean(),
+});
+
+export const gameMetricsRowSchema = z.object({
+  words_studied: z.coerce.number().int(),
+  mastered: z.coerce.number().int(),
+  reviews: z.coerce.number().int(),
+  practice: z.coerce.number().int(),
+  duration_ms: z.coerce.number(),
+  night_answers: z.coerce.number().int(),
+});
+
+export const gameStateRowSchema = z.object({
+  version: z.coerce.number().int(),
+  total_xp: z.coerce.number().int(),
+  state: z.record(z.string(), z.unknown()),
+});
+
+export const gameQuestRowSchema = z.object({
+  period: z.enum(['day', 'week']),
+  period_start: isoDay,
+  slot: z.coerce.number().int(),
+  kind: z.string(),
+  target: z.coerce.number().int(),
+  reward: z.coerce.number().int(),
+  progress: z.coerce.number().int(),
+  completed_at: timestamp.nullable(),
+});
+
+export const gameBadgeRowSchema = z.object({ badge: z.string(), tier: z.coerce.number().int(), earned_at: timestamp });
+export const gameFreezeRowSchema = z.object({ id: z.string(), granted_on: isoDay, used_on: isoDay.nullable() });
+export const gameRewardRowSchema = z.object({
+  id: z.string(),
+  kind: z.string(),
+  payload: z.record(z.string(), z.unknown()),
+  created_at: timestamp,
+});
+export const gameLedgerRowSchema = z.object({
+  source_id: z.string(),
+  amount: z.coerce.number().int(),
+  reason: z.string(),
+  earned_on: isoDay,
+});
+export const gameCommitRowSchema = z.object({
+  outcome: z.enum(['ok', 'stale']),
+  version: z.coerce.number().int(),
+  total_xp: z.coerce.number().int(),
+});
+
+export interface GameSnapshotRows {
+  state: z.infer<typeof gameStateRowSchema> | null;
+  quests: Array<z.infer<typeof gameQuestRowSchema>>;
+  badges: Array<z.infer<typeof gameBadgeRowSchema>>;
+  freezes: Array<z.infer<typeof gameFreezeRowSchema>>;
+  rewards: Array<z.infer<typeof gameRewardRowSchema>>;
+}
+
 /** One answer as `record_fsrs_review` takes it. */
 export interface FsrsReviewArgs {
   id: string;
@@ -244,7 +317,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 16;
+export const LATEST_SCHEMA_VERSION = 17;
 
 /**
  * The newest migration Settings asks the owner to run. Version 15 makes FSRS
@@ -252,7 +325,7 @@ export const LATEST_SCHEMA_VERSION = 16;
  * screens for it exist (docs/fsrs-only-progress.md), so the app does not ask
  * for it yet. Raise this to LATEST_SCHEMA_VERSION when they do.
  */
-export const RECOMMENDED_SCHEMA_VERSION = 16;
+export const RECOMMENDED_SCHEMA_VERSION = 17;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -529,6 +602,16 @@ export interface VocabularyDatabase {
   recordStudyDay?(row: StudyDayRow): Promise<boolean>;
   /** Needs schema version 15. Oldest first. */
   listMetStudyDays?(): Promise<IsoDate[]>;
+  /** Needs schema version 17: the game's stored rows, quests for the day and the week given. */
+  gameSnapshot?(today: IsoDate, weekStart: IsoDate): Promise<GameSnapshotRows>;
+  /** Needs schema version 17: answers not yet counted, oldest first. */
+  gamePendingAnswers?(limit: number): Promise<Array<z.infer<typeof gameAnswerRowSchema>>>;
+  /** Needs schema version 17: what the ledger gave the answers named. */
+  gameLedger?(answerIds: readonly string[]): Promise<Array<z.infer<typeof gameLedgerRowSchema>>>;
+  /** Needs schema version 17. */
+  gameBadgeMetrics?(): Promise<z.infer<typeof gameMetricsRowSchema>>;
+  /** Needs schema version 17: applies a change the server signed. */
+  gameCommit?(payload: string, signature: string): Promise<z.infer<typeof gameCommitRowSchema>>;
   setCardTrashed(id: string, trashed: boolean): Promise<boolean>;
   applyReview(args: ReviewWriteArgs): Promise<ReviewWriteRow>;
   findReviewByRequestId(requestId: string): Promise<{ mastery: number; reviewDate: IsoDate | null } | null>;
@@ -798,6 +881,14 @@ export function toDatabaseError(error: PostgrestFailure, status?: number): Datab
     return new DatabaseError(
       'schema_missing',
       'The database schema is not installed. Apply the migrations in supabase/migrations.',
+      logged,
+    );
+  }
+  // game_commit before its signing key is set (schema version 17).
+  if (code === '55000') {
+    return new DatabaseError(
+      'schema_missing',
+      'XP and levels are not set up in the database yet: set the game signing key (docs/gamification-plan.md).',
       logged,
     );
   }
@@ -1626,6 +1717,80 @@ export function createSupabaseDatabase(
       const rows = z.array(z.object({ day: z.string().refine(isIsoDate) })).safeParse(data ?? []);
       if (!rows.success) throw new DatabaseError('unavailable', 'The database returned days in an unexpected shape.');
       return rows.data.map((row) => row.day);
+    },
+
+    async gameSnapshot(today, weekStart) {
+      if (schemaVersion < 17) throw new DatabaseError('schema_missing', 'This database cannot keep the game yet.');
+      const parse = <T>(schema: z.ZodType<T>, data: unknown, what: string): T[] => {
+        const rows = z.array(schema).safeParse(data ?? []);
+        if (!rows.success) throw new DatabaseError('unavailable', `The database returned ${what} in an unexpected shape.`);
+        return rows.data;
+      };
+      const [state, quests, badges, freezes, rewards] = await Promise.all([
+        client.from('game_state').select('version, total_xp, state').maybeSingle(),
+        client
+          .from('game_quests')
+          .select('period, period_start, slot, kind, target, reward, progress, completed_at')
+          .or(`and(period.eq.day,period_start.eq.${today}),and(period.eq.week,period_start.eq.${weekStart})`)
+          .order('period')
+          .order('slot'),
+        client.from('game_badges').select('badge, tier, earned_at').order('earned_at'),
+        client.from('game_freezes').select('id, granted_on, used_on').order('granted_on'),
+        client.from('game_rewards').select('id, kind, payload, created_at').is('claimed_at', null).order('created_at').limit(200),
+      ]);
+      for (const result of [state, quests, badges, freezes, rewards]) {
+        if (result.error) throw toDatabaseError(result.error, result.status);
+      }
+      const stateRow = state.data === null ? null : gameStateRowSchema.safeParse(state.data);
+      if (stateRow !== null && !stateRow.success) throw new DatabaseError('unavailable', 'The database returned the game state in an unexpected shape.');
+      return {
+        state: stateRow === null ? null : stateRow.data,
+        quests: parse(gameQuestRowSchema, quests.data, 'quests'),
+        badges: parse(gameBadgeRowSchema, badges.data, 'badges'),
+        freezes: parse(gameFreezeRowSchema, freezes.data, 'streak freezes'),
+        rewards: parse(gameRewardRowSchema, rewards.data, 'rewards'),
+      };
+    },
+
+    async gamePendingAnswers(limit) {
+      if (schemaVersion < 17) throw new DatabaseError('schema_missing', 'This database cannot keep the game yet.');
+      const { data, error, status } = await client.rpc('game_pending_answers', { p_limit: limit });
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(gameAnswerRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned answers in an unexpected shape.');
+      return rows.data;
+    },
+
+    async gameLedger(answerIds) {
+      if (schemaVersion < 17) throw new DatabaseError('schema_missing', 'This database cannot keep the game yet.');
+      if (answerIds.length === 0) return [];
+      const { data, error, status } = await client
+        .from('xp_ledger')
+        .select('source_id, amount, reason, earned_on')
+        .eq('source', 'answer')
+        .in('source_id', [...answerIds]);
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(gameLedgerRowSchema).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned XP in an unexpected shape.');
+      return rows.data;
+    },
+
+    async gameBadgeMetrics() {
+      if (schemaVersion < 17) throw new DatabaseError('schema_missing', 'This database cannot keep the game yet.');
+      const { data, error, status } = await client.rpc('game_badge_metrics');
+      if (error) throw toDatabaseError(error, status);
+      const row = z.array(gameMetricsRowSchema).safeParse(data ?? []);
+      if (!row.success || row.data[0] === undefined) throw new DatabaseError('unavailable', 'The database returned totals in an unexpected shape.');
+      return row.data[0];
+    },
+
+    async gameCommit(payload, signature) {
+      if (schemaVersion < 17) throw new DatabaseError('schema_missing', 'This database cannot keep the game yet.');
+      const { data, error, status } = await client.rpc('game_commit', { p_payload: payload, p_signature: signature });
+      if (error) throw toDatabaseError(error, status);
+      const row = z.array(gameCommitRowSchema).safeParse(data ?? []);
+      if (!row.success || row.data[0] === undefined) throw new DatabaseError('unavailable', 'The database answered the game change in an unexpected shape.');
+      return row.data[0];
     },
 
     async undoFsrsReview(args) {

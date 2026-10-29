@@ -108,6 +108,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     aiChat: schemaVersion >= 10,
     weakRecovery: schemaVersion >= 14,
     fsrsOnly: schemaVersion >= 15,
+    game: schemaVersion >= 17,
   };
 }
 

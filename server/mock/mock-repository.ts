@@ -11,6 +11,8 @@ import { DEFAULT_SCHEDULER, type SchedulerId } from '../../shared/scheduler/acti
 import type { ScheduleCard } from '../../shared/scheduler/comparison.js';
 import { stabilityForLevel } from '../../shared/scheduler/strength.js';
 import type { CardFieldConfig, StoredFsrs, VocabularyRecord } from '../../shared/vocabulary.js';
+import type { AnswerEvent } from '../../shared/gamification/xp.js';
+import type { GameMetrics } from '../game-service.js';
 import type { EntryChanges, EntryData, NewEntry, VocabularyCatalog } from '../vocabulary-catalog.js';
 import type {
   ConfidenceStat,
@@ -175,6 +177,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     aiChat: true,
     weakRecovery: true,
     fsrsOnly: false,
+    game: true,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
@@ -922,6 +925,66 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
   }
 
   // ---- AI Conversations (mock: not persisted) ----
+
+  // ---- What the game reads (server/game-service.ts), as game_pending_answers and game_badge_metrics give it ----
+
+  /** Every review, undo and practice answer, as the game counts them. */
+  gameAnswers(): AnswerEvent[] {
+    const MASTER_DAYS = 365;
+    const reviews = this.logs.map((log): AnswerEvent => {
+      const detail = log.fsrsOnly;
+      const before = log.fsrs?.before?.state.stability ?? 0;
+      const after = log.fsrs?.after.state.stability ?? 0;
+      return {
+        id: `review-${log.sequence}`,
+        kind: log.kind,
+        undoes: log.undoes === null ? null : `review-${log.undoes}`,
+        at: log.at,
+        on: log.reviewedOn,
+        isNew: detail?.newWord ?? false,
+        counted: detail?.counted ?? true,
+        wasDue: detail?.wasDue ?? true,
+        durationMs: log.durationMs,
+        mode: log.reviewMode,
+        mastered: log.kind === 'review' && (detail?.counted ?? true) && after >= MASTER_DAYS && before < MASTER_DAYS,
+      };
+    });
+    const practice = this.practice.map(
+      (entry): AnswerEvent => ({
+        id: `practice-${entry.requestId}`,
+        kind: 'practice',
+        undoes: null,
+        at: entry.at,
+        on: entry.reviewedOn,
+        isNew: false,
+        counted: false,
+        wasDue: false,
+        durationMs: entry.durationMs,
+        mode: entry.mode,
+        mastered: false,
+      }),
+    );
+    return [...reviews, ...practice];
+  }
+
+  /** The totals the badges read. */
+  gameMetrics(): GameMetrics {
+    const standing = this.logs.filter((log) => this.stands(log));
+    const hourOf = (iso: string) =>
+      Number(new Intl.DateTimeFormat('en-GB', { timeZone: this.timeZone, hour: '2-digit', hourCycle: 'h23' }).format(new Date(iso)));
+    const night = [...standing.map((log) => log.at), ...this.practice.map((entry) => entry.at)].filter((at) => {
+      const hour = hourOf(at);
+      return hour >= 23 || hour < 4;
+    }).length;
+    return {
+      wordsStudied: new Set(standing.map((log) => log.wordId)).size,
+      mastered: [...this.words.values()].filter((word) => !word.trashed && !word.suspended && (word.fsrs?.state.stability ?? 0) >= 365).length,
+      reviews: standing.length,
+      practice: this.practice.length,
+      durationMs: [...standing, ...this.practice].reduce((sum, entry) => sum + (entry.durationMs ?? 0), 0),
+      nightAnswers: night,
+    };
+  }
 
   private readonly aiConversations = new Map<string, AiConversationRow>();
   private readonly aiMessages = new Map<string, AiMessageRow[]>();

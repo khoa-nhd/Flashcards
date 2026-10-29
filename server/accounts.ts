@@ -11,6 +11,7 @@ export interface Account {
 }
 
 /** Everything one request may do, bound to the account that made it and to nothing else. */
+import type { GameService } from './game-service.js';
 import type { StudyGoalsService } from './study-goals-service.js';
 
 export interface AccountSession {
@@ -43,6 +44,9 @@ export interface AccountSession {
   review: ReviewService;
   /** The two daily goals and the streak; only where FSRS is the only schedule (schema version 15). */
   studyGoals?: StudyGoalsService | null;
+  /** XP, levels, quests and badges; `null` with `gameReason` saying why. */
+  game?: GameService | null;
+  gameReason?: string | null;
   vocabulary: VocabularyService;
   analytics: AnalyticsService;
   library: LibraryService;

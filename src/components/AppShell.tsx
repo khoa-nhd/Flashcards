@@ -4,6 +4,7 @@ import { pick } from '../lib/i18n.js';
 import { ROUTES, type RouteKey } from '../lib/router.js';
 import { ConfirmDialog } from './ConfirmDialog.js';
 import { GoalCelebration } from './GoalCelebration.js';
+import { GameWatcher, XpCard, XpChip } from './GameBar.js';
 import { Icon, type IconName } from './Icon.js';
 import { Link } from './Link.js';
 import { Onboarding } from './Onboarding.js';
@@ -66,7 +67,9 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
   const title =
     active === 'import'
       ? pick(language, 'Import', 'Nhập danh sách')
-      : currentNav === undefined
+      : active === 'achievements'
+        ? pick(language, 'Achievements', 'Thành tích')
+        : currentNav === undefined
         ? pick(language, 'Vocabulary', 'Từ vựng')
         : navLabel(currentNav);
 
@@ -113,6 +116,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           <div className="my-2 border-t border-line" />
           {SECONDARY.map(sideLink)}
         </nav>
+        <XpCard />
         {account !== null && (
           <div className="flex flex-col gap-1 border-t border-line px-3 pt-3 text-xs text-faint">
             <span className="truncate" title={account.email ?? undefined}>
@@ -135,6 +139,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           </div>
           <div className="flex shrink-0 items-center gap-0.5">
             <SyncStatus />
+            <XpChip />
             {SECONDARY.map((item) => (
               <Link
                 key={item.route}
@@ -196,6 +201,7 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
         </nav>
       </div>
       <Onboarding />
+      <GameWatcher />
       <GoalCelebration />
     </div>
   );

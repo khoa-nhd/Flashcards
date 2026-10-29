@@ -10,7 +10,9 @@ import { Spinner } from '../components/Spinner.js';
 import { WordPicker } from '../components/WordPicker.js';
 import { pick } from '../lib/i18n.js';
 import { EVERYTHING_LABEL, FOCUS_TEXT, SELECT_TEXT, SELECT_VALUE, scopeFromQuery } from '../lib/review-focus.js';
-import { ALL_SCOPE, WEAK_SCOPE, sameScope, scopeKey, selection } from '../lib/review-scope.js';
+import { EARLY_DAYS_DEFAULT, sameScope, scopeFromKey, scopeKey, selection } from '../lib/review-scope.js';
+import { XpFloat } from '../components/GameBar.js';
+import { knownGame } from '../lib/game-state.js';
 import { ROUTES, buildHref, navigate, useLocation } from '../lib/router.js';
 import type { SessionMeta } from '../lib/session-machine.js';
 
@@ -90,7 +92,7 @@ const HEADER_BUTTON =
  * this tab and coming back resumes where it was.
  */
 export function ReviewPage() {
-  const { api, session, ensureReviewSession, counting: countingChoice } = useApp();
+  const { api, session, ensureReviewSession, counting: countingChoice, toasts } = useApp();
   const settings = useSettings();
   const language = useUiLanguage();
   const counting = useCounting();
@@ -113,7 +115,7 @@ export function ReviewPage() {
   const reload = () => {
     // Refresh is a fresh start at the same words, so it counts again by default —
     // the weakest words keep the sitting's own starting point.
-    if (askedKey !== 'weak') countingChoice.preset(true);
+    if (asked.kind !== 'weak' && asked.kind !== 'random') countingChoice.preset(true);
     void session.load();
   };
 
@@ -131,7 +133,7 @@ export function ReviewPage() {
     // The weakest words are the one narrowing the server works out for itself, and `scopeKey`
     // names them exactly that.
     if (picking) return;
-    ensureReviewSession(askedKey === 'weak' ? WEAK_SCOPE : ALL_SCOPE);
+    ensureReviewSession(scopeFromKey(askedKey));
   }, [ensureReviewSession, picking, askedKey]);
 
   // The weak list the sitting started from, so the finished screen can name any word that left it.
@@ -274,14 +276,16 @@ export function ReviewPage() {
           </label>
           <select
             id="review-focus"
-            value={picking ? SELECT_VALUE : askedKey === 'weak' ? 'weak' : ''}
+            value={picking ? SELECT_VALUE : asked.kind === 'all' ? '' : asked.kind}
             title="Choose which words to review. The weakest words and your own picks may be taken before they are due."
             className="h-9 max-w-[9.5rem] cursor-pointer rounded-full border border-line-strong bg-transparent px-3 text-xs font-medium text-muted sm:max-w-[11rem] sm:text-sm disabled:cursor-not-allowed disabled:opacity-50"
             onChange={(event) => {
               const { value } = event.target;
               // Hand the keys back to the card: an arrow key should answer, not change this choice.
               event.currentTarget.blur();
-              navigate(buildHref(ROUTES.review, { focus: value === '' ? null : value }));
+              // Review early starts from how far ahead this account last chose to reach.
+              const days = value === 'early' ? String(knownGame(api)?.earlyDays ?? EARLY_DAYS_DEFAULT) : null;
+              navigate(buildHref(ROUTES.review, { focus: value === '' ? null : value, days }));
             }}
           >
             <option value="">{EVERYTHING_LABEL}</option>
@@ -292,6 +296,36 @@ export function ReviewPage() {
             ))}
             <option value={SELECT_VALUE}>{SELECT_TEXT.label}</option>
           </select>
+          {asked.kind === 'early' && (
+            <>
+              <label className="sr-only" htmlFor="review-early-days">
+                {pick(language, 'How many days ahead', 'Bao nhiêu ngày tới')}
+              </label>
+              <select
+                id="review-early-days"
+                value={asked.days}
+                title={pick(language, 'How many days ahead to reach', 'Ôn trước bao nhiêu ngày')}
+                className="h-9 cursor-pointer rounded-full border border-line-strong bg-transparent px-2 text-xs font-medium text-muted sm:text-sm"
+                onChange={(event) => {
+                  const days = Number(event.target.value);
+                  event.currentTarget.blur();
+                  navigate(buildHref(ROUTES.review, { focus: 'early', days: String(days) }), { replace: true });
+                  // Remembered with the account for next time; the review itself does not wait for it.
+                  if (knownGame(api)?.available === true) {
+                    void api.saveGameSettings({ earlyDays: days }).catch(() =>
+                      toasts.show({ message: pick(language, 'Could not remember that choice.', 'Không lưu được lựa chọn này.') }),
+                    );
+                  }
+                }}
+              >
+                {Array.from({ length: 14 }, (_, at) => at + 1).map((days) => (
+                  <option key={days} value={days}>
+                    {pick(language, `${days} ${days === 1 ? 'day' : 'days'}`, `${days} ngày`)}
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
           <CountingSwitch fsrsOnly={fsrsOnly} />
           {pickedScope && !choosing && (
             <button type="button" onClick={() => setPicked(null)} className={HEADER_BUTTON}>
@@ -338,7 +372,10 @@ export function ReviewPage() {
           </div>
         </div>
       )}
-      <div className="pool min-h-0 flex-1">{content}</div>
+      <div className="pool relative min-h-0 flex-1">
+        <XpFloat />
+        {content}
+      </div>
       {helpOpen && (
         <ShortcutHelp
           answerKeys={settings.answerKeys}

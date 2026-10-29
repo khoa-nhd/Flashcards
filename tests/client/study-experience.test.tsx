@@ -63,13 +63,15 @@ async function save(saves: Saves, at = 0, result = applied) {
 describe('choosing what to review', () => {
   const chooser = () => screen.getByLabelText('Cards to review') as HTMLSelectElement;
 
-  it('offers exactly three choices, starting on everything due', async () => {
+  it('offers exactly five choices, starting on everything due', async () => {
     await open('/review', { cards: [card(1)] });
     await screen.findByTestId('flashcard');
     expect(chooser().value).toBe('');
     expect(within(chooser()).getAllByRole('option').map((option) => option.textContent)).toEqual([
       'Everything due',
       'Weakest words',
+      'Review early',
+      'Random review',
       'Select words',
     ]);
   });

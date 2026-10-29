@@ -6,6 +6,7 @@ import type {
   AiMessage,
   AnalyticsResponse,
   DayPlanResponse,
+  GameResponse,
   ImportResponse,
   LibraryResponse,
   PracticeResponse,
@@ -22,6 +23,7 @@ import type {
   WeakWordsResponse,
 } from '../../shared/api.js';
 import { EXPORT_FORMAT, EXPORT_VERSION } from '../../shared/export-format.js';
+import { levelOf } from '../../shared/gamification/levels.js';
 import { collectionKey, orderPair, tidyName } from '../../shared/library.js';
 import { NO_GOAL, planDay, type PlanInput } from '../../shared/session-planner.js';
 import { PRACTICE_MASTERY_MAX, STUDY_MODES, judge, practiceMasteryOf, type StudyMode } from '../../shared/study-modes.js';
@@ -87,6 +89,8 @@ export interface FakeApiOptions {
   weakWords?: Partial<WeakWordsResponse>;
   /** The two FSRS-only daily goals. */
   studyGoals?: Partial<StudyGoalsResponse>;
+  /** The game the account starts with; off (as before version 17) unless given. */
+  game?: Partial<GameResponse>;
   /** The figures the day's plan is worked out from; the plan itself comes from the real planner. */
   plan?: Partial<PlanFigures>;
   /** What the server says it did with a practice answer. */
@@ -245,6 +249,28 @@ export function studyGoalsResponse(overrides: Partial<StudyGoalsResponse> = {}):
   };
 }
 
+/** A game with nothing earned yet. Off unless `available` is given, as on a database before version 17. */
+export function gameResponse(overrides: Partial<GameResponse> = {}): GameResponse {
+  return {
+    available: false,
+    reason: 'XP and levels need the latest database update (version 17).',
+    today: TODAY,
+    totalXp: 0,
+    level: { level: 1, into: 0, needed: 100 },
+    combo: { count: 0, bonus: 0, longest: 0 },
+    comebackUntil: null,
+    quests: { day: [], week: null },
+    badges: [],
+    badgeValues: {},
+    freezes: { held: 0, max: 2 },
+    checkin: { day: 0, lastOn: null },
+    earlyDays: 3,
+    rewards: [],
+    ...(overrides.available === true ? { reason: null } : {}),
+    ...overrides,
+  };
+}
+
 export function createFakeApi({
   cards = [],
   queue = {},
@@ -260,6 +286,7 @@ export function createFakeApi({
   analytics: analyticsOverrides = {},
   weakWords: weakWordsOverrides = {},
   studyGoals: studyGoalsOverrides = {},
+  game: gameOverrides,
   plan: planFigures = {},
   practiceOutcome = 'recorded',
   library: libraryStart = {},
@@ -277,6 +304,7 @@ export function createFakeApi({
   const scheduler = schedulerReport(schedulerOverrides);
   const simulated = simulationResponse(simulationOverrides);
   let studyGoals = studyGoalsResponse(studyGoalsOverrides);
+  let game = gameResponse(gameOverrides);
   /** Correct practice answers so far, by word and mode, and the requests already counted. */
   const practiceCorrect = new Map<string, number>(
     Object.entries(practiceCorrectStart).flatMap(([id, byMode]) =>
@@ -588,6 +616,19 @@ export function createFakeApi({
       return dayPlan({ ...planFigures, goal });
     }),
     fetchStudyGoals: vi.fn<AppApi['fetchStudyGoals']>(async () => ({ ...studyGoals, goals: { ...studyGoals.goals } })),
+    fetchGame: vi.fn<AppApi['fetchGame']>(async () => structuredClone(game)),
+    // Claiming adds each reward's XP and takes it off the list, as the server does.
+    claimGameRewards: vi.fn<AppApi['claimGameRewards']>(async (ids) => {
+      const claiming = game.rewards.filter((reward) => ids === 'all' || ids.includes(reward.id));
+      const xp = claiming.reduce((sum, reward) => sum + (typeof reward.payload.xp === 'number' ? reward.payload.xp : 0), 0);
+      const totalXp = game.totalXp + xp;
+      game = { ...game, totalXp, level: levelOf(totalXp), rewards: game.rewards.filter((reward) => !claiming.includes(reward)) };
+      return structuredClone(game);
+    }),
+    saveGameSettings: vi.fn<AppApi['saveGameSettings']>(async ({ earlyDays }) => {
+      game = { ...game, earlyDays };
+      return structuredClone(game);
+    }),
     saveStudyGoals: vi.fn<AppApi['saveStudyGoals']>(async (input) => {
       const goals = {
         newWords: input.newWords ?? studyGoals.goals.newWords,
