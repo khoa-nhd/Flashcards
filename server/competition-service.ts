@@ -27,6 +27,7 @@ import {
   type GroupToSettle,
 } from '../shared/gamification/league.js';
 import { BADGES } from '../shared/gamification/badges.js';
+import { itemById } from '../shared/gamification/catalog.js';
 import { levelOf } from '../shared/gamification/levels.js';
 import { nicknameProblem, randomNickname, tidyNickname, type NicknameProblem } from '../shared/gamification/nickname.js';
 import { seededRandom } from '../shared/gamification/quests.js';
@@ -160,6 +161,8 @@ export interface CompetitionStore {
   challenges(): Promise<ChallengeRow[]>;
   isAdmin(): Promise<boolean>;
   reports(): Promise<ReportRow[]>;
+  /** Phase 3: the items a profile shows off, and its leading companions. */
+  showcase?(member: string): Promise<Array<{ item_id: string; is_leading: boolean }>>;
 }
 
 // ---- The database store ----
@@ -226,6 +229,7 @@ export function createDatabaseCompetitionStore(
       return row === true;
     },
     reports: () => call('admin_reports', {}, reportRowSchema),
+    showcase: (member) => call('profile_showcase', { p_user: member }, z.object({ item_id: z.string(), is_leading: z.boolean() })),
   };
 }
 
@@ -253,6 +257,10 @@ export interface CompetitionServiceOptions {
   /** The account's own zone, for its streak's "today". */
   timeZone: string;
   now?: () => Date;
+  /** Whether the account owns an item (phase 3): a frame or title must be owned to be worn. */
+  owns?: (item: string) => Promise<boolean>;
+  /** Phase 3 is kept (schema version 19): profiles show their showcase. */
+  economy?: boolean;
 }
 
 /** XP for winning a weekly challenge, and for each side of a draw. */
@@ -301,8 +309,17 @@ export class CompetitionService {
     throw new CompetitionError('taken', 'No free nickname could be found; choose one in Settings.');
   }
 
-  async saveProfile(update: { nickname?: string; inLeagues?: boolean }): Promise<ProfileResponse> {
+  async saveProfile(update: { nickname?: string; inLeagues?: boolean; frame?: string | null; title?: string | null }): Promise<ProfileResponse> {
     const me = await this.me();
+    for (const [kind, item] of [
+      ['frame', update.frame],
+      ['title', update.title],
+    ] as const) {
+      if (item === undefined || item === null) continue;
+      if (itemById(item)?.kind !== kind || !(await this.options.owns?.(item))) {
+        throw new CompetitionError('invalid', `You can only wear a ${kind} you have.`);
+      }
+    }
     let nickname = me.nickname!;
     if (update.nickname !== undefined) {
       nickname = tidyNickname(update.nickname);
@@ -313,8 +330,8 @@ export class CompetitionService {
       await this.options.store.apply({
         op: 'profile',
         nickname,
-        frame: me.frame,
-        title: me.title,
+        frame: update.frame === undefined ? me.frame : update.frame,
+        title: update.title === undefined ? me.title : update.title,
         inLeagues: update.inLeagues ?? me.in_leagues,
       });
     } catch (error) {
@@ -478,9 +495,10 @@ export class CompetitionService {
       if (bot === undefined) throw new CompetitionError('not_found', 'No player has that nickname.');
       return this.botProfile(bot, board[0]!.group_tier);
     }
-    const [badges, days] = await Promise.all([
+    const [badges, days, showcase] = await Promise.all([
       store.badges(row.member_id),
       row.is_me || row.following || row.followed_by ? store.streakDays(row.member_id) : Promise.resolve([]),
+      this.options.economy === true && store.showcase !== undefined ? store.showcase(row.member_id) : Promise.resolve(null),
     ]);
     return {
       nickname: row.nickname ?? wanted,
@@ -497,6 +515,14 @@ export class CompetitionService {
       following: row.following,
       followedBy: row.followed_by,
       blocked: row.blocked,
+      ...(showcase === null
+        ? {}
+        : {
+            showcase: {
+              leading: showcase.filter((entry) => entry.is_leading).map((entry) => entry.item_id),
+              items: showcase.map((entry) => entry.item_id),
+            },
+          }),
       ...(row.is_me ? { inLeagues: me.in_leagues, admin: await this.isAdmin() } : {}),
     };
   }
@@ -753,6 +779,15 @@ export class CompetitionService {
       createdAt: row.created_at,
       reports: row.reports,
     }));
+  }
+
+  /** Switches events on or off for everyone. */
+  async switchEvents(events: Partial<Record<'goldenHour' | 'sunday' | 'monthly' | 'boss', boolean>>): Promise<void> {
+    await this.needAdmin();
+    const names = { goldenHour: 'golden_hour', sunday: 'sunday', monthly: 'monthly', boss: 'boss' } as const;
+    for (const [key, enabled] of Object.entries(events) as Array<[keyof typeof names, boolean | undefined]>) {
+      if (enabled !== undefined) await this.options.store.apply({ op: 'admin_event', event: names[key], enabled });
+    }
   }
 
   async moderate(target: string, action: 'rename' | 'hide' | 'unhide' | 'resolve'): Promise<void> {

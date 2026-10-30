@@ -477,6 +477,42 @@ Mua không âm số dư, không mua trùng, mở rương một lần, tỉ lệ 
 seed cố định), trần +25% linh vật, tâm trạng linh vật, sửa streak, boss không
 đổi lịch FSRS, nâng cấp từ v18.
 
+### 3.10 Chủ dự án làm
+
+1. Supabase → SQL Editor: chạy `supabase/migrations/20261101090000_economy.sql`
+   (sau v18). Không cần khóa mới: dùng cùng `GAME_SIGNING_KEY`.
+2. Không cần biến môi trường mới. Sự kiện bật/tắt ở trang Quản trị.
+
+### 3.11 Đã làm (khác với kế hoạch ở đâu)
+
+- **Rương quay trên server bằng nguồn ngẫu nhiên an toàn của Node** (không phải
+  `gen_random_uuid` trong SQL), trước khi ký thay đổi; phần thưởng đã nhận thì
+  không nhận lại được, nên mỗi rương chỉ mở một lần. Không cần bảng `chests`:
+  rương là một phần thưởng chờ (`game_rewards`, kind `chest`).
+- Dữ liệu: `stardust_ledger`, `inventory`, `game_events`, cột
+  `game_state.stardust`; `game_commit` mới ghi thêm bụi sao, vật phẩm và từ chối
+  cả thay đổi nếu số dư âm. Linh vật, x2 XP, boss, bộ sưu tập nằm trong
+  `game_state.state`, nên không cần các bảng `pet_slots`, `active_pets`,
+  `pet_progress`, `active_boosts`, `boss_weeks`, `shop_days`.
+- **Thẻ chòm sao** mang tên 88 chòm sao của IAU (tên là dữ kiện); hình vẽ là
+  hoa văn sinh từ id thẻ, **không phải bản đồ sao**, nên repo không chứa dữ liệu
+  tọa độ hay đường nối có giấy phép GPL.
+- **Hiệu ứng** (lật thẻ, kiểu cảnh Moonrise) chưa làm.
+
+Mặc định tôi tự đặt (cần duyệt):
+
+| Điểm | Mặc định |
+|---|---|
+| Giá theo độ hiếm | thường 120 · hiếm 300 · sử thi 600 · huyền thoại 1.200 |
+| Đổi đồ trùng | thường 10 · hiếm 40 · sử thi 80 · huyền thoại 150 bụi sao |
+| Kỹ năng linh vật | cú đêm +10% · thỏ trăng +8% · cáo sao +5% và rương hiếm +2% · mèo mây +5% và combo giữ thêm 1 phút · cá voi đêm +7% · rồng sao nhỏ +10% |
+| Hình dạng linh vật | lên dạng 2/3/4 ở 7/30/100 ngày học cùng |
+| Boss | 40 máu; nhớ trừ 1, quên hồi 0,5; cần ít nhất 5 từ yếu; thắng lần đầu được danh hiệu "Diệt boss" |
+| Thử thách tháng | 1.000 câu trả lời trong tháng |
+| Rương theo ngày | chỉ các ngày đạt mục tiêu từ hôm qua trở đi (lịch sử cũ không thành rương) |
+| Bộ sưu tập | Hoàng đạo (600), Quanh cực Bắc (400), Con tàu Argo (300), Cuộc săn của Lạp Hộ (400), mỗi bộ kèm một danh hiệu |
+| Linh vật đầu tiên | người dùng tự chọn một trong 6 con |
+
 ---
 
 ## Giai đoạn 4 – Nhắc nhở (schema v20)

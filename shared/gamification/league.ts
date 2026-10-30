@@ -9,6 +9,7 @@
 import { addDays, calendarDateInTimeZone, type IsoDate } from '../dates.js';
 import { weekStartOf } from './engine.js';
 import { levelOf } from './levels.js';
+import { leagueStardust } from './economy.js';
 import { randomNickname } from './nickname.js';
 import { seededRandom } from './quests.js';
 
@@ -169,6 +170,12 @@ export function botLevel(bot: Bot): number {
 
 // ---- Ranking and settling ----
 
+/** Stardust a week's result gives (phase 3); only claimed where the database keeps stardust. */
+function stardustFor(rank: number, outcome: Outcome): { stardust?: number } {
+  const stardust = leagueStardust(rank, outcome);
+  return stardust > 0 ? { stardust } : {};
+}
+
 export interface Standing {
   /** A real member's account, or `bot:<seat>`. */
   id: string;
@@ -221,7 +228,7 @@ export interface SettledMember {
     tier: number;
     rank: number;
     outcome: Outcome;
-    xp?: number;
+    stardust?: number;
   };
 }
 
@@ -253,7 +260,7 @@ export function settleGroup(group: GroupToSettle, week: IsoDate): SettledMember[
         xp: standing.xp,
         outcome,
         tier,
-        reward: { week, from: group.tier, tier, rank: standing.rank, outcome },
+        reward: { week, from: group.tier, tier, rank: standing.rank, outcome, ...stardustFor(standing.rank, outcome) },
       };
     });
 }

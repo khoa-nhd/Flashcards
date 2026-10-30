@@ -5,15 +5,40 @@
  *
  * It only reads saved answers. Nothing here can change what is due.
  */
-import { createHmac, randomUUID } from 'node:crypto';
-import type { AnswerGame, GameResponse } from '../shared/api.js';
+import { createHmac, randomInt, randomUUID } from 'node:crypto';
+import { z } from 'zod';
+import type { AnswerGame, BossResponse, BuyRequest, CollectionResponse, GameResponse, ShopResponse } from '../shared/api.js';
+import { CARD_SETS, itemById, petById } from '../shared/gamification/catalog.js';
+import {
+  ALL_EVENTS,
+  ALWAYS,
+  BOOST_MS,
+  BOSS_HP,
+  BOSS_WORDS,
+  BOSS_XP,
+  MONTHLY_TARGET,
+  STARDUST,
+  bossHealth,
+  dailyShop,
+  goldenHour,
+  monthKey,
+  petEffects,
+  petForm,
+  petMood,
+  petSlots,
+  priceOf,
+  repairDays,
+  type EventSwitches,
+} from '../shared/gamification/economy.js';
 import { calendarDateInTimeZone, type IsoDate } from '../shared/dates.js';
 import { BADGES, type BadgeId, type BadgeMetrics } from '../shared/gamification/badges.js';
 import { streakOf } from '../shared/study-goals.js';
 import {
   INITIAL_STATE,
+  addItems,
   claim,
   isEmpty,
+  stateChange,
   sync,
   weekStartOf,
   type GameChange,
@@ -32,8 +57,22 @@ import { DatabaseError } from './supabase/supabase-database.js';
 import type { VocabularyCatalog } from './vocabulary-catalog.js';
 import type { VocabularyRepository } from './vocabulary-repository.js';
 
+/** Why a purchase or a choice of companions was refused. */
+export class GameError extends Error {
+  constructor(
+    public readonly failure: 'insufficient' | 'owned' | 'unavailable' | 'invalid',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'GameError';
+  }
+}
+
+/** A number in [0, 1) from a secure source: chests are drawn with it. */
+const secureRandom = () => randomInt(0, 2 ** 47) / 2 ** 47;
+
 /** Totals the badges read; the streak and the combo come from the engine. */
-export type GameMetrics = Omit<BadgeMetrics, 'longestStreak' | 'longestCombo'>;
+export type GameMetrics = Omit<BadgeMetrics, 'longestStreak' | 'longestCombo' | 'bosses'>;
 
 /** Where the game is kept. */
 export interface GameStore {
@@ -45,6 +84,10 @@ export interface GameStore {
   metrics(): Promise<GameMetrics>;
   /** Stores a change; `stale` when the game moved on since its snapshot. */
   commit(change: GameChange): Promise<'ok' | 'stale'>;
+  /** Phase 3 (version 19): which events are on. Absent where the economy is not kept. */
+  events?(): Promise<EventSwitches>;
+  /** Practice answers on the boss's words since a moment, remembered and forgotten. */
+  bossProgress?(words: readonly string[], from: string): Promise<{ correct: number; wrong: number }>;
 }
 
 // ---- The database store: every change is signed ----
@@ -79,6 +122,8 @@ function snapshotFromRows(rows: GameSnapshotRows): GameSnapshot {
       payload: row.payload as Reward['payload'],
       createdAt: row.created_at,
     })),
+    stardust: rows.state?.stardust ?? 0,
+    inventory: rows.inventory,
   };
 }
 
@@ -123,13 +168,29 @@ export function createDatabaseGameStore(database: VocabularyDatabase, account: s
         nightAnswers: row.night_answers,
       };
     },
+    ...(database.gameEvents === undefined
+      ? {}
+      : {
+          async events(): Promise<EventSwitches> {
+            const rows = await need(database.gameEvents).call(database);
+            const on = (event: string) => rows.find((row) => row.event === event)?.enabled ?? true;
+            return { goldenHour: on('golden_hour'), sunday: on('sunday'), monthly: on('monthly'), boss: on('boss') };
+          },
+          async bossProgress(words: readonly string[], from: string) {
+            const rows = await need(database.competitionCall).call(database, 'boss_progress', { p_words: [...words], p_from: from });
+            const row = z.object({ correct: z.coerce.number().int(), wrong: z.coerce.number().int() }).safeParse(rows[0]);
+            if (!row.success) throw new DatabaseError('unavailable', 'The database returned the boss in an unexpected shape.');
+            return row.data;
+          },
+        }),
     async commit(change) {
       const payload = JSON.stringify({ user: account, ...change });
       try {
         const result = await need(database.gameCommit).call(database, payload, signGameChange(payload, signingKey));
         return result.outcome;
       } catch (error) {
-        // The only refusal a change signed here can meet is a key the database does not share.
+        if (error instanceof DatabaseError && error.code === '23514') throw new GameError('insufficient', 'Not enough stardust.');
+        // The only other refusal a change signed here can meet is a key the database does not share.
         if (error instanceof DatabaseError && error.failure === 'forbidden') {
           throw new DatabaseError(
             'forbidden',
@@ -150,9 +211,16 @@ export interface MemoryGameStore extends GameStore {
   xpBetween(from: string, to: string): number;
   /** Adds a reward from outside the game, as a league or a challenge does. */
   give(reward: Omit<Reward, 'id' | 'createdAt'>): void;
+  /** Switches an event, as the admin page does. */
+  setEvent(event: keyof EventSwitches, enabled: boolean): void;
 }
 
-export function createMemoryGameStore(source: { answers(): AnswerEvent[]; metrics(): GameMetrics }): MemoryGameStore {
+export function createMemoryGameStore(source: {
+  answers(): AnswerEvent[];
+  metrics(): GameMetrics;
+  /** Practice answers, for the weekly boss. */
+  practice?(): Array<{ id: string; correct: boolean; at: string }>;
+}): MemoryGameStore {
   let version = 0;
   let state: GameStateData = { ...INITIAL_STATE };
   const ledger = new Map<string, { source: string; amount: number; reason: string; on: IsoDate; at: string }>();
@@ -160,6 +228,9 @@ export function createMemoryGameStore(source: { answers(): AnswerEvent[]; metric
   const badges = new Map<string, { badge: BadgeId; tier: number; earnedAt: string }>();
   const freezes = new Map<string, { id: string; grantedOn: IsoDate; usedOn: IsoDate | null }>();
   const rewards = new Map<string, Reward & { claimed: boolean }>();
+  const stardust = new Map<string, number>();
+  const inventory = new Map<string, string>();
+  const events: EventSwitches = { ...ALL_EVENTS };
   const key = (quest: Pick<Quest, 'period' | 'start' | 'slot'>) => `${quest.period}:${quest.start}:${quest.slot}`;
 
   return {
@@ -184,7 +255,20 @@ export function createMemoryGameStore(source: { answers(): AnswerEvent[]; metric
         rewards: [...rewards.values()]
           .filter((reward) => !reward.claimed)
           .map((reward) => ({ id: reward.id, kind: reward.kind, payload: reward.payload, createdAt: reward.createdAt })),
+        stardust: [...stardust.values()].reduce((sum, amount) => sum + amount, 0),
+        inventory: [...inventory.keys()],
       };
+    },
+    async events() {
+      return { ...events };
+    },
+    setEvent(event, enabled) {
+      events[event] = enabled;
+    },
+    async bossProgress(words, from) {
+      const wanted = new Set(words);
+      const answers = (source.practice?.() ?? []).filter((answer) => wanted.has(answer.id) && Date.parse(answer.at) >= Date.parse(from));
+      return { correct: answers.filter((answer) => answer.correct).length, wrong: answers.filter((answer) => !answer.correct).length };
     },
     async pendingAnswers(limit) {
       return source
@@ -206,6 +290,11 @@ export function createMemoryGameStore(source: { answers(): AnswerEvent[]; metric
     },
     async commit(change) {
       if (change.version !== version) return 'stale';
+      const fresh = change.stardust.filter((entry) => !stardust.has(`${entry.source}:${entry.sourceId}`));
+      const balance = [...stardust.values(), ...fresh.map((entry) => entry.amount)].reduce((sum, amount) => sum + amount, 0);
+      if (balance < 0) throw new GameError('insufficient', 'Not enough stardust.');
+      for (const entry of fresh) stardust.set(`${entry.source}:${entry.sourceId}`, entry.amount);
+      for (const entry of change.inventory) if (!inventory.has(entry.item)) inventory.set(entry.item, entry.source);
       for (const entry of change.ledger) {
         const id = `${entry.source}:${entry.sourceId}`;
         if (!ledger.has(id)) ledger.set(id, { source: entry.source, amount: entry.amount, reason: entry.reason, on: entry.on, at: entry.at });
@@ -247,6 +336,12 @@ export interface GameServiceOptions {
   timeZone: string;
   now?: () => Date;
   newId?: () => string;
+  /** Phase 3 is kept (schema version 19 and a store that keeps it). */
+  economy?: boolean;
+  /** The words the weekly boss is made of, weakest first (Weak words' order). */
+  weakWords?: () => Promise<Array<{ id: string; word: string }>>;
+  /** Draws chests; a secure source unless a test gives its own. */
+  random?: () => number;
 }
 
 /** Answers counted per round; a long history is counted over several rounds. */
@@ -301,6 +396,7 @@ export class GameService {
     const weekStart = weekStartOf(today);
     const facts = await this.facts(options);
     const metrics = options.badges === true ? await store.metrics() : null;
+    const economy = await this.economyContext();
 
     for (let round = 0; round < MAX_ROUNDS; round += 1) {
       let answers: AnswerEvent[] = [];
@@ -324,6 +420,7 @@ export class GameService {
           // Without fresh totals only the streak and combo badges, which the engine knows itself, can be reached.
           metrics: metrics ?? { wordsStudied: 0, mastered: 0, reviews: 0, practice: 0, durationMs: 0, nightAnswers: 0 },
           newId: this.newId,
+          economy,
         });
         if (isEmpty(change, snapshot.state)) break;
         if ((await store.commit(change)) === 'ok') {
@@ -346,6 +443,7 @@ export class GameService {
         ...metrics,
         longestStreak: streakOf(facts.metDays, today, facts.metToday, covered).longest,
         longestCombo: this.last.state.longestCombo,
+        bosses: this.last.state.bossWins,
       };
     }
     return this.last;
@@ -399,33 +497,283 @@ export class GameService {
     const { store } = this.options;
     const today = this.today();
     const weekStart = weekStartOf(today);
+    let opened: GameResponse['opened'] = [];
     for (let attempt = 0; attempt < RETRIES; attempt += 1) {
       const snapshot = await store.snapshot(today, weekStart);
       const wanted = ids === 'all' ? snapshot.rewards.map((reward) => reward.id) : ids;
-      const change = claim(snapshot, wanted, this.now().toISOString(), today, this.newId);
+      const random = this.economyOn() ? (this.options.random ?? secureRandom) : null;
+      const { opened: drawn, ...change } = claim(snapshot, wanted, this.now().toISOString(), today, this.newId, random);
       if (change.claimed.length === 0) break;
-      if ((await store.commit(change)) === 'ok') break;
+      // A chest is drawn here, before the change is signed, and stored with it: claiming it again finds it claimed.
+      if ((await store.commit(change)) === 'ok') {
+        opened = drawn;
+        break;
+      }
     }
-    return this.state();
+    return { ...(await this.state()), opened };
   }
 
-  async saveSettings(settings: { earlyDays: number }): Promise<GameResponse> {
+  // ---- The economy (phase 3) ----
+
+  /** The events read by the last count, for the page. */
+  private lastEvents: EventSwitches | null = null;
+
+  private economyOn(): boolean {
+    return this.options.economy === true && this.options.store.events !== undefined;
+  }
+
+  private async economyContext(): Promise<{ timeZone: string; events: EventSwitches } | null> {
+    if (!this.economyOn()) return null;
+    this.lastEvents = await this.options.store.events!();
+    return { timeZone: this.options.timeZone, events: this.lastEvents };
+  }
+
+  private needEconomy(): void {
+    if (!this.economyOn()) throw new GameError('unavailable', 'The shop and collection need the latest database update (version 19).');
+  }
+
+  /**
+   * Stores a change worked out from a fresh snapshot, working it out again if
+   * the game moved on meanwhile. `make` returns null when there is nothing to do.
+   */
+  private async change(make: (snapshot: GameSnapshot) => GameChange | null): Promise<void> {
     const { store } = this.options;
     const today = this.today();
     for (let attempt = 0; attempt < RETRIES; attempt += 1) {
       const snapshot = await store.snapshot(today, weekStartOf(today));
-      const change: GameChange = {
-        version: snapshot.version,
-        state: { ...snapshot.state, earlyDays: settings.earlyDays },
-        ledger: [],
-        quests: [],
-        badges: [],
-        freezes: [],
-        rewards: [],
-        claimed: [],
-      };
-      if ((await store.commit(change)) === 'ok') break;
+      const change = make(snapshot);
+      if (change === null || (await store.commit(change)) === 'ok') return;
     }
+    throw new GameError('unavailable', 'The game changed meanwhile; try again.');
+  }
+
+  async shop(): Promise<ShopResponse> {
+    const today = this.today();
+    if (!this.economyOn()) {
+      return { available: false, reason: 'The shop needs the latest database update (version 19).', today, stardust: 0, items: [], services: [] };
+    }
+    const snapshot = await this.sync();
+    const owned = new Set(snapshot.inventory);
+    const facts = await this.facts({});
+    const covered = snapshot.freezes.flatMap((freeze) => (freeze.usedOn === null ? [] : [freeze.usedOn]));
+    const held = snapshot.freezes.filter((freeze) => freeze.usedOn === null).length;
+    return {
+      available: true,
+      reason: null,
+      today,
+      stardust: snapshot.stardust,
+      items: dailyShop(this.options.account, today).map((id) => ({ item: id, price: priceOf(itemById(id)!), owned: owned.has(id) })),
+      services: [
+        { kind: 'freeze', price: ALWAYS.freeze, blocked: held >= FREEZE_MAX ? 'held' : null },
+        { kind: 'boost', price: ALWAYS.boost, blocked: null },
+        { kind: 'repair', price: ALWAYS.repair, blocked: repairDays(facts.metDays, covered, today).length === 0 ? 'nothing' : null },
+        { kind: 'slot', price: ALWAYS.slot, blocked: owned.has('slot_bought') ? 'owned' : null },
+      ],
+    };
+  }
+
+  async buy(request: BuyRequest): Promise<ShopResponse> {
+    this.needEconomy();
+    const today = this.today();
+    const now = this.now();
+    const at = now.toISOString();
+    const facts = await this.facts({});
+    await this.sync(facts);
+    await this.change((snapshot) => {
+      const owned = new Set(snapshot.inventory);
+      const change = stateChange(snapshot, { ...INITIAL_STATE, ...snapshot.state });
+      const pay = (price: number, reason: string) => {
+        if (snapshot.stardust < price) throw new GameError('insufficient', 'Not enough stardust.');
+        change.stardust.push({ source: 'shop', sourceId: this.newId(), amount: -price, reason, at });
+      };
+      switch (request.kind) {
+        case 'item': {
+          const item = itemById(request.item);
+          if (item === undefined || !dailyShop(this.options.account, today).includes(item.id)) {
+            throw new GameError('invalid', 'That is not for sale today.');
+          }
+          if (owned.has(item.id)) throw new GameError('owned', 'You already have that.');
+          pay(priceOf(item), item.id);
+          addItems(change, owned, [item.id], 'shop', at, this.newId);
+          break;
+        }
+        case 'freeze': {
+          if (snapshot.freezes.filter((freeze) => freeze.usedOn === null).length >= FREEZE_MAX) {
+            throw new GameError('owned', 'You already hold as many streak freezes as you can.');
+          }
+          pay(ALWAYS.freeze, 'freeze');
+          change.freezes.push({ id: this.newId(), grantedOn: today, usedOn: null });
+          break;
+        }
+        case 'boost': {
+          pay(ALWAYS.boost, 'boost');
+          const from = Math.max(now.getTime(), snapshot.state.boostUntil === null ? 0 : Date.parse(snapshot.state.boostUntil));
+          change.state = { ...change.state, boostUntil: new Date(from + BOOST_MS).toISOString() };
+          break;
+        }
+        case 'repair': {
+          const covered = snapshot.freezes.flatMap((freeze) => (freeze.usedOn === null ? [] : [freeze.usedOn]));
+          const days = repairDays(facts.metDays, covered, today);
+          if (days.length === 0) throw new GameError('invalid', 'There is no broken streak to repair.');
+          pay(ALWAYS.repair, 'repair');
+          // A repair is freezes spent on the missed days after the fact.
+          for (const day of days) change.freezes.push({ id: this.newId(), grantedOn: today, usedOn: day });
+          break;
+        }
+        case 'slot': {
+          if (owned.has('slot_bought')) throw new GameError('owned', 'You already bought that slot.');
+          pay(ALWAYS.slot, 'slot');
+          change.inventory.push({ item: 'slot_bought', source: 'shop' });
+          break;
+        }
+      }
+      return change;
+    });
+    return this.shop();
+  }
+
+  async collection(): Promise<CollectionResponse> {
+    if (!this.economyOn()) {
+      return {
+        available: false,
+        reason: 'The collection needs the latest database update (version 19).',
+        stardust: 0,
+        owned: [],
+        slots: 1,
+        leading: [],
+        petDays: {},
+        sets: [],
+        theme: null,
+      };
+    }
+    const snapshot = await this.sync();
+    const owned = new Set(snapshot.inventory);
+    const pets = { ...INITIAL_STATE.pets, ...snapshot.state.pets };
+    return {
+      available: true,
+      reason: null,
+      stardust: snapshot.stardust,
+      owned: snapshot.inventory,
+      slots: petSlots(levelOf(snapshot.totalXp).level, pets, owned),
+      leading: pets.active,
+      petDays: pets.days,
+      sets: CARD_SETS.map((set) => ({
+        id: set.id,
+        have: set.cards.filter((card) => owned.has(card)).length,
+        total: set.cards.length,
+        done: snapshot.state.setsDone.includes(set.id),
+      })),
+      theme: snapshot.state.theme,
+    };
+  }
+
+  /** Every account is given one companion of its choosing, once. */
+  async starter(pet: string): Promise<CollectionResponse> {
+    this.needEconomy();
+    if (petById(pet) === undefined) throw new GameError('invalid', 'There is no such companion.');
+    await this.change((snapshot) => {
+      if (snapshot.inventory.some((item) => petById(item) !== undefined)) throw new GameError('owned', 'Your first companion is already chosen.');
+      const state = { ...INITIAL_STATE, ...snapshot.state };
+      const change = stateChange(snapshot, { ...state, pets: { ...state.pets, active: [pet] } });
+      change.inventory.push({ item: pet, source: 'starter' });
+      return change;
+    });
+    return this.collection();
+  }
+
+  /** Which companions lead, and the colour theme: only what is owned, and no more companions than slots. */
+  async equip(choice: { pets?: string[]; theme?: string | null }): Promise<CollectionResponse> {
+    this.needEconomy();
+    await this.change((snapshot) => {
+      const owned = new Set(snapshot.inventory);
+      const state = { ...INITIAL_STATE, ...snapshot.state };
+      let next = state;
+      if (choice.pets !== undefined) {
+        const pets = [...new Set(choice.pets)];
+        if (pets.some((pet) => petById(pet) === undefined || !owned.has(pet))) throw new GameError('invalid', 'You can only lead companions you have.');
+        if (pets.length > petSlots(levelOf(snapshot.totalXp).level, state.pets, owned)) throw new GameError('invalid', 'Not enough companion slots.');
+        next = { ...next, pets: { ...state.pets, active: pets } };
+      }
+      if (choice.theme !== undefined) {
+        if (choice.theme !== null && (itemById(choice.theme)?.kind !== 'theme' || !owned.has(choice.theme))) {
+          throw new GameError('invalid', 'You can only use a theme you have.');
+        }
+        next = { ...next, theme: choice.theme };
+      }
+      return stateChange(snapshot, next);
+    });
+    return this.collection();
+  }
+
+  /** Which events are on, for the admin page. */
+  async events(): Promise<EventSwitches> {
+    this.needEconomy();
+    return this.options.store.events!();
+  }
+
+  /** Whether the account owns an item: what may be worn on the public profile. */
+  async owns(item: string): Promise<boolean> {
+    if (!this.economyOn()) return false;
+    const today = this.today();
+    return (await this.options.store.snapshot(today, weekStartOf(today))).inventory.includes(item);
+  }
+
+  /**
+   * This week's boss: the account's weakest words, beaten with practice. Its
+   * health is worked out from the practice answers on its words, so a
+   * schedule is never touched; beating it gives its reward once.
+   */
+  async boss(): Promise<BossResponse> {
+    const today = this.today();
+    const week = weekStartOf(today);
+    const off = (reason: string): BossResponse => ({ available: false, reason, week, words: [], hp: BOSS_HP, max: BOSS_HP, correct: 0, wrong: 0, won: false });
+    if (!this.economyOn() || this.options.store.bossProgress === undefined) return off('The weekly boss needs the latest database update (version 19).');
+    const events = await this.options.store.events!();
+    if (!events.boss) return off('The weekly boss is switched off this week.');
+    let snapshot = await this.sync();
+    if (snapshot.state.boss?.week !== week) {
+      const weakest = ((await this.options.weakWords?.()) ?? []).slice(0, BOSS_WORDS);
+      if (weakest.length < 5) return off('The boss needs at least five weak words to be made of.');
+      await this.change((fresh) =>
+        fresh.state.boss?.week === week ? null : stateChange(fresh, { ...INITIAL_STATE, ...fresh.state, boss: { week, words: weakest.map((word) => word.id), won: false } }),
+      );
+      snapshot = await this.options.store.snapshot(today, week);
+    }
+    const boss = snapshot.state.boss!;
+    const from = zonedMidnight(week, this.options.timeZone);
+    const { correct, wrong } = await this.options.store.bossProgress(boss.words, from);
+    const hp = bossHealth(correct, wrong);
+    if (hp === 0 && !boss.won) {
+      await this.change((fresh) => {
+        if (fresh.state.boss?.won !== false || fresh.state.boss.week !== week) return null;
+        const state = { ...INITIAL_STATE, ...fresh.state };
+        const change = stateChange(fresh, { ...state, boss: { ...boss, won: true }, bossWins: state.bossWins + 1 });
+        const at = this.now().toISOString();
+        change.rewards.push({ id: this.newId(), kind: 'boss', payload: { xp: BOSS_XP, stardust: STARDUST.boss, week }, createdAt: at });
+        addItems(change, new Set(fresh.inventory), ['title_boss'], `boss:${week}`, at, this.newId);
+        return change;
+      });
+      // The boss badge is counted from the wins.
+      await this.sync({ badges: true });
+    }
+    const names = new Map(((await this.options.weakWords?.()) ?? []).map((word) => [word.id, word.word]));
+    const catalog = this.options.catalog === undefined ? [] : (await this.options.catalog.listEntries()).entries;
+    for (const entry of catalog) if (!names.has(entry.id)) names.set(entry.id, entry.word);
+    return {
+      available: true,
+      reason: null,
+      week,
+      words: boss.words.flatMap((id) => (names.has(id) ? [{ id, word: names.get(id)! }] : [])),
+      hp,
+      max: BOSS_HP,
+      correct,
+      wrong,
+      won: hp === 0,
+    };
+  }
+
+  async saveSettings(settings: { earlyDays: number }): Promise<GameResponse> {
+    await this.change((snapshot) => stateChange(snapshot, { ...snapshot.state, earlyDays: settings.earlyDays }));
     return this.state();
   }
 
@@ -474,8 +822,43 @@ export class GameService {
       checkin: { day: snapshot.state.checkin.day, lastOn: snapshot.state.checkin.lastOn },
       earlyDays: snapshot.state.earlyDays,
       rewards: snapshot.rewards.map((reward) => ({ ...reward, payload: { ...reward.payload } })),
+      economy: this.economyView(snapshot),
     };
   }
+
+  private economyView(snapshot: GameSnapshot): GameResponse['economy'] {
+    if (!this.economyOn() || this.lastEvents === null) return null;
+    const today = this.today();
+    const owned = new Set(snapshot.inventory);
+    const pets = { ...INITIAL_STATE.pets, ...snapshot.state.pets };
+    const events = this.lastEvents;
+    const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: this.options.timeZone, hour: '2-digit', hourCycle: 'h23' }).format(this.now()));
+    const golden = events.goldenHour ? goldenHour(this.options.account, today) : null;
+    const month = snapshot.state.month?.key === monthKey(today) ? snapshot.state.month : null;
+    return {
+      stardust: snapshot.stardust,
+      pets: pets.active.map((id) => ({ id, days: pets.days[id] ?? 0, form: petForm(pets.days[id] ?? 0), mood: petMood(snapshot.state.lastActiveOn, today) })),
+      slots: petSlots(levelOf(snapshot.totalXp).level, pets, owned),
+      petBonus: petEffects(pets.active).xpPercent,
+      theme: snapshot.state.theme,
+      boostUntil:
+        snapshot.state.boostUntil !== null && Date.parse(snapshot.state.boostUntil) > this.now().getTime() ? snapshot.state.boostUntil : null,
+      goldenHour: golden,
+      goldenNow: golden !== null && hour === golden,
+      sunday: events.sunday && new Date(`${today}T00:00:00Z`).getUTCDay() === 0,
+      month: events.monthly ? { count: month?.count ?? 0, target: MONTHLY_TARGET, done: month?.done ?? false } : null,
+    };
+  }
+}
+
+/** Midnight at the start of a day in a zone, as an instant. */
+export function zonedMidnight(day: IsoDate, timeZone: string): string {
+  // The zone's offset at noon that day, applied to midnight (no zone the app offers moves its clock at midnight).
+  const noon = new Date(`${day}T12:00:00Z`);
+  const local = new Date(noon.toLocaleString('en-US', { timeZone }));
+  const utc = new Date(noon.toLocaleString('en-US', { timeZone: 'UTC' }));
+  const offset = local.getTime() - utc.getTime();
+  return new Date(Date.parse(`${day}T00:00:00Z`) - offset).toISOString();
 }
 
 /** The answer when the game cannot be kept, with why, so the page can say so. */

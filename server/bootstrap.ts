@@ -110,7 +110,11 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
   });
   // The sample data has no account either, so its goals and its game are kept in memory too.
   const goalStore = createStudyGoalStore();
-  const gameStore = createMemoryGameStore({ answers: () => repository.gameAnswers(), metrics: () => repository.gameMetrics() });
+  const gameStore = createMemoryGameStore({
+    answers: () => repository.gameAnswers(),
+    metrics: () => repository.gameMetrics(),
+    practice: () => repository.gamePractice(),
+  });
   const game = new GameService({
     store: gameStore,
     account: 'sample',
@@ -118,6 +122,8 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     catalog: repository,
     goals: () => goalStore.get() ?? SUGGESTED_STUDY_GOALS,
     timeZone,
+    economy: true,
+    weakWords: async () => (await analytics.weakWords()).words.map((word) => ({ id: word.id, word: word.word })),
   });
   const studyGoals = fsrsOnly
     ? new StudyGoalsService({
@@ -135,12 +141,20 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
       totalXp: () => gameStore.xpBetween('1970-01-01T00:00:00Z', '9999-01-01T00:00:00Z'),
       metDays: () => [],
       give: (reward) => gameStore.give(reward),
+      setEvent: (event, enabled) => gameStore.setEvent(event, enabled),
+      owned: async () => {
+        const today = calendarDateInTimeZone(new Date(), timeZone);
+        const snapshot = await gameStore.snapshot(today, today);
+        return { items: snapshot.inventory, leading: snapshot.state.pets?.active ?? [] };
+      },
     }),
     account: 'sample',
     // The sample data has no sign-in, so its moderation page is open to try.
     email: 'sample@example.test',
     adminEmails: ['sample@example.test'],
     timeZone,
+    owns: (item) => game.owns(item),
+    economy: true,
   });
   return { app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game, competition }), config };
 }

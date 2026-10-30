@@ -75,6 +75,28 @@
 }
 
 /* The setting in the app overrides the system preference in one direction only: less motion. */
+/* Colour themes bought in the shop (phase 3): only the accent changes. */
+:root[data-accent='theme_dawn'] {
+  --accent: #f4b8c8;
+  --accent-hover: #f8ccd8;
+  --accent-soft: rgb(244 184 200 / 0.12);
+}
+:root[data-accent='theme_aurora'] {
+  --accent: #86dcb6;
+  --accent-hover: #a4e8c9;
+  --accent-soft: rgb(134 220 182 / 0.12);
+}
+:root[data-accent='theme_ember'] {
+  --accent: #f0b07a;
+  --accent-hover: #f5c69c;
+  --accent-soft: rgb(240 176 122 / 0.12);
+}
+:root[data-accent='theme_lilac'] {
+  --accent: #cfc5ff;
+  --accent-hover: #ddd6ff;
+  --accent-soft: rgb(207 197 255 / 0.12);
+}
+
 :root[data-reduce-motion='true'] *,
 :root[data-reduce-motion='true'] *::before,
 :root[data-reduce-motion='true'] *::after {

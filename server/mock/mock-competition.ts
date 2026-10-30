@@ -33,6 +33,9 @@ export interface MockCompetitionSource {
   totalXp(): number;
   metDays(): IsoDate[];
   give(reward: Omit<Reward, 'id' | 'createdAt'>): void;
+  setEvent?(event: 'goldenHour' | 'sunday' | 'monthly' | 'boss', enabled: boolean): void;
+  /** The sample account's items and leading companions. */
+  owned?(): Promise<{ items: string[]; leading: string[] }>;
   now?: () => Date;
 }
 
@@ -259,6 +262,12 @@ export function createMemoryCompetitionStore(source: MockCompetitionSource): Com
           for (const report of reports) if (report.target === other) report.resolved = true;
           return null;
         }
+        case 'admin_event': {
+          const names = { golden_hour: 'goldenHour', sunday: 'sunday', monthly: 'monthly', boss: 'boss' } as const;
+          const event = names[String(op.event) as keyof typeof names];
+          if (event !== undefined) source.setEvent?.(event, op.enabled !== false);
+          return null;
+        }
         case 'admin_resolve':
           for (const report of reports) if (report.target === other) report.resolved = true;
           return null;
@@ -407,6 +416,21 @@ export function createMemoryCompetitionStore(source: MockCompetitionSource): Com
 
     async isAdmin() {
       return true;
+    },
+
+    async showcase(member) {
+      if (member === me) {
+        const owned = (await source.owned?.()) ?? { items: [], leading: [] };
+        return owned.items.map((item) => ({ item_id: item, is_leading: owned.leading.includes(item) }));
+      }
+      // The first sample player leads a companion and has a few cards.
+      return member === FRIEND_ONE
+        ? [
+            { item_id: 'pet_whale', is_leading: true },
+            { item_id: 'card_orion', is_leading: false },
+            { item_id: 'card_lyra', is_leading: false },
+          ]
+        : [];
     },
 
     async reports() {

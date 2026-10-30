@@ -12,7 +12,8 @@ export type BadgeId =
   | 'streak'
   | 'hours'
   | 'night_owl'
-  | 'combo';
+  | 'combo'
+  | 'boss';
 
 export interface BadgeMetrics {
   wordsStudied: number;
@@ -25,6 +26,8 @@ export interface BadgeMetrics {
   /** Answers given from 23:00 to 03:59, the account's own time. */
   nightAnswers: number;
   longestCombo: number;
+  /** Weekly bosses beaten (phase 3). */
+  bosses: number;
 }
 
 export interface BadgeDefinition {
@@ -45,6 +48,7 @@ export const BADGES: readonly BadgeDefinition[] = [
   { id: 'hours', tiers: [1, 10, 100, 500], value: (m) => Math.floor(m.durationMs / HOUR_MS) },
   { id: 'night_owl', tiers: [10, 50], value: (m) => m.nightAnswers },
   { id: 'combo', tiers: [25, 50, 100, 250], value: (m) => m.longestCombo },
+  { id: 'boss', tiers: [1, 5, 20, 52], value: (m) => m.bosses },
 ];
 
 export const badgeById = (id: string): BadgeDefinition | undefined => BADGES.find((badge) => badge.id === id);

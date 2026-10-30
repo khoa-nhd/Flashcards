@@ -26,7 +26,8 @@ import {
 } from '../components/ui.js';
 import { useRemote } from '../hooks/useRemote.js';
 import { ApiError } from '../lib/api-client.js';
-import { badgeName, leagueName, tierName } from '../lib/game-text.js';
+import { badgeName, itemName, leagueName, tierName } from '../lib/game-text.js';
+import { CardArt, PetArt, frameRing } from '../components/Collectibles.js';
 import { pick, type UiLanguage } from '../lib/i18n.js';
 import { ROUTES, useLocation } from '../lib/router.js';
 
@@ -289,11 +290,16 @@ export function ProfilePage() {
       ) : (
         <div className="flex flex-col gap-5">
           <section className={`${CARD} pool pool-top flex flex-col items-center gap-4 p-6 text-center`}>
-            <span className="flex size-20 items-center justify-center rounded-full border-2 border-accent/60 bg-paper/60 font-serif text-3xl font-semibold text-ink">
+            <span
+              className={`flex size-20 items-center justify-center rounded-full bg-paper/60 font-serif text-3xl font-semibold text-ink ${
+                data!.frame === null ? 'border-2 border-accent/60' : frameRing(data!.frame)
+              }`}
+            >
               {[...data!.nickname][0]?.toUpperCase()}
             </span>
             <div className="flex flex-col items-center gap-1.5">
               <h2 className="font-serif text-2xl font-semibold text-ink">{data!.nickname}</h2>
+              {data!.title !== null && <span className="text-xs font-semibold uppercase tracking-[0.14em] text-accent">{itemName(language, data!.title)}</span>}
               <span className="flex flex-wrap items-center justify-center gap-2 text-sm text-muted">
                 Level {data!.level} <TierBadge tier={data!.tier} />
               </span>
@@ -328,6 +334,39 @@ export function ProfilePage() {
               !data!.limited && <Actions profile={data!} language={language} reload={profile.reload} />
             )}
           </section>
+
+          {data!.showcase !== undefined && data!.showcase.items.length > 0 && (
+            <section className={`${CARD} flex flex-col gap-3 p-5`}>
+              <h2 className={SECTION_TITLE}>{pick(language, 'Showcase', 'Tủ trưng bày')}</h2>
+              {data!.showcase.leading.length > 0 && (
+                <ul className="flex flex-wrap gap-2">
+                  {data!.showcase.leading.map((pet) => (
+                    <li key={pet} className="flex flex-col items-center gap-1 text-xs text-muted">
+                      <PetArt id={pet} form={2} className="size-16" />
+                      {itemName(language, pet)}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <p className={HELP}>
+                {pick(
+                  language,
+                  `${data!.showcase.items.filter((id) => id.startsWith('card_')).length} of 88 constellations collected`,
+                  `Đã sưu tầm ${data!.showcase.items.filter((id) => id.startsWith('card_')).length}/88 chòm sao`,
+                )}
+              </p>
+              <ul className="grid grid-cols-4 gap-2 sm:grid-cols-8">
+                {data!.showcase.items
+                  .filter((id) => id.startsWith('card_'))
+                  .slice(0, 16)
+                  .map((id) => (
+                    <li key={id} title={itemName(language, id)}>
+                      <CardArt id={id} className="h-12 w-full" />
+                    </li>
+                  ))}
+              </ul>
+            </section>
+          )}
 
           {data!.badges.length > 0 && (
             <section className={`${CARD} p-5`}>

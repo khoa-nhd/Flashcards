@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { RECENTLY_ADDED_DAYS, pageIdSchema, type PracticeResponse, type VocabularyEntry } from '../../shared/api.js';
 import { addDays, compareDates } from '../../shared/dates.js';
 import {
@@ -37,8 +37,8 @@ import { ROUTES, buildHref, openWord, useLocation } from '../lib/router.js';
 import { SPEECH_LANGUAGES, speechAvailable, type SpeechLanguage } from '../lib/speech.js';
 
 const SOURCES = ['due', 'weak', 'recent', 'all'] as const;
-/** One of the built-in sets, or one collection. */
-type Source = (typeof SOURCES)[number] | `collection:${string}`;
+/** One of the built-in sets, the weekly boss's words, or one collection. */
+type Source = (typeof SOURCES)[number] | 'boss' | `collection:${string}`;
 
 const SOURCE_LABELS: Record<(typeof SOURCES)[number], string> = {
   due: 'Words due for review',
@@ -57,6 +57,7 @@ function sourceFromQuery(query: URLSearchParams): Source {
   const collection = query.get('collection');
   if (collection !== null && pageIdSchema.safeParse(collection).success) return `collection:${collection}`;
   const source = query.get('source');
+  if (source === 'boss') return 'boss';
   return isSource(source) ? source : 'due';
 }
 
@@ -120,6 +121,9 @@ export function PracticePage() {
   });
   const [source, setSource] = useState<Source>(() => sourceFromQuery(query));
   const { collections } = useLibrary();
+  // The weekly boss's words, asked for only when practising against it (phase 3).
+  const bossLoad = useCallback(() => (source === 'boss' ? api.fetchBoss() : Promise.resolve(null)), [api, source]);
+  const boss = useRemote(bossLoad, 'Could not load the weekly boss.');
   const [length, setLength] = useState<number>(10);
   const [run, setRun] = useState<Run | null>(null);
   const [finished, setFinished] = useState<FinishedState | null>(null);
@@ -163,6 +167,7 @@ export function PracticePage() {
         return compareDates(entry.dateAdded, addDays(today, -(RECENTLY_ADDED_DAYS - 1))) >= 0 && compareDates(entry.dateAdded, today) <= 0;
       }
       if (source === 'weak') return weak.data?.words.some((word) => word.id === entry.id) ?? false;
+      if (source === 'boss') return boss.data?.words.some((word) => word.id === entry.id) ?? false;
       if (source.startsWith('collection:')) {
         const wanted = source.slice('collection:'.length);
         return collections.find((collection) => collection.id === wanted)?.wordIds.includes(entry.id) ?? false;
@@ -170,7 +175,7 @@ export function PracticePage() {
       return true;
     });
     return entries.map(toPracticeWord);
-  }, [state.entries, source, today, weak.data, collections]);
+  }, [state.entries, source, today, weak.data, collections, boss.data]);
 
   // Prioritise words that haven't been practised yet (totalAnswers === 0)
   const sortedCandidates = useMemo(() => {
@@ -654,6 +659,7 @@ export function PracticePage() {
                     value={source}
                     onChange={(event) => setSource(event.target.value as Source)}
                   >
+                    {source === 'boss' && <option value="boss">The weekly boss&rsquo;s words</option>}
                     {SOURCES.map((key) => (
                       <option key={key} value={key} disabled={key === 'weak' && weak.status === 'failed'}>
                         {SOURCE_LABELS[key]}

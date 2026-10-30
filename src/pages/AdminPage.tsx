@@ -4,7 +4,7 @@
  * own list of admins also names; the page itself decides nothing.
  */
 import { useState } from 'react';
-import type { AdminReport } from '../../shared/api.js';
+import type { AdminReport, GameEvents } from '../../shared/api.js';
 import { useApp, useUiLanguage } from '../app-context.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { Spinner } from '../components/Spinner.js';
@@ -62,6 +62,42 @@ function ReportRow({ report, language, onDone }: { report: AdminReport; language
   );
 }
 
+const EVENT_LABELS: Record<keyof GameEvents, [string, string]> = {
+  goldenHour: ['Golden hour (double XP for an hour each evening)', 'Giờ vàng (x2 XP một giờ mỗi tối)'],
+  sunday: ['Sunday (+50% XP all day)', 'Chủ nhật (+50% XP cả ngày)'],
+  monthly: ['Monthly challenge', 'Thử thách tháng'],
+  boss: ['Weekly boss', 'Boss tuần'],
+};
+
+/** Events on or off for everyone (phase 3). Hidden where the database keeps none. */
+function Events({ language }: { language: UiLanguage }) {
+  const { api, toasts } = useApp();
+  const events = useRemote(api.fetchEvents, 'Could not load the events.');
+  const [busy, setBusy] = useState(false);
+  if (events.status !== 'ready') return null;
+  const save = async (key: keyof GameEvents, enabled: boolean) => {
+    setBusy(true);
+    try {
+      events.adopt(await api.saveEvents({ [key]: enabled }));
+    } catch (cause) {
+      toasts.show({ message: cause instanceof ApiError ? cause.message : pick(language, 'That did not work.', 'Không thực hiện được.') });
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className={`${CARD} mb-5 flex flex-col gap-3 p-5`}>
+      <h2 className="text-sm font-semibold text-ink">{pick(language, 'Events', 'Sự kiện')}</h2>
+      {(Object.keys(EVENT_LABELS) as Array<keyof GameEvents>).map((key) => (
+        <label key={key} className="flex items-center gap-3 text-sm text-ink">
+          <input type="checkbox" className="size-4 accent-[var(--color-accent)]" checked={events.data[key]} disabled={busy} onChange={(event) => void save(key, event.target.checked)} />
+          {pick(language, ...EVENT_LABELS[key])}
+        </label>
+      ))}
+    </section>
+  );
+}
+
 export function AdminPage() {
   const { api } = useApp();
   const language = useUiLanguage();
@@ -76,6 +112,7 @@ export function AdminPage() {
           'Báo cáo về biệt danh và hồ sơ. Mỗi thao tác cũng đóng các báo cáo về người đó.',
         )}
       />
+      {admin.status === 'ready' && <Events language={language} />}
       {admin.status === 'loading' ? (
         <p className="flex items-center gap-2 text-sm text-muted">
           <Spinner /> {pick(language, 'Loading…', 'Đang tải…')}

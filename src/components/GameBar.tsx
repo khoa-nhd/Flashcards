@@ -3,6 +3,7 @@
  * the level beside the navigation, the XP each answer earns floating up by the
  * card, and the listener that keeps both current from the answers' replies.
  */
+import { useTheme } from './Collectibles.js';
 import { useEffect, useRef, useState } from 'react';
 import type { AnswerGame } from '../../shared/api.js';
 import { useApp, useUiLanguage } from '../app-context.js';
@@ -18,6 +19,8 @@ import { Link } from './Link.js';
  */
 export function GameWatcher() {
   const { api, sync } = useApp();
+  const game = useGame(api);
+  useTheme(game.data?.economy?.theme);
   useEffect(
     () =>
       sync.subscribeEvents((event) => {
@@ -65,6 +68,12 @@ export function XpCard() {
         </span>
       </span>
       <ProgressBar into={into} needed={needed} />
+      {data.economy != null && (
+        <span className="flex items-center gap-1 text-[0.6875rem] tabular-nums text-muted">
+          <Icon name="star" className="size-3 text-[#f0c75e]" />
+          {data.economy.stardust.toLocaleString(language)} {pick(language, 'stardust', 'bụi sao')}
+        </span>
+      )}
       {data.rewards.length > 0 && (
         <span className="text-[0.6875rem] font-medium text-accent">
           {pick(

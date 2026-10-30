@@ -33,6 +33,7 @@ import {
   gameAnswerRowSchema,
   gameBadgeRowSchema,
   COMPETITION_FUNCTIONS,
+  gameEventRowSchema,
   gameCommitRowSchema,
   gameFreezeRowSchema,
   gameLedgerRowSchema,
@@ -684,7 +685,7 @@ export function createPgVocabularyDatabase(
         run((session) => session.query<{ row: unknown }>(`select to_jsonb(t) as row from (${sql}) t`, params)).then((rows) =>
           rows.map((each) => each.row),
         );
-      const [state] = await json('select version, total_xp, state from public.game_state');
+      const [state] = await json(schemaVersion >= 19 ? 'select version, total_xp, state, stardust from public.game_state' : 'select version, total_xp, state from public.game_state');
       return {
         state: state === undefined ? null : gameStateRowSchema.parse(state),
         quests: (
@@ -703,7 +704,16 @@ export function createPgVocabularyDatabase(
         rewards: (
           await json('select id, kind, payload, created_at from public.game_rewards where claimed_at is null order by created_at limit 200')
         ).map((row) => gameRewardRowSchema.parse(row)),
+        inventory:
+          schemaVersion >= 19
+            ? (await json('select item_id from public.inventory order by acquired_at, item_id')).map((row) => (row as { item_id: string }).item_id)
+            : [],
       };
+    },
+
+    async gameEvents() {
+      const rows = await run((session) => session.query<{ event: string; enabled: boolean }>('select event, enabled from public.game_events'));
+      return rows.map((row) => gameEventRowSchema.parse(row));
     },
 
     async gamePendingAnswers(limit) {

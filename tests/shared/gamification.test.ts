@@ -40,6 +40,8 @@ const empty = (overrides: Partial<GameSnapshot> = {}): GameSnapshot => ({
   badges: [],
   freezes: [],
   rewards: [],
+  stardust: 0,
+  inventory: [],
   ...overrides,
 });
 
@@ -261,7 +263,7 @@ describe('streak freezes', () => {
 });
 
 describe('badges', () => {
-  const metrics: BadgeMetrics = { ...NO_METRICS, wordsStudied: 120, reviews: 1500, longestStreak: 8, longestCombo: 30 };
+  const metrics: BadgeMetrics = { ...NO_METRICS, wordsStudied: 120, reviews: 1500, longestStreak: 8, longestCombo: 30, bosses: 0 };
 
   it('earns every tier reached, once', () => {
     const earned = newTiers(metrics, new Set());

@@ -22,6 +22,9 @@ export const ROUTES = {
   /** A player's profile is `/profile?u=<nickname>`; without it, one's own. */
   profile: '/profile',
   admin: '/admin',
+  shop: '/shop',
+  collection: '/collection',
+  boss: '/boss',
   chat: '/chat',
   help: '/help',
 } as const;

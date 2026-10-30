@@ -660,6 +660,41 @@ export function createFakeApi({
       throw new ApiError('forbidden', 'Only an admin can do that.', 403);
     }),
     moderate: vi.fn<AppApi['moderate']>(async () => undefined),
+    fetchEvents: vi.fn<AppApi['fetchEvents']>(async () => ({ goldenHour: true, sunday: true, monthly: true, boss: true })),
+    saveEvents: vi.fn<AppApi['saveEvents']>(async (events) => ({ goldenHour: true, sunday: true, monthly: true, boss: true, ...events })),
+    // The economy: not kept by this fake, as by a server without schema version 19.
+    fetchShop: vi.fn<AppApi['fetchShop']>(async () => ({ available: false, reason: 'The shop needs the latest database update (version 19).', today: TODAY, stardust: 0, items: [], services: [] })),
+    buy: vi.fn<AppApi['buy']>(async () => {
+      throw new ApiError('not_supported', 'The shop is not available.', 409);
+    }),
+    fetchCollection: vi.fn<AppApi['fetchCollection']>(async () => ({
+      available: false,
+      reason: 'The collection needs the latest database update (version 19).',
+      stardust: 0,
+      owned: [],
+      slots: 1,
+      leading: [],
+      petDays: {},
+      sets: [],
+      theme: null,
+    })),
+    equip: vi.fn<AppApi['equip']>(async () => {
+      throw new ApiError('not_supported', 'The collection is not available.', 409);
+    }),
+    chooseStarter: vi.fn<AppApi['chooseStarter']>(async () => {
+      throw new ApiError('not_supported', 'The collection is not available.', 409);
+    }),
+    fetchBoss: vi.fn<AppApi['fetchBoss']>(async () => ({
+      available: false,
+      reason: 'The weekly boss needs the latest database update (version 19).',
+      week: TODAY,
+      words: [],
+      hp: 40,
+      max: 40,
+      correct: 0,
+      wrong: 0,
+      won: false,
+    })),
     saveStudyGoals: vi.fn<AppApi['saveStudyGoals']>(async (input) => {
       const goals = {
         newWords: input.newWords ?? studyGoals.goals.newWords,

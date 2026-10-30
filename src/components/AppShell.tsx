@@ -31,6 +31,8 @@ const PRIMARY: NavItem[] = [
 
 const SECONDARY: NavItem[] = [
   { route: 'league', label: 'League', labelVi: 'Giải đấu', short: 'League', shortVi: 'Giải đấu', icon: 'league' },
+  { route: 'shop', label: 'Shop', labelVi: 'Cửa hàng', short: 'Shop', shortVi: 'Cửa hàng', icon: 'shop' },
+  { route: 'collection', label: 'Companions & cards', labelVi: 'Kho đồ', short: 'Items', shortVi: 'Kho đồ', icon: 'pet' },
   { route: 'friends', label: 'Friends', labelVi: 'Bạn bè', short: 'Friends', shortVi: 'Bạn bè', icon: 'friends' },
   { route: 'practice', label: 'Practice', labelVi: 'Luyện tập', short: 'Practice', shortVi: 'Luyện tập', icon: 'practice' },
   { route: 'collections', label: 'Collections', labelVi: 'Bộ sưu tập', short: 'Collections', shortVi: 'Bộ sưu tập', icon: 'collections' },
@@ -75,6 +77,8 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           ? pick(language, 'Profile', 'Hồ sơ')
           : active === 'admin'
             ? pick(language, 'Moderation', 'Quản trị')
+            : active === 'boss'
+              ? pick(language, 'Weekly boss', 'Boss tuần')
             : currentNav === undefined
         ? pick(language, 'Vocabulary', 'Từ vựng')
         : navLabel(currentNav);

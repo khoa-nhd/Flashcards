@@ -110,6 +110,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     fsrsOnly: schemaVersion >= 15,
     game: schemaVersion >= 17,
     competition: schemaVersion >= 18,
+    economy: schemaVersion >= 19,
   };
 }
 

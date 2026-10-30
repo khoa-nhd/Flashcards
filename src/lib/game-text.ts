@@ -2,6 +2,7 @@
  * What the game's parts are called, in both languages: quests, badges, their
  * tiers and the rewards waiting to be claimed.
  */
+import { itemById } from '../../shared/gamification/catalog.js';
 import type { GameQuestView, GameRewardView } from '../../shared/api.js';
 import { pick, type UiLanguage } from './i18n.js';
 
@@ -64,8 +65,14 @@ export function badgeName(language: UiLanguage, badge: string): string {
       return pick(language, 'Night owl', 'Cú đêm');
     case 'combo':
       return pick(language, 'Combo', 'Combo');
-    default:
+    case 'boss':
+      return pick(language, 'Boss slayer', 'Diệt boss');
+    default: {
+      // A month's challenge: month_2026_10.
+      const month = /^month_(\d{4})_(\d{2})$/.exec(badge);
+      if (month !== null) return pick(language, `Challenge of ${month[2]}/${month[1]}`, `Thử thách tháng ${Number(month[2])}/${month[1]}`);
       return badge;
+    }
   }
 }
 
@@ -88,6 +95,8 @@ export function badgeMeasure(language: UiLanguage, badge: string, threshold: num
       return pick(language, `${threshold} answers after 11 pm`, `${threshold} lượt sau 23 giờ`);
     case 'combo':
       return pick(language, `A combo of ${threshold}`, `Combo ${threshold}`);
+    case 'boss':
+      return pick(language, `${threshold} weekly ${threshold === 1 ? 'boss' : 'bosses'} beaten`, `Hạ ${threshold} boss tuần`);
     default:
       return String(threshold);
   }
@@ -132,6 +141,12 @@ export function rewardText(language: UiLanguage, reward: GameRewardView): { titl
         detail: pick(language, `Today’s quests are complete${plus}`, `Hoàn thành mọi nhiệm vụ hôm nay${plus}`),
       };
     case 'checkin':
+      if (payload.chest === 'rare') {
+        return {
+          title: pick(language, 'Check-in · day 7 of 7', 'Điểm danh · ngày 7/7'),
+          detail: pick(language, 'A full week of study: a rare chest.', 'Học trọn một tuần: một rương hiếm.'),
+        };
+      }
       return {
         title: pick(language, `Check-in · day ${String(payload.day)} of 7`, `Điểm danh · ngày ${String(payload.day)}/7`),
         detail: pick(language, `For studying today${plus}`, `Vì hôm nay đã học${plus}`),
@@ -181,6 +196,25 @@ export function rewardText(language: UiLanguage, reward: GameRewardView): { titl
         detail: pick(language, `You finished the week #${rank} in your league.`, `Bạn kết thúc tuần ở hạng ${rank} trong nhóm.`),
       };
     }
+    case 'chest':
+      return {
+        title: chestName(language, typeof payload.rarity === 'string' ? payload.rarity : 'common'),
+        detail: pick(language, 'For meeting your goals. Open it to see what is inside.', 'Vì đã đạt mục tiêu. Mở ra xem bên trong có gì.'),
+      };
+    case 'boss':
+      return {
+        title: pick(language, 'The weekly boss is beaten', 'Đã hạ boss tuần'),
+        detail: pick(language, `+${String(payload.stardust ?? 0)} stardust${plus}`, `+${String(payload.stardust ?? 0)} bụi sao${plus}`),
+      };
+    case 'set':
+      return {
+        title: pick(language, 'A set completed', 'Hoàn thành một bộ sưu tập'),
+        detail: pick(
+          language,
+          `+${String(payload.stardust ?? 0)} stardust and the title ${itemName(language, String(payload.title))}.`,
+          `+${String(payload.stardust ?? 0)} bụi sao và danh hiệu ${itemName(language, String(payload.title))}.`,
+        ),
+      };
     case 'challenge': {
       const against = typeof payload.against === 'string' ? payload.against : pick(language, 'a friend', 'một người bạn');
       if (payload.outcome === 'won') {
@@ -194,6 +228,33 @@ export function rewardText(language: UiLanguage, reward: GameRewardView): { titl
         detail: pick(language, `Weekly challenge drawn${plus}`, `Thách đấu tuần hòa${plus}`),
       };
     }
+  }
+}
+
+/** A chest's name, by how rare it is. */
+export function chestName(language: UiLanguage, rarity: string): string {
+  if (rarity === 'legendary') return pick(language, 'Legendary chest', 'Rương huyền thoại');
+  if (rarity === 'rare') return pick(language, 'Rare chest', 'Rương hiếm');
+  return pick(language, 'Chest', 'Rương');
+}
+
+/** An item's name from the catalogue. */
+export function itemName(language: UiLanguage, id: string): string {
+  const item = itemById(id);
+  return item === undefined ? id : pick(language, item.en, item.vi);
+}
+
+/** A rarity's name. */
+export function rarityName(language: UiLanguage, rarity: string): string {
+  switch (rarity) {
+    case 'legendary':
+      return pick(language, 'Legendary', 'Huyền thoại');
+    case 'epic':
+      return pick(language, 'Epic', 'Sử thi');
+    case 'rare':
+      return pick(language, 'Rare', 'Hiếm');
+    default:
+      return pick(language, 'Common', 'Thường');
   }
 }
 

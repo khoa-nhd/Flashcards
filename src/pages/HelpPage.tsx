@@ -121,6 +121,13 @@ export function HelpPage() {
               'Giải đấu: mỗi tuần bạn ở trong một nhóm hai mươi người cùng hạng, xếp theo XP của tuần; năm người đầu lên hạng vào thứ Hai, năm người cuối xuống hạng. Khi chưa đủ người, giải đấu có thêm đối thủ mô phỏng. Câu trả lời cách câu trước chưa tới 0,6 giây, hoặc quá 90 câu trong một phút, vẫn được lưu như thường nhưng không có XP. Bạn bè là những người theo dõi nhau: thấy chuỗi ngày của nhau, giữ một chuỗi chung và có thể thách đấu nhau theo tuần. Người khác chỉ thấy biệt danh, level, hạng, chuỗi ngày và huy hiệu của bạn, không bao giờ thấy từ vựng.',
             )}
           </p>
+          <p className={`${HELP} mt-2`}>
+            {pick(
+              language,
+              'Stardust comes from levels, quests, chests and leagues, and buys items in the shop (never with money). Each day you meet your goals brings a chest. Companions study with you: each adds a little XP (all together at most +25%), grows through four forms as you study, and is sad after two days away. The weekly boss is made of your weakest words and is beaten in practice, which never changes a schedule. Golden hour (an hour between 19:00 and 22:00) doubles XP, Sunday adds 50%, and all bonuses add together.',
+              'Bụi sao có từ level, nhiệm vụ, rương và giải đấu, dùng để mua đồ trong cửa hàng (không bao giờ bằng tiền thật). Mỗi ngày đạt mục tiêu được một rương. Linh vật học cùng bạn: mỗi con cộng thêm chút XP (tất cả cộng lại tối đa +25%), lớn qua bốn hình dạng khi bạn học, và buồn khi bạn nghỉ hai ngày. Boss tuần gồm những từ bạn hay quên nhất và bị đánh bại bằng luyện tập, không bao giờ đổi lịch ôn. Giờ vàng (một giờ trong khoảng 19:00–22:00) nhân đôi XP, Chủ nhật thêm 50%, và mọi phần thưởng cộng lại với nhau.',
+            )}
+          </p>
         </section>
 
         <section className={`${CARD} p-5`}>

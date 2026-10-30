@@ -136,7 +136,8 @@ export interface Database {
       };
       /** From schema version 17. Read only: written through game_commit alone. */
       game_state: {
-        Row: { user_id: string; version: number; total_xp: number; state: Record<string, unknown>; updated_at: string };
+        /** `stardust` from schema version 19. */
+        Row: { user_id: string; version: number; total_xp: number; state: Record<string, unknown>; updated_at: string; stardust: number };
         Insert: Record<string, never>;
         Update: Record<string, never>;
         Relationships: [];
@@ -187,6 +188,19 @@ export interface Database {
       };
       game_rewards: {
         Row: { id: string; user_id: string; kind: string; payload: Record<string, unknown>; created_at: string; claimed_at: string | null };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      /** From schema version 19. */
+      inventory: {
+        Row: { user_id: string; item_id: string; source: string; acquired_at: string };
+        Insert: Record<string, never>;
+        Update: Record<string, never>;
+        Relationships: [];
+      };
+      game_events: {
+        Row: { event: string; enabled: boolean; updated_at: string };
         Insert: Record<string, never>;
         Update: Record<string, never>;
         Relationships: [];
@@ -490,7 +504,15 @@ export interface Database {
         Args: { p_payload: string; p_signature: string };
         Returns: Array<{ outcome: 'ok' | 'stale'; version: number; total_xp: number }>;
       };
-      /** From schema version 18; the rows are parsed in server/competition-service.ts. */
+      /** From schema version 18 (19 for the last two); the rows are parsed where they are used. */
+      profile_showcase: {
+        Args: Record<string, string | string[] | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      boss_progress: {
+        Args: Record<string, string | string[] | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
       competition_me: {
         Args: Record<string, string | null>;
         Returns: Array<Record<string, unknown>>;

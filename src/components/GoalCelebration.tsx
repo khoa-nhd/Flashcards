@@ -14,11 +14,11 @@
  * Both only read the goals: nothing here can change what counts or when.
  */
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react';
-import type { GameRewardView, ReviewActionResponse, StudyGoalsResponse } from '../../shared/api.js';
+import type { GameResponse, GameRewardView, ReviewActionResponse, StudyGoalsResponse } from '../../shared/api.js';
 import { useApp, useUiLanguage } from '../app-context.js';
 import { ApiError } from '../lib/api-client.js';
 import { adoptGame, useGame } from '../lib/game-state.js';
-import { rewardText } from '../lib/game-text.js';
+import { chestName, itemName, rewardText } from '../lib/game-text.js';
 import { pick } from '../lib/i18n.js';
 import { ROUTES, useLocation } from '../lib/router.js';
 import { Icon, type IconName } from './Icon.js';
@@ -237,9 +237,65 @@ function RewardsOnDashboard() {
     setVisit(path);
     if (onDashboard) setPutAway(false);
   }
+  // What the chests just claimed held: shown even once no reward is left.
+  const [opened, setOpened] = useState<Opened[]>([]);
   const rewards = game.data?.available === true ? game.data.rewards : [];
-  if (!onDashboard || putAway || rewards.length === 0) return null;
-  return <RewardsScene rewards={rewards} onClose={() => setPutAway(true)} />;
+  if (!onDashboard || putAway || (rewards.length === 0 && opened.length === 0)) return null;
+  return (
+    <RewardsScene
+      rewards={rewards}
+      opened={opened}
+      onOpened={setOpened}
+      onClose={() => {
+        setOpened([]);
+        setPutAway(true);
+      }}
+    />
+  );
+}
+
+type Opened = NonNullable<GameResponse['opened']>[number];
+
+/** What came out of the chests just opened. */
+function ChestContents({ opened, onDone, actions }: { opened: readonly Opened[]; onDone: () => void; actions: RefObject<HTMLDivElement | null> }) {
+  const language = useUiLanguage();
+  const stardust = opened.reduce((sum, each) => sum + each.contents.stardust, 0);
+  const xp = opened.reduce((sum, each) => sum + each.contents.xp, 0);
+  const items = opened.flatMap((each) => each.contents.items);
+  const best = opened.some((each) => each.contents.rarity === 'legendary') ? 'legendary' : opened.some((each) => each.contents.rarity === 'rare') ? 'rare' : 'common';
+  return (
+    <>
+      <p className="moonrise-rise text-xs font-semibold uppercase tracking-[0.2em] text-faint" style={delay(100)}>
+        {chestName(language, best)}
+      </p>
+      <div
+        className={`moonrise-rise mt-8 flex size-36 items-center justify-center rounded-full border ${
+          best === 'legendary' ? 'border-[#f0c75e]/60 text-[#f0c75e] shadow-[0_0_90px_-6px_rgb(240_199_94_/_0.55)]' : 'border-accent/40 text-accent shadow-[0_0_80px_-10px_rgb(165_201_238_/_0.45)]'
+        } bg-accent-soft`}
+        style={delay(200)}
+        aria-hidden="true"
+      >
+        <Icon name="chest" className="size-14" />
+      </div>
+      <h2 id="rewards-title" className="moonrise-rise mt-8 font-serif text-3xl font-semibold tracking-tight text-ink sm:text-4xl" style={delay(300)}>
+        {pick(language, 'Inside', 'Bên trong có')}
+      </h2>
+      <ul id="rewards-detail" className="moonrise-rise mt-4 flex max-w-sm flex-col items-center gap-1.5 text-sm text-muted" style={delay(380)}>
+        {stardust > 0 && <li className="font-semibold text-ink">+{stardust} {pick(language, 'stardust', 'bụi sao')}</li>}
+        {xp > 0 && <li className="font-semibold text-ink">+{xp} XP</li>}
+        {items.map((id) => (
+          <li key={id} className="font-semibold text-ink">
+            {itemName(language, id)}
+          </li>
+        ))}
+      </ul>
+      <div ref={actions} className="moonrise-rise mt-9 flex justify-center" style={delay(460)}>
+        <button type="button" className={`min-w-36 ${BUTTON_PRIMARY}`} onClick={onDone}>
+          {pick(language, 'Continue', 'Tiếp tục')}
+        </button>
+      </div>
+    </>
+  );
 }
 
 const REWARD_ICON: Record<GameRewardView['kind'], IconName> = {
@@ -253,21 +309,38 @@ const REWARD_ICON: Record<GameRewardView['kind'], IconName> = {
   comeback: 'refresh',
   league: 'trophy',
   challenge: 'trophy',
+  chest: 'chest',
+  boss: 'trophy',
+  set: 'star',
 };
 
-function RewardsScene({ rewards, onClose }: { rewards: readonly GameRewardView[]; onClose: () => void }) {
+function RewardsScene({
+  rewards,
+  opened,
+  onOpened,
+  onClose,
+}: {
+  rewards: readonly GameRewardView[];
+  opened: readonly Opened[];
+  onOpened: (opened: Opened[]) => void;
+  onClose: () => void;
+}) {
   const { api, toasts } = useApp();
   const language = useUiLanguage();
   const actions = useRef<HTMLDivElement>(null);
   const [busy, setBusy] = useState(false);
-  const reward = rewards[0]!;
-  const { title, detail } = rewardText(language, reward);
-  const xp = typeof reward.payload.xp === 'number' ? reward.payload.xp : 0;
+  const reward = rewards[0];
+  const { title, detail } = reward === undefined ? { title: '', detail: '' } : rewardText(language, reward);
+  const xp = typeof reward?.payload.xp === 'number' ? reward.payload.xp : 0;
+  const stardust = typeof reward?.payload.stardust === 'number' ? reward.payload.stardust : 0;
+  const chest = reward !== undefined && (reward.kind === 'chest' || typeof reward.payload.chest === 'string');
 
   const claim = async (ids: readonly string[] | 'all') => {
     setBusy(true);
     try {
-      adoptGame(api, await api.claimGameRewards(ids));
+      const game = await api.claimGameRewards(ids);
+      adoptGame(api, game);
+      if ((game.opened ?? []).length > 0) onOpened(game.opened!);
     } catch (cause) {
       toasts.show({
         message: cause instanceof ApiError ? cause.message : pick(language, 'Could not claim the reward.', 'Không nhận được phần thưởng.'),
@@ -280,7 +353,17 @@ function RewardsScene({ rewards, onClose }: { rewards: readonly GameRewardView[]
 
   return (
     <NightScene titleId="rewards-title" detailId="rewards-detail" settleMs={700} onClose={onClose} actions={actions}>
-      {() => (
+      {() =>
+        opened.length > 0 || reward === undefined ? (
+          <ChestContents
+            opened={opened}
+            actions={actions}
+            onDone={() => {
+              onOpened([]);
+              if (rewards.length === 0) onClose();
+            }}
+          />
+        ) : (
         <>
           <p className="moonrise-rise text-xs font-semibold uppercase tracking-[0.2em] text-faint" style={delay(150)}>
             {pick(language, 'Rewards to claim', 'Phần thưởng chờ nhận')}
@@ -294,6 +377,8 @@ function RewardsScene({ rewards, onClose }: { rewards: readonly GameRewardView[]
           >
             {reward.kind === 'level' ? (
               <span className="font-serif text-6xl font-semibold tabular-nums text-ink">{String(reward.payload.level)}</span>
+            ) : chest ? (
+              <Icon name="chest" className="size-14" />
             ) : (
               <Icon name={REWARD_ICON[reward.kind]} className="size-14" />
             )}
@@ -311,7 +396,13 @@ function RewardsScene({ rewards, onClose }: { rewards: readonly GameRewardView[]
           </p>
           <div ref={actions} className="moonrise-rise mt-9 flex flex-wrap items-center justify-center gap-2" style={delay(520)}>
             <button type="button" className={`min-w-36 ${BUTTON_PRIMARY}`} disabled={busy} onClick={() => void claim([reward.id])}>
-              {xp > 0 ? pick(language, `Claim +${xp} XP`, `Nhận +${xp} XP`) : pick(language, 'Claim', 'Nhận')}
+              {chest
+                ? pick(language, 'Open', 'Mở rương')
+                : xp > 0
+                  ? pick(language, `Claim +${xp} XP`, `Nhận +${xp} XP`)
+                  : stardust > 0
+                    ? pick(language, `Claim +${stardust} stardust`, `Nhận +${stardust} bụi sao`)
+                    : pick(language, 'Claim', 'Nhận')}
             </button>
             {rewards.length > 1 && (
               <button type="button" className={BUTTON_GHOST} disabled={busy} onClick={() => void claim('all')}>
@@ -323,7 +414,8 @@ function RewardsScene({ rewards, onClose }: { rewards: readonly GameRewardView[]
             </button>
           </div>
         </>
-      )}
+        )
+      }
     </NightScene>
   );
 }

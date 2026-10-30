@@ -179,6 +179,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     fsrsOnly: false,
     game: true,
     competition: true,
+    economy: true,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
@@ -968,6 +969,11 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
       }),
     );
     return [...reviews, ...practice];
+  }
+
+  /** Practice answers, for the weekly boss. */
+  gamePractice(): Array<{ id: string; correct: boolean; at: string }> {
+    return this.practice.map((entry) => ({ id: entry.id, correct: entry.correct, at: entry.at }));
   }
 
   /** The totals the badges read. */

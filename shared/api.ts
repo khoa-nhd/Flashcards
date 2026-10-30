@@ -149,6 +149,8 @@ export const capabilitiesSchema = z.object({
   game: z.boolean().default(false),
   /** Leagues, nicknames, friends and profiles (schema version 18). */
   competition: z.boolean().default(false),
+  /** Stardust, the shop, chests, companions, the weekly boss and events (schema version 19). */
+  economy: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -167,6 +169,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   fsrsOnly: false,
   game: false,
   competition: false,
+  economy: false,
 };
 
 /**
@@ -1123,7 +1126,21 @@ export const gameQuestSchema = z.object({
 
 export const gameRewardSchema = z.object({
   id: z.string(),
-  kind: z.enum(['level', 'badge', 'quest', 'quests_all', 'checkin', 'freeze_granted', 'freeze_used', 'comeback', 'league', 'challenge']),
+  kind: z.enum([
+    'level',
+    'badge',
+    'quest',
+    'quests_all',
+    'checkin',
+    'freeze_granted',
+    'freeze_used',
+    'comeback',
+    'league',
+    'challenge',
+    'chest',
+    'boss',
+    'set',
+  ]),
   payload: z.record(z.string(), z.unknown()),
   createdAt: z.string(),
 });
@@ -1149,6 +1166,40 @@ export const gameResponseSchema = z.object({
   earlyDays: z.number().int().min(1).max(14),
   /** Rewards waiting to be claimed, oldest first. */
   rewards: z.array(gameRewardSchema),
+  /** Phase 3 (schema version 19); absent or null where the economy is not kept. */
+  economy: z
+    .object({
+      stardust: z.number().int(),
+      /** Companions leading now. */
+      pets: z.array(z.object({ id: z.string(), form: z.number().int(), days: z.number().int(), mood: z.enum(['happy', 'sad']) })),
+      slots: z.number().int(),
+      /** The XP the leading companions add, in percent, after the cap. */
+      petBonus: z.number().int(),
+      theme: z.string().nullable(),
+      boostUntil: z.string().nullable(),
+      /** Today's golden hour, as the hour it starts in the account's own time; null when switched off. */
+      goldenHour: z.number().int().nullable(),
+      goldenNow: z.boolean(),
+      sunday: z.boolean(),
+      month: z.object({ count: z.number().int(), target: z.number().int(), done: z.boolean() }).nullable(),
+    })
+    .nullable()
+    .optional(),
+  /** Chests opened by the claim this answers. */
+  opened: z
+    .array(
+      z.object({
+        reward: z.string(),
+        contents: z.object({
+          rarity: z.enum(['common', 'rare', 'legendary']),
+          stardust: z.number().int(),
+          xp: z.number().int(),
+          items: z.array(z.string()),
+          duplicates: z.array(z.string()),
+        }),
+      }),
+    )
+    .optional(),
 });
 
 export const gameClaimRequestSchema = z.strictObject({
@@ -1159,6 +1210,71 @@ export const gameClaimRequestSchema = z.strictObject({
 export const gameSettingsRequestSchema = z.strictObject({
   earlyDays: z.number().int().min(1).max(14),
 });
+
+// ---- The economy (docs/gamification-plan.md, phase 3) ----
+
+export const SHOP_SERVICES = ['freeze', 'boost', 'repair', 'slot'] as const;
+
+export const shopResponseSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().nullable(),
+  today: isoDateSchema,
+  stardust: z.number().int(),
+  items: z.array(z.object({ item: z.string(), price: z.number().int(), owned: z.boolean() })),
+  services: z.array(
+    z.object({
+      kind: z.enum(SHOP_SERVICES),
+      price: z.number().int(),
+      /** Why it cannot be bought now, if it cannot. */
+      blocked: z.enum(['held', 'owned', 'nothing', 'full']).nullable(),
+    }),
+  ),
+});
+
+export const buyRequestSchema = z.union([
+  z.strictObject({ kind: z.literal('item'), item: z.string().min(1).max(60) }),
+  z.strictObject({ kind: z.enum(SHOP_SERVICES) }),
+]);
+
+export const collectionResponseSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().nullable(),
+  stardust: z.number().int(),
+  owned: z.array(z.string()),
+  slots: z.number().int(),
+  leading: z.array(z.string()),
+  /** Days studied with each companion leading. */
+  petDays: z.record(z.string(), z.number().int()),
+  sets: z.array(z.object({ id: z.string(), have: z.number().int(), total: z.number().int(), done: z.boolean() })),
+  theme: z.string().nullable(),
+});
+
+export const equipRequestSchema = z.strictObject({
+  pets: z.array(z.string().max(60)).max(5).optional(),
+  theme: z.string().max(60).nullable().optional(),
+});
+
+export const starterRequestSchema = z.strictObject({ pet: z.string().max(60) });
+
+export const bossResponseSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().nullable(),
+  week: isoDateSchema,
+  words: z.array(z.object({ id: z.string(), word: z.string() })),
+  hp: z.number(),
+  max: z.number().int(),
+  correct: z.number().int(),
+  wrong: z.number().int(),
+  won: z.boolean(),
+});
+
+export const gameEventsSchema = z.object({ goldenHour: z.boolean(), sunday: z.boolean(), monthly: z.boolean(), boss: z.boolean() });
+
+export type ShopResponse = z.infer<typeof shopResponseSchema>;
+export type BuyRequest = z.infer<typeof buyRequestSchema>;
+export type CollectionResponse = z.infer<typeof collectionResponseSchema>;
+export type BossResponse = z.infer<typeof bossResponseSchema>;
+export type GameEvents = z.infer<typeof gameEventsSchema>;
 
 // ---- Competition (docs/gamification-plan.md, phase 2) ----
 // Other accounts appear only by nickname: never an email, an id, a word or a schedule.
@@ -1207,6 +1323,8 @@ export const profileResponseSchema = z.object({
   following: z.boolean(),
   followedBy: z.boolean(),
   blocked: z.boolean(),
+  /** Phase 3: what the profile shows off. */
+  showcase: z.object({ leading: z.array(z.string()), items: z.array(z.string()) }).optional(),
   /** Only on one's own profile. */
   inLeagues: z.boolean().optional(),
   admin: z.boolean().optional(),
@@ -1215,6 +1333,9 @@ export const profileResponseSchema = z.object({
 export const profileUpdateRequestSchema = z.strictObject({
   nickname: z.string().max(60).optional(),
   inLeagues: z.boolean().optional(),
+  /** Phase 3: a frame and a title the account owns, or null to wear none. */
+  frame: z.string().max(60).nullable().optional(),
+  title: z.string().max(60).nullable().optional(),
 });
 
 export const profileSearchResponseSchema = z.object({

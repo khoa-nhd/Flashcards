@@ -172,6 +172,8 @@ describe('earning limits', () => {
     badges: [],
     freezes: [],
     rewards: [],
+    stardust: 0,
+    inventory: [],
   };
   const context = (answers: AnswerEvent[]): SyncContext => {
     let id = 0;

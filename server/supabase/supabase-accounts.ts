@@ -238,6 +238,15 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
       const fsrsOnly = repository.capabilities.fsrsOnly;
       // The game needs its tables (schema version 17) and the key that signs its changes.
       const gameKey = options.gameSigningKey ?? null;
+      const analytics = new AnalyticsService({
+        repository,
+        catalog: repository,
+        rules,
+        timeZone,
+        goals,
+        scheduler,
+        now,
+      });
       const game =
         repository.capabilities.game && gameKey !== null
           ? new GameService({
@@ -248,6 +257,8 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
               goals: () => settings?.studyGoals ?? SUGGESTED_STUDY_GOALS,
               timeZone,
               now,
+              economy: repository.capabilities.economy,
+              weakWords: async () => (await analytics.weakWords()).words.map((word) => ({ id: word.id, word: word.word })),
             })
           : null;
       const gameReason =
@@ -266,6 +277,8 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
               adminEmails: options.adminEmails ?? [],
               timeZone,
               now,
+              owns: game === null ? undefined : (item) => game.owns(item),
+              economy: repository.capabilities.economy,
             })
           : null;
       const competitionReason =
@@ -316,15 +329,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
               }),
             })
           : null,
-        analytics: new AnalyticsService({
-          repository,
-          catalog: repository,
-          rules,
-          timeZone,
-          goals,
-          scheduler,
-          now,
-        }),
+        analytics,
         library,
         exporter: new ExportService({
           repository,

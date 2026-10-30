@@ -60,6 +60,15 @@ import {
   type StudyGoalsResponse,
   type GameResponse,
   adminResponseSchema,
+  bossResponseSchema,
+  collectionResponseSchema,
+  gameEventsSchema,
+  shopResponseSchema,
+  type BossResponse,
+  type BuyRequest,
+  type CollectionResponse,
+  type GameEvents,
+  type ShopResponse,
   friendsResponseSchema,
   inviteResponseSchema,
   leagueResponseSchema,
@@ -173,7 +182,7 @@ export interface CompetitionApi {
   fetchLeague(): Promise<LeagueResponse>;
   /** A player's profile by nickname, or one's own for `null`. */
   fetchProfile(nickname: string | null): Promise<ProfileResponse>;
-  saveProfile(update: { nickname?: string; inLeagues?: boolean }): Promise<ProfileResponse>;
+  saveProfile(update: { nickname?: string; inLeagues?: boolean; frame?: string | null; title?: string | null }): Promise<ProfileResponse>;
   searchPlayers(query: string): Promise<z.infer<typeof profileSearchResponseSchema>>;
   fetchFriends(): Promise<FriendsResponse>;
   friendAction(action: 'follow' | 'unfollow' | 'block' | 'unblock' | 'challenge', nickname: string): Promise<void>;
@@ -182,6 +191,15 @@ export interface CompetitionApi {
   acceptChallenge(id: string): Promise<void>;
   reportPlayer(nickname: string, reason: string): Promise<void>;
   fetchAdmin(): Promise<AdminResponse>;
+  fetchEvents(): Promise<GameEvents>;
+  saveEvents(events: Partial<GameEvents>): Promise<GameEvents>;
+  // Phase 3: the economy.
+  fetchShop(): Promise<ShopResponse>;
+  buy(request: BuyRequest): Promise<ShopResponse>;
+  fetchCollection(): Promise<CollectionResponse>;
+  equip(choice: { pets?: string[]; theme?: string | null }): Promise<CollectionResponse>;
+  chooseStarter(pet: string): Promise<CollectionResponse>;
+  fetchBoss(): Promise<BossResponse>;
   moderate(target: string, action: 'rename' | 'hide' | 'unhide' | 'resolve'): Promise<void>;
 }
 
@@ -632,6 +650,24 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
 
     fetchAdmin: () =>
       call('/api/admin', adminResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading the reports took too long.' }),
+
+    fetchEvents: () =>
+      call('/api/admin/events', gameEventsSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading the events took too long.' }),
+
+    saveEvents: (events) => change('/api/admin/events', 'PUT', events, gameEventsSchema),
+
+    fetchShop: () => call('/api/shop', shopResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading the shop took too long.' }),
+
+    buy: (request) => change('/api/shop/buy', 'POST', request, shopResponseSchema),
+
+    fetchCollection: () =>
+      call('/api/collection', collectionResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading your collection took too long.' }),
+
+    equip: (choice) => change('/api/collection/equip', 'POST', choice, collectionResponseSchema),
+
+    chooseStarter: (pet) => change('/api/collection/starter', 'POST', { pet }, collectionResponseSchema),
+
+    fetchBoss: () => call('/api/boss', bossResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading the boss took too long.' }),
 
     moderate: (target, action) => change('/api/admin/action', 'POST', { target, action }, okSchema).then(() => undefined),
 

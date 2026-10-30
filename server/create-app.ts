@@ -31,6 +31,10 @@ import {
   updateExampleRequestSchema,
   updateSettingsRequestSchema,
   adminActionRequestSchema,
+  buyRequestSchema,
+  equipRequestSchema,
+  gameEventsSchema,
+  starterRequestSchema,
   inviteAcceptRequestSchema,
   nicknameRequestSchema,
   profileUpdateRequestSchema,
@@ -53,7 +57,7 @@ import type { VocabularyService } from './vocabulary-service.js';
 import { type AiService } from './ai-service-impl.js';
 import { AiError, AiErrorCode } from './ai-service.js';
 import type { StudyGoalsService } from './study-goals-service.js';
-import { unavailableGame, type GameService } from './game-service.js';
+import { GameError, unavailableGame, type GameService } from './game-service.js';
 import { CompetitionError, type CompetitionService } from './competition-service.js';
 import { leagueWeekOf, weekEndsAt } from '../shared/gamification/league.js';
 import { calendarDateInTimeZone } from '../shared/dates.js';
@@ -103,6 +107,13 @@ interface Scope {
 }
 
 type AppEnv = { Variables: { scope: Scope } };
+
+const GAME_REFUSALS = {
+  insufficient: [409, 'insufficient'],
+  owned: [409, 'conflict'],
+  unavailable: [409, 'not_supported'],
+  invalid: [400, 'invalid_request'],
+} as const;
 
 const COMPETITION_REFUSALS = {
   not_found: [404, 'not_found'],
@@ -501,6 +512,40 @@ export function createApp({
     return c.json(await requireGame(c).saveSettings(settings));
   });
 
+  // ---- The economy: stardust, the shop, the collection, the weekly boss (phase 3) ----
+
+  /** The economy's own refusals, as HTTP. */
+  const trade = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      if (!(error instanceof GameError)) throw error;
+      const [status, code] = GAME_REFUSALS[error.failure];
+      throw new HttpError(status, code, error.message);
+    }
+  };
+
+  app.get('/api/shop', async (c) => c.json(await trade(() => requireGame(c).shop())));
+
+  app.post('/api/shop/buy', async (c) => {
+    const request = await parseBody(c, buyRequestSchema);
+    return c.json(await trade(() => requireGame(c).buy(request)));
+  });
+
+  app.get('/api/collection', async (c) => c.json(await trade(() => requireGame(c).collection())));
+
+  app.post('/api/collection/equip', async (c) => {
+    const choice = await parseBody(c, equipRequestSchema);
+    return c.json(await trade(() => requireGame(c).equip(choice)));
+  });
+
+  app.post('/api/collection/starter', async (c) => {
+    const { pet } = await parseBody(c, starterRequestSchema);
+    return c.json(await trade(() => requireGame(c).starter(pet)));
+  });
+
+  app.get('/api/boss', async (c) => c.json(await trade(() => requireGame(c).boss())));
+
   // ---- Competition: leagues, nicknames, friends, profiles, moderation. Other accounts by nickname only. ----
 
   const requireCompetition = (c: Context<AppEnv>): CompetitionService => {
@@ -588,6 +633,17 @@ export function createApp({
 
   // Moderation: the server checks ADMIN_EMAILS, and the database its own list, before anything is shown or done.
   app.get('/api/admin', async (c) => c.json({ reports: await compete(() => requireCompetition(c).reports()) }));
+
+  app.get('/api/admin/events', async (c) => {
+    await compete(() => requireCompetition(c).reports());
+    return c.json(await trade(() => requireGame(c).events()));
+  });
+
+  app.put('/api/admin/events', async (c) => {
+    const events = await parseBody(c, gameEventsSchema.partial());
+    await compete(() => requireCompetition(c).switchEvents(events));
+    return c.json(await trade(() => requireGame(c).events()));
+  });
 
   app.post('/api/admin/action', async (c) => {
     const { target, action } = await parseBody(c, adminActionRequestSchema);

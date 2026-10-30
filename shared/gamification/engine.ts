@@ -20,6 +20,24 @@ import {
   type QuestGoals,
 } from './quests.js';
 import { CHECKIN_XP, FREEZE_EVERY, FREEZE_MAX, daysToCover, nextCheckinDay, type Freeze } from './streak.js';
+import { CARD_SETS } from './catalog.js';
+import {
+  BOOST_BONUS,
+  GOLDEN_HOUR_BONUS,
+  INITIAL_PETS,
+  MONTHLY_TARGET,
+  STARDUST,
+  SUNDAY_BONUS,
+  chestRarity,
+  goldenHour,
+  monthBadge,
+  monthKey,
+  openChest,
+  petEffects,
+  type ChestContents,
+  type EventSwitches,
+  type PetState,
+} from './economy.js';
 import {
   COMBO_GAP_MS,
   COMEBACK_AFTER_DAYS,
@@ -54,6 +72,19 @@ export interface GameStateData {
   earlyDays: number;
   /** The day the combo high-water mark below belongs to. */
   comboDay: { on: IsoDate; longest: number } | null;
+  // ---- Phase 3 ----
+  pets: PetState;
+  /** Until when a bought boost doubles XP. */
+  boostUntil: string | null;
+  /** This month's challenge: answers counted, and whether its badge is earned. */
+  month: { key: string; count: number; done: boolean } | null;
+  /** This week's boss: its words, and whether it is beaten. */
+  boss: { week: IsoDate; words: string[]; won: boolean } | null;
+  bossWins: number;
+  /** Card sets completed, so each gives its reward once. */
+  setsDone: string[];
+  /** The colour theme chosen, if any. */
+  theme: string | null;
   /** What the earning limits have counted so far (xp.ts, RATE_LIMIT). */
   limits: { recent: string[]; last?: string };
 }
@@ -72,6 +103,13 @@ export const INITIAL_STATE: GameStateData = {
   earlyDays: 3,
   comboDay: null,
   limits: { recent: [] },
+  pets: INITIAL_PETS,
+  boostUntil: null,
+  month: null,
+  boss: null,
+  bossWins: 0,
+  setsDone: [],
+  theme: null,
 };
 
 export interface LedgerEntry {
@@ -95,7 +133,10 @@ export type RewardKind =
   | 'freeze_used'
   | 'comeback'
   | 'league'
-  | 'challenge';
+  | 'challenge'
+  | 'chest'
+  | 'boss'
+  | 'set';
 
 export interface Reward {
   id: string;
@@ -121,6 +162,23 @@ export interface GameSnapshot {
   freezes: Freeze[];
   /** Rewards not yet claimed, oldest first. */
   rewards: Reward[];
+  /** Stardust held (phase 3); 0 where the database keeps none. */
+  stardust: number;
+  /** Items owned (phase 3). */
+  inventory: string[];
+}
+
+export interface StardustEntry {
+  source: 'reward' | 'chest' | 'shop' | 'set';
+  sourceId: string;
+  amount: number;
+  reason: string;
+  at: string;
+}
+
+export interface InventoryEntry {
+  item: string;
+  source: string;
 }
 
 /** What to store: a change against the snapshot of `version`. */
@@ -133,6 +191,8 @@ export interface GameChange {
   freezes: Freeze[];
   rewards: Reward[];
   claimed: string[];
+  stardust: StardustEntry[];
+  inventory: InventoryEntry[];
 }
 
 /** An earlier answer an undo takes back, as the ledger has it. */
@@ -156,9 +216,25 @@ export interface SyncContext {
   metToday: boolean;
   addedToday: number;
   /** Totals the badges are read from; streak and combo are filled in here. */
-  metrics: Omit<BadgeMetrics, 'longestStreak' | 'longestCombo'>;
+  metrics: Omit<BadgeMetrics, 'longestStreak' | 'longestCombo' | 'bosses'>;
   /** Makes reward and freeze ids. */
   newId: () => string;
+  /** Phase 3, where the database keeps it (version 19): events, companions, chests and stardust. */
+  economy?: { timeZone: string; events: EventSwitches } | null;
+}
+
+/** The hour of the day an instant falls in, in a zone. */
+function hourIn(iso: string, timeZone: string): number {
+  return Number(new Intl.DateTimeFormat('en-GB', { timeZone, hour: '2-digit', hourCycle: 'h23' }).format(new Date(iso)));
+}
+
+const isSunday = (day: IsoDate) => new Date(`${day}T00:00:00Z`).getUTCDay() === 0;
+
+/** Stardust for reaching every level from just after `from` up to `to`. */
+export function levelStardust(from: number, to: number): number {
+  let total = 0;
+  for (let level = Math.max(2, from + 1); level <= to; level += 1) total += STARDUST.level(level);
+  return total;
 }
 
 const time = (iso: string) => Date.parse(iso);
@@ -208,6 +284,9 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
   state.limits = { ...limits, recent: [...limits.recent] };
   if (state.installedAt === null) state.installedAt = now;
   const installedAt = time(state.installedAt);
+  const economy = context.economy ?? null;
+  state.pets = { ...INITIAL_PETS, ...state.pets, days: { ...(state.pets?.days ?? {}) }, active: [...(state.pets?.active ?? [])] };
+  const pets = economy === null ? { xpPercent: 0, comboExtraMs: 0, chestRarePercent: 0 } : petEffects(state.pets.active);
 
   const ledger: LedgerEntry[] = [];
   const rewards: Reward[] = [];
@@ -232,6 +311,7 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
 
   // ---- Answers ----
   const counted = new Map<string, Undone>();
+  const monthlyEarned: string[] = [];
   for (const event of context.answers) {
     const at = time(event.at);
     const live = at >= installedAt;
@@ -269,7 +349,7 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
 
     if (live) {
       const last = state.lastAnswerAt === null ? null : time(state.lastAnswerAt);
-      if (last === null || at - last > COMBO_GAP_MS) {
+      if (last === null || at - last > COMBO_GAP_MS + pets.comboExtraMs) {
         state.combo = 1;
       } else if (at >= last) {
         state.combo += 1;
@@ -286,13 +366,35 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
         reward('comeback', { until: state.comebackUntil, days: daysBetween(state.lastActiveOn, event.on) - 1 });
       }
       if (state.comebackUntil !== null && at < time(state.comebackUntil)) bonus += COMEBACK_BONUS;
+
+      if (economy !== null) {
+        bonus += pets.xpPercent;
+        if (state.boostUntil !== null && at < time(state.boostUntil)) bonus += BOOST_BONUS;
+        if (economy.events.goldenHour && hourIn(event.at, economy.timeZone) === goldenHour(account, event.on)) bonus += GOLDEN_HOUR_BONUS;
+        if (economy.events.sunday && isSunday(event.on)) bonus += SUNDAY_BONUS;
+        // Every new day of study grows the companions leading.
+        if (state.lastActiveOn === null || compareDates(event.on, state.lastActiveOn) > 0) {
+          for (const pet of state.pets.active) state.pets.days[pet] = (state.pets.days[pet] ?? 0) + 1;
+        }
+        if (economy.events.monthly) {
+          const key = monthKey(event.on);
+          const month = state.month?.key === key ? { ...state.month } : { key, count: 0, done: false };
+          month.count += 1;
+          if (!month.done && month.count >= MONTHLY_TARGET) {
+            month.done = true;
+            monthlyEarned.push(key);
+          }
+          state.month = month;
+        }
+      }
     }
 
     // The first answer of a day is the day's check-in.
     if (state.checkin.lastOn === null || compareDates(event.on, state.checkin.lastOn) > 0) {
       const day = nextCheckinDay(state.checkin, event.on);
       state.checkin = { day, lastOn: event.on };
-      if (live) reward('checkin', { day, xp: CHECKIN_XP[day - 1] });
+      // With chests kept, the seventh day's check-in is a rare chest instead of its XP.
+      if (live) reward('checkin', economy !== null && day === 7 ? { day, chest: 'rare' } : { day, xp: CHECKIN_XP[day - 1] });
     }
     if (state.lastActiveOn === null || compareDates(event.on, state.lastActiveOn) > 0) state.lastActiveOn = event.on;
     if (live && (state.lastAnswerAt === null || at >= time(state.lastAnswerAt))) state.lastAnswerAt = event.at;
@@ -316,6 +418,8 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
   }
 
   // ---- Goal days ----
+  /** Met days given their XP now and recent enough to bring a chest (a whole history does not become chests). */
+  const newGoalDays: IsoDate[] = [];
   const metDays = [...new Set(context.metToday ? [...context.metDays, today] : context.metDays)]
     .filter((day) => compareDates(day, today) <= 0)
     .sort(compareDates);
@@ -323,6 +427,7 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
     if (state.goalCursor !== null && compareDates(day, state.goalCursor) <= 0) continue;
     ledger.push({ source: 'goal', sourceId: day, amount: XP.goalDay, base: XP.goalDay, bonus: 0, reason: 'goal', at: now, on: day });
     state.goalCursor = day;
+    if (compareDates(day, addDays(today, -1)) >= 0) newGoalDays.push(day);
   }
 
   // ---- Quests set from the day as a whole ----
@@ -344,11 +449,19 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
     if (quest.completedAt === null && quest.progress >= quest.target) {
       quest.completedAt = now;
       touched.add(questKey(quest));
-      reward('quest', { xp: quest.reward, quest: quest.kind, period: quest.period, target: quest.target });
+      reward('quest', {
+        xp: quest.reward,
+        quest: quest.kind,
+        period: quest.period,
+        target: quest.target,
+        ...(economy === null ? {} : { stardust: quest.period === 'week' ? STARDUST.weeklyQuest : STARDUST.dailyQuest }),
+      });
     }
   }
   const dailyAfter = current().filter((quest) => quest.period === 'day' && quest.completedAt !== null).length;
-  if (dailyBefore < DAILY_QUESTS && dailyAfter >= DAILY_QUESTS) reward('quests_all', { xp: XP.allQuests });
+  if (dailyBefore < DAILY_QUESTS && dailyAfter >= DAILY_QUESTS) {
+    reward('quests_all', { xp: XP.allQuests, ...(economy === null ? {} : { stardust: STARDUST.allQuests }) });
+  }
 
   // ---- Streak freezes ----
   const freezes = snapshot.freezes.map((freeze) => ({ ...freeze }));
@@ -380,16 +493,32 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
     reward('freeze_granted', { streak: streak.current });
   }
 
+  // ---- Chests: one for each day the goals are met ----
+  if (economy !== null) for (const day of newGoalDays) reward('chest', { day, streak: streak.current, rarePercent: pets.chestRarePercent });
+
   // ---- Badges ----
   const heldBadges = new Set(snapshot.badges.map((badge) => `${badge.badge}:${badge.tier}`));
-  const badges = newTiers({ ...context.metrics, longestStreak: streak.longest, longestCombo: state.longestCombo }, heldBadges);
+  const badges = newTiers(
+    { ...context.metrics, longestStreak: streak.longest, longestCombo: state.longestCombo, bosses: state.bossWins },
+    heldBadges,
+  );
+  for (const month of monthlyEarned) {
+    badges.push({ badge: monthBadge(month) as BadgeId, tier: 1 });
+    reward('badge', { badge: monthBadge(month), tier: 1, month });
+  }
   for (const badge of badges) reward('badge', { badge: badge.badge, tier: badge.tier });
 
   // ---- Level ----
   const total = snapshot.totalXp + ledger.reduce((sum, entry) => sum + entry.amount, 0);
   const level = levelOf(total).level;
   // Level 1 is where everyone starts: only a level above it, and above the last one shown, is news.
-  if (level > Math.max(1, state.levelAnnounced)) reward('level', { level, from: state.levelAnnounced });
+  if (level > Math.max(1, state.levelAnnounced)) {
+    reward('level', {
+      level,
+      from: state.levelAnnounced,
+      ...(economy === null ? {} : { stardust: levelStardust(state.levelAnnounced, level) }),
+    });
+  }
   state.levelAnnounced = Math.max(state.levelAnnounced, level);
 
   return {
@@ -403,17 +532,62 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
     freezes: [...changedFreezes.values()],
     rewards,
     claimed: [],
+    stardust: [],
+    inventory: [],
   };
+}
+
+/** A change that only moves the state on: where the shop's, the boss's and the companions' changes start. */
+export function stateChange(snapshot: GameSnapshot, state: GameStateData): GameChange {
+  return { version: snapshot.version, state, ledger: [], quests: [], badges: [], freezes: [], rewards: [], claimed: [], stardust: [], inventory: [] };
+}
+
+/**
+ * Adds items to a change (any already owned are left out: whoever adds them
+ * turns them into stardust first), and gives the reward of every card set
+ * they complete.
+ */
+export function addItems(change: GameChange, owned: ReadonlySet<string>, items: readonly string[], source: string, at: string, newId: () => string): void {
+  const have = new Set([...owned, ...change.inventory.map((entry) => entry.item)]);
+  for (const item of items) {
+    if (have.has(item)) continue;
+    have.add(item);
+    change.inventory.push({ item, source });
+  }
+  for (const set of CARD_SETS) {
+    if (change.state.setsDone.includes(set.id) || !set.cards.every((card) => have.has(card))) continue;
+    change.state = { ...change.state, setsDone: [...change.state.setsDone, set.id] };
+    if (!have.has(set.title)) {
+      have.add(set.title);
+      change.inventory.push({ item: set.title, source: set.id });
+    }
+    change.rewards.push({ id: newId(), kind: 'set', payload: { set: set.id, stardust: set.stardust, title: set.title }, createdAt: at });
+  }
+}
+
+/** A chest opened as it was claimed. */
+export interface Opened {
+  reward: string;
+  contents: ChestContents;
 }
 
 /**
  * Claims rewards: each one's XP goes into the ledger, and a new level from
  * that XP is announced the same way as any other.
  */
-export function claim(snapshot: GameSnapshot, ids: readonly string[], now: string, today: IsoDate, newId: () => string): GameChange {
+export function claim(
+  snapshot: GameSnapshot,
+  ids: readonly string[],
+  now: string,
+  today: IsoDate,
+  newId: () => string,
+  /** Draws chests, where the database keeps what is in them (version 19); without it chests stay closed. */
+  random: (() => number) | null = null,
+): GameChange & { opened: Opened[] } {
   const state: GameStateData = { ...INITIAL_STATE, ...snapshot.state };
   const wanted = new Set(ids);
-  const claiming = snapshot.rewards.filter((reward) => wanted.has(reward.id));
+  const isChest = (reward: Reward) => reward.kind === 'chest' || typeof reward.payload.chest === 'string';
+  const claiming = snapshot.rewards.filter((reward) => wanted.has(reward.id) && (random !== null || !isChest(reward)));
   const ledger: LedgerEntry[] = claiming
     .filter((reward) => (reward.payload.xp ?? 0) > 0)
     .map((reward) => ({
@@ -426,23 +600,46 @@ export function claim(snapshot: GameSnapshot, ids: readonly string[], now: strin
       at: now,
       on: today,
     }));
-  const rewards: Reward[] = [];
+  const change: GameChange & { opened: Opened[] } = { ...stateChange(snapshot, state), ledger, opened: [] };
+  const owned = new Set(snapshot.inventory);
+  for (const reward of claiming) {
+    const stardust = typeof reward.payload.stardust === 'number' ? reward.payload.stardust : 0;
+    if (stardust > 0) change.stardust.push({ source: 'reward', sourceId: reward.id, amount: stardust, reason: reward.kind, at: now });
+    // Reaching Gold in a league opens a companion slot for good.
+    if (reward.kind === 'league' && Number(reward.payload.tier) >= 3) {
+      change.state = { ...change.state, pets: { ...INITIAL_PETS, ...change.state.pets, goldReached: true } };
+    }
+    if (!isChest(reward) || random === null) continue;
+    const given = typeof reward.payload.chest === 'string' ? reward.payload.chest : reward.payload.rarity;
+    const rarity =
+      given === 'common' || given === 'rare' || given === 'legendary'
+        ? given
+        : chestRarity(random, Number(reward.payload.streak ?? 0), Number(reward.payload.rarePercent ?? 0));
+    const contents = openChest(rarity, random, new Set([...owned, ...change.inventory.map((entry) => entry.item)]));
+    if (contents.xp > 0) {
+      ledger.push({ source: 'reward', sourceId: reward.id, amount: contents.xp, base: contents.xp, bonus: 0, reason: 'chest', at: now, on: today });
+    }
+    if (contents.stardust > 0) change.stardust.push({ source: 'chest', sourceId: reward.id, amount: contents.stardust, reason: rarity, at: now });
+    addItems(change, owned, contents.items, `chest:${reward.id}`, now, newId);
+    change.opened.push({ reward: reward.id, contents });
+  }
   const total = snapshot.totalXp + ledger.reduce((sum, entry) => sum + entry.amount, 0);
   const level = levelOf(total).level;
-  if (level > Math.max(1, state.levelAnnounced)) {
-    rewards.push({ id: newId(), kind: 'level', payload: { level, from: state.levelAnnounced }, createdAt: now });
+  if (level > Math.max(1, change.state.levelAnnounced)) {
+    change.rewards.push({
+      id: newId(),
+      kind: 'level',
+      payload: {
+        level,
+        from: change.state.levelAnnounced,
+        ...(random === null ? {} : { stardust: levelStardust(change.state.levelAnnounced, level) }),
+      },
+      createdAt: now,
+    });
   }
-  state.levelAnnounced = Math.max(state.levelAnnounced, level);
-  return {
-    version: snapshot.version,
-    state,
-    ledger,
-    quests: [],
-    badges: [],
-    freezes: [],
-    rewards,
-    claimed: claiming.map((reward) => reward.id),
-  };
+  change.state = { ...change.state, levelAnnounced: Math.max(change.state.levelAnnounced, level) };
+  change.claimed = claiming.map((reward) => reward.id);
+  return change;
 }
 
 /** Whether a change stores anything at all; an empty one need not be sent. */
@@ -454,6 +651,8 @@ export function isEmpty(change: GameChange, before: GameStateData): boolean {
     change.freezes.length === 0 &&
     change.rewards.length === 0 &&
     change.claimed.length === 0 &&
+    change.stardust.length === 0 &&
+    change.inventory.length === 0 &&
     JSON.stringify(change.state) === JSON.stringify({ ...INITIAL_STATE, ...before })
   );
 }

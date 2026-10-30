@@ -290,7 +290,8 @@ describe('reading other accounts', () => {
 describe('upgrading to version 18', () => {
   it('runs on a database at version 17, and can be run again', async () => {
     const migrations = readMigrations();
-    const old = await createTestDatabase({ migrations: migrations.length - 1 });
+    const at = migrations.findIndex((migration) => migration.name.endsWith('_competition.sql'));
+    const old = await createTestDatabase({ migrations: at });
     try {
       const user = await old.createUser('owner@example.test');
       const [row] = await old.as(user, (s) =>
@@ -303,7 +304,7 @@ describe('upgrading to version 18', () => {
          values ($1, $2, gen_random_uuid(), 'review', 'remember', '2026-10-20', '2026-10-20T08:00:00Z', 3, 4, 'mastery_v1')`,
         [user, row!.id],
       );
-      const v18 = migrations.at(-1)!;
+      const v18 = migrations[at]!;
       await old.db.exec(v18.sql);
       await old.db.exec(v18.sql);
       expect(await old.admin('select public.app_schema_version() as v')).toEqual([{ v: 18 }]);
