@@ -151,6 +151,8 @@ export const capabilitiesSchema = z.object({
   competition: z.boolean().default(false),
   /** Stardust, the shop, chests, companions, the weekly boss and events (schema version 19). */
   economy: z.boolean().default(false),
+  /** Reminders by web push (schema version 20). */
+  notifications: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -170,6 +172,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   game: false,
   competition: false,
   economy: false,
+  notifications: false,
 };
 
 /**
@@ -1269,6 +1272,41 @@ export const bossResponseSchema = z.object({
 });
 
 export const gameEventsSchema = z.object({ goldenHour: z.boolean(), sunday: z.boolean(), monthly: z.boolean(), boss: z.boolean() });
+
+// ---- Reminders (docs/gamification-plan.md, phase 4) ----
+
+const clockSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
+
+export const notificationSettingsSchema = z.object({
+  streak: z.boolean(),
+  league: z.boolean(),
+  reminder: z.boolean(),
+  social: z.boolean(),
+  /** The daily reminder's time, and the quiet hours, in the account's own time (HH:MM). */
+  reminderAt: clockSchema,
+  quietFrom: clockSchema,
+  quietUntil: clockSchema,
+});
+
+export const notificationsResponseSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().nullable(),
+  /** The server's VAPID public key, for the browser to subscribe with. */
+  publicKey: z.string().nullable(),
+  settings: notificationSettingsSchema,
+  /** The push endpoints of the account's devices. */
+  devices: z.array(z.string()),
+});
+
+export const pushSubscribeRequestSchema = z.strictObject({
+  endpoint: z.url().startsWith('https://').max(1000),
+  keys: z.strictObject({ p256dh: z.string().min(1).max(200), auth: z.string().min(1).max(100) }),
+});
+
+export const pushUnsubscribeRequestSchema = z.strictObject({ endpoint: z.string().max(1000) });
+
+export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
+export type NotificationsResponse = z.infer<typeof notificationsResponseSchema>;
 
 export type ShopResponse = z.infer<typeof shopResponseSchema>;
 export type BuyRequest = z.infer<typeof buyRequestSchema>;

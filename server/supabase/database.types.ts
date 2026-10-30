@@ -192,6 +192,46 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      /** From schema version 20. */
+      notification_settings: {
+        Row: {
+          user_id: string;
+          streak: boolean;
+          league: boolean;
+          reminder: boolean;
+          social: boolean;
+          reminder_at: string;
+          quiet_from: string;
+          quiet_until: string;
+          updated_at: string;
+        };
+        Insert: {
+          user_id?: string;
+          streak?: boolean;
+          league?: boolean;
+          reminder?: boolean;
+          social?: boolean;
+          reminder_at?: string;
+          quiet_from?: string;
+          quiet_until?: string;
+        };
+        Update: {
+          streak?: boolean;
+          league?: boolean;
+          reminder?: boolean;
+          social?: boolean;
+          reminder_at?: string;
+          quiet_from?: string;
+          quiet_until?: string;
+        };
+        Relationships: [];
+      };
+      push_subscriptions: {
+        Row: { user_id: string; endpoint: string; p256dh: string; auth: string; created_at: string };
+        Insert: { user_id?: string; endpoint: string; p256dh: string; auth: string };
+        Update: Record<string, never>;
+        Relationships: [];
+      };
       /** From schema version 19. */
       inventory: {
         Row: { user_id: string; item_id: string; source: string; acquired_at: string };
@@ -504,6 +544,13 @@ export interface Database {
         Args: { p_payload: string; p_signature: string };
         Returns: Array<{ outcome: 'ok' | 'stale'; version: number; total_xp: number }>;
       };
+      /** From schema version 20, called by the reminder timer with its secret. */
+      notify_candidates: { Args: { p_token: string; p_now: string }; Returns: Array<Record<string, unknown>> };
+      notify_league: { Args: { p_token: string; p_week: string }; Returns: Array<Record<string, unknown>> };
+      notify_social: { Args: { p_token: string; p_week: string }; Returns: Array<Record<string, unknown>> };
+      notify_claim: { Args: { p_token: string; p_sends: unknown; p_state: unknown }; Returns: Array<Record<string, unknown>> };
+      notify_gone: { Args: { p_token: string; p_endpoints: string[] }; Returns: undefined };
+      push_take_device: { Args: { p_endpoint: string; p_p256dh: string; p_auth: string }; Returns: undefined };
       /** From schema version 18 (19 for the last two); the rows are parsed where they are used. */
       profile_showcase: {
         Args: Record<string, string | string[] | null>;

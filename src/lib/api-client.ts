@@ -60,6 +60,9 @@ import {
   type StudyGoalsResponse,
   type GameResponse,
   adminResponseSchema,
+  notificationsResponseSchema,
+  type NotificationSettings,
+  type NotificationsResponse,
   bossResponseSchema,
   collectionResponseSchema,
   gameEventsSchema,
@@ -200,6 +203,12 @@ export interface CompetitionApi {
   equip(choice: { pets?: string[]; theme?: string | null }): Promise<CollectionResponse>;
   chooseStarter(pet: string): Promise<CollectionResponse>;
   fetchBoss(): Promise<BossResponse>;
+  // Phase 4: reminders.
+  fetchNotifications(): Promise<NotificationsResponse>;
+  saveNotifications(settings: Partial<NotificationSettings>): Promise<NotificationsResponse>;
+  subscribePush(subscription: { endpoint: string; keys: { p256dh: string; auth: string } }): Promise<NotificationsResponse>;
+  unsubscribePush(endpoint: string): Promise<NotificationsResponse>;
+  testPush(): Promise<{ sent: number; gone: number }>;
   moderate(target: string, action: 'rename' | 'hide' | 'unhide' | 'resolve'): Promise<void>;
 }
 
@@ -668,6 +677,17 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
     chooseStarter: (pet) => change('/api/collection/starter', 'POST', { pet }, collectionResponseSchema),
 
     fetchBoss: () => call('/api/boss', bossResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading the boss took too long.' }),
+
+    fetchNotifications: () =>
+      call('/api/notifications', notificationsResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading your reminders took too long.' }),
+
+    saveNotifications: (settings) => change('/api/notifications', 'PUT', settings, notificationsResponseSchema),
+
+    subscribePush: (subscription) => change('/api/notifications/subscribe', 'POST', subscription, notificationsResponseSchema),
+
+    unsubscribePush: (endpoint) => change('/api/notifications/unsubscribe', 'POST', { endpoint }, notificationsResponseSchema),
+
+    testPush: () => change('/api/notifications/test', 'POST', {}, z.object({ sent: z.number().int(), gone: z.number().int() })),
 
     moderate: (target, action) => change('/api/admin/action', 'POST', { target, action }, okSchema).then(() => undefined),
 

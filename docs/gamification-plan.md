@@ -539,7 +539,7 @@ Mặc định tôi tự đặt (cần duyệt):
   gửi bằng thư viện `web-push` trên server.
 - **Cần bộ hẹn giờ chạy mỗi 15 phút.** Kiểm tra giới hạn Cron của gói Vercel
   đang dùng; nếu không đủ, dùng GitHub Actions `schedule` (miễn phí) gọi
-  `POST /api/cron/notify` có `CRON_SECRET`.
+  `POST /api/cron/notify` có `CRON_TOKEN`.
 - Server không có quyền đọc dữ liệu của mọi người (không service-role key):
   hàm definer `notify_due(token)` kiểm tra token với bản băm lưu trong database,
   rồi trả danh sách cần gửi (chỉ subscription và nội dung, không dữ liệu học).
@@ -551,8 +551,36 @@ ngày, token sai bị từ chối, subscription hết hạn (HTTP 410) bị xóa
 
 ### 4.4 Chủ dự án làm
 
-Tạo khóa VAPID và `CRON_SECRET` (lệnh có trong tài liệu), đặt trên Vercel, chạy
-`…_notifications.sql`, thiết lập bộ hẹn giờ.
+1. Tạo khóa: `npx web-push generate-vapid-keys` (ra Public Key và Private Key) và
+   một bí mật cho bộ hẹn giờ: `openssl rand -hex 32`.
+2. Vercel → Environment Variables: `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`,
+   `VAPID_SUBJECT=mailto:<email của bạn>`, `CRON_TOKEN=<bí mật>`; Redeploy.
+3. Supabase → SQL Editor: chạy `supabase/migrations/20261102090000_notifications.sql`
+   (sau v19), rồi lưu bản băm của bí mật (database không giữ bí mật gốc):
+   `insert into public.notify_secret (hash) values (encode(sha256(convert_to('<bí mật>', 'UTF8')), 'hex')) on conflict (id) do update set hash = excluded.hash;`
+4. GitHub → repo → Settings → Secrets and variables → Actions: thêm `APP_URL`
+   (địa chỉ app trên Vercel) và `CRON_TOKEN` (cùng bí mật). Workflow
+   `.github/workflows/reminders.yml` chạy mỗi 15 phút (GitHub có thể trễ vài
+   phút, và tự tắt lịch nếu repo không có hoạt động trong 60 ngày).
+5. Mở app → Cài đặt → Nhắc nhở → bật trên thiết bị và bấm "Gửi thử".
+
+### 4.5 Đã làm (khác với kế hoạch ở đâu)
+
+- Server quyết định bằng luật trong `shared/notifications.ts` từ những gì các hàm
+  `notify_*` trả (chỉ trả cho đúng bí mật), **giữ chỗ** từng thông báo trước khi
+  gửi (`notify_claim`) nên hai lần chạy cùng lúc cũng không gửi trùng. Hàm chỉ
+  trả thiết bị, giờ địa phương, lựa chọn, đã đạt mục tiêu hay chưa, số từ đang
+  chờ, điểm tuần và biệt danh bạn bè; không có từ vựng hay câu trả lời.
+- Nhắc học mỗi ngày chỉ gửi trong 2 giờ sau giờ đã chọn, khi còn từ chờ và chưa
+  đạt mục tiêu. Giờ vàng báo trước 20 phút. Kết quả tuần và lời thách đấu gặp
+  giờ yên lặng thì đợi sáng hôm sau, không mất.
+- Một trình duyệt chỉ thuộc tài khoản đăng ký sau cùng trên nó, để thông báo
+  của người khác không hiện trên máy mình.
+- Thêm `manifest.webmanifest` và biểu tượng để iPhone/iPad "Thêm vào Màn hình
+  chính" được.
+- Biến bí mật của bộ hẹn giờ tên là `CRON_TOKEN` (không phải `CRON_SECRET`): một
+  test của dự án cấm mọi biến có chữ `SECRET` ở server, để không ai cắm nhầm
+  khóa service-role của Supabase vào.
 
 ---
 

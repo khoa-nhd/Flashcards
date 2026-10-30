@@ -29,6 +29,10 @@ export interface AppConfig {
    * lower case). The database's own list of admins must name them too.
    */
   adminEmails: string[];
+  /** Web push keys (phase 4): both or neither. Without them no reminder is sent. */
+  vapid: { publicKey: string; privateKey: string; subject: string } | null;
+  /** What the reminder timer presents. The database keeps its SHA-256. */
+  cronSecret: string | null;
   port: number;
   host: string;
   /** Problems that stop the app from serving reviews. Never contains secret values. */
@@ -116,6 +120,16 @@ export function loadConfig(env: Env = process.env): AppConfig {
     .map((email) => email.trim().toLowerCase())
     .filter((email) => email.includes('@'));
 
+  const vapidPublic = read(env, 'VAPID_PUBLIC_KEY');
+  const vapidPrivate = read(env, 'VAPID_PRIVATE_KEY');
+  const vapid =
+    vapidPublic !== null && vapidPrivate !== null
+      ? { publicKey: vapidPublic, privateKey: vapidPrivate, subject: read(env, 'VAPID_SUBJECT') ?? 'mailto:reminders@example.com' }
+      : null;
+  const cronValue = read(env, 'CRON_TOKEN');
+  // Too short a secret is as good as none.
+  const cronSecret = cronValue !== null && cronValue.length >= 32 ? cronValue : null;
+
   const port = Number(read(env, 'PORT') ?? '8787');
   if (!Number.isInteger(port) || port <= 0 || port > 65535) issues.push('PORT is not a valid port.');
 
@@ -128,6 +142,8 @@ export function loadConfig(env: Env = process.env): AppConfig {
     writesRequested: mode === 'mock' || read(env, 'REVIEW_WRITES_ENABLED')?.toLowerCase() !== 'false',
     gameSigningKey,
     adminEmails,
+    vapid,
+    cronSecret,
     port: Number.isInteger(port) ? port : 8787,
     host: read(env, 'HOST') ?? (isProduction ? '0.0.0.0' : '127.0.0.1'),
     issues,

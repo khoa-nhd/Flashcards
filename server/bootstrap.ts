@@ -15,6 +15,16 @@ import { createSchedulerStore } from './scheduler-store.js';
 import { createSupabaseAccounts } from './supabase/supabase-accounts.js';
 import { StudyGoalsService, createStudyGoalStore } from './study-goals-service.js';
 import { CompetitionService } from './competition-service.js';
+import { createClient } from '@supabase/supabase-js';
+import webPush from 'web-push';
+import {
+  NotificationService,
+  createMemoryNotificationStore,
+  createSupabaseNotifyDatabase,
+  createWebPushSender,
+  runReminders,
+} from './notification-service.js';
+import type { Database } from './supabase/database.types.js';
 import { GameService, createMemoryGameStore } from './game-service.js';
 import { createMemoryCompetitionStore } from './mock/mock-competition.js';
 import { SUGGESTED_STUDY_GOALS } from '../shared/study-goals.js';
@@ -45,8 +55,21 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
             writesRequested: config.writesRequested,
             gameSigningKey: config.gameSigningKey,
             adminEmails: config.adminEmails,
+            vapid: config.vapid,
           });
-    return { app: createApp({ config, service: null, accounts }), config };
+    // The reminder timer's run: the anonymous role, opened only by the secret the database checks.
+    const reminders =
+      config.supabase === null || config.cronSecret === null || config.vapid === null
+        ? null
+        : {
+            run: () => {
+              const client = createClient<Database>(config.supabase!.url, config.supabase!.publicKey, {
+                auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+              });
+              return runReminders(createSupabaseNotifyDatabase(client, config.cronSecret!), createWebPushSender(config.vapid!), new Date());
+            },
+          };
+    return { app: createApp({ config, service: null, accounts, reminders }), config };
   }
 
   // Sample words kept in memory, shared by everyone who opens the app.
@@ -156,7 +179,18 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     owns: (item) => game.owns(item),
     economy: true,
   });
-  return { app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game, competition }), config };
+  // The sample data's reminders: kept in memory, sent with keys made for this run unless some are given.
+  const keys = config.vapid ?? { ...webPush.generateVAPIDKeys(), subject: 'mailto:sample@example.test' };
+  const notifications = new NotificationService({
+    database: createMemoryNotificationStore(),
+    sender: createWebPushSender(keys),
+    publicKey: keys.publicKey,
+    available: true,
+  });
+  return {
+    app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game, competition, notifications }),
+    config,
+  };
 }
 
 let shared: ReturnType<typeof buildApp> | undefined;

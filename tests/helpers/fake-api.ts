@@ -684,6 +684,24 @@ export function createFakeApi({
     chooseStarter: vi.fn<AppApi['chooseStarter']>(async () => {
       throw new ApiError('not_supported', 'The collection is not available.', 409);
     }),
+    // Reminders: not kept by this fake, as by a server without VAPID keys.
+    fetchNotifications: vi.fn<AppApi['fetchNotifications']>(async () => ({
+      available: false,
+      reason: 'Reminders are not set up on the server yet (VAPID keys).',
+      publicKey: null,
+      settings: { streak: true, league: true, reminder: true, social: true, reminderAt: '19:00', quietFrom: '23:00', quietUntil: '07:00' },
+      devices: [],
+    })),
+    saveNotifications: vi.fn<AppApi['saveNotifications']>(async () => {
+      throw new ApiError('not_supported', 'Reminders are not available.', 409);
+    }),
+    subscribePush: vi.fn<AppApi['subscribePush']>(async () => {
+      throw new ApiError('not_supported', 'Reminders are not available.', 409);
+    }),
+    unsubscribePush: vi.fn<AppApi['unsubscribePush']>(async () => {
+      throw new ApiError('not_supported', 'Reminders are not available.', 409);
+    }),
+    testPush: vi.fn<AppApi['testPush']>(async () => ({ sent: 0, gone: 0 })),
     fetchBoss: vi.fn<AppApi['fetchBoss']>(async () => ({
       available: false,
       reason: 'The weekly boss needs the latest database update (version 19).',

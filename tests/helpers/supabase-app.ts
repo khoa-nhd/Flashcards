@@ -63,6 +63,7 @@ export function createSupabaseTestApp(db: TestDatabase, users: TestUser[], optio
     ratingMap: fsrsRatingMap,
     gameSigningKey: config.gameSigningKey,
     adminEmails: config.adminEmails,
+    vapid: config.vapid,
     connect(token, schemaVersion) {
       const user = byToken.get(token);
       if (user === undefined) throw new Error('No such test user.');

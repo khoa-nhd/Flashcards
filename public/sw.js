@@ -65,3 +65,36 @@ self.addEventListener('fetch', (event) => {
     ),
   );
 });
+
+// ---- Reminders (web push, phase 4) ----
+// The server sends { title, body, url, tag }; a tap opens the app at `url`.
+
+self.addEventListener('push', (event) => {
+  let data;
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : '' };
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'Vocabulary', {
+      body: data.body || '',
+      tag: data.tag || 'reminder',
+      icon: '/icon.svg',
+      badge: '/icon.svg',
+      data: { url: typeof data.url === 'string' && data.url.startsWith('/') ? data.url : '/' },
+    }),
+  );
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const url = new URL(event.notification.data?.url || '/', self.location.origin).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((windows) => {
+      const open = windows.find((client) => new URL(client.url).origin === self.location.origin);
+      if (open) return open.focus().then(() => open.navigate(url));
+      return self.clients.openWindow(url);
+    }),
+  );
+});

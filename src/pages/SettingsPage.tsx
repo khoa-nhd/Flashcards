@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { ProfileSettings } from '../components/ProfileSettings.js';
+import { ReminderSettings } from '../components/Reminders.js';
 import { useApp, useSettings, useSync, useVocabulary } from '../app-context.js';
 import { AccountSection, DatabaseStatus, TimeZoneSection, TrashSection } from '../components/AccountSettings.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -82,6 +83,7 @@ export function SettingsPage() {
         {account !== null && <AccountSection account={account} />}
         {account !== null && <TimeZoneSection />}
         <ProfileSettings />
+        <ReminderSettings />
         {fsrsOnly ? (
           <FsrsSettingsSection />
         ) : (

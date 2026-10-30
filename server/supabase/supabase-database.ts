@@ -6,6 +6,7 @@
  * key plus that user's access token, so Row Level Security decides what each
  * request can see and change. No privileged key exists anywhere in this app.
  */
+import type { NotificationSettings } from '../../shared/api.js';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { z } from 'zod';
 import { isIsoDate, type IsoDate } from '../../shared/dates.js';
@@ -207,6 +208,35 @@ export const gameStateRowSchema = z.object({
 
 export const gameEventRowSchema = z.object({ event: z.string(), enabled: z.boolean() });
 
+export const notificationSettingsRowSchema = z.object({
+  streak: z.boolean(),
+  league: z.boolean(),
+  reminder: z.boolean(),
+  social: z.boolean(),
+  reminder_at: z.string(),
+  quiet_from: z.string(),
+  quiet_until: z.string(),
+});
+
+export function notificationSettingsFromRow(row: unknown): NotificationSettings {
+  const parsed = notificationSettingsRowSchema.safeParse(row);
+  if (!parsed.success) throw new DatabaseError('unavailable', 'The database returned reminder settings in an unexpected shape.');
+  const { reminder_at, quiet_from, quiet_until, ...kinds } = parsed.data;
+  return { ...kinds, reminderAt: reminder_at.slice(0, 5), quietFrom: quiet_from.slice(0, 5), quietUntil: quiet_until.slice(0, 5) };
+}
+
+export function notificationSettingsToRow(settings: NotificationSettings) {
+  return {
+    streak: settings.streak,
+    league: settings.league,
+    reminder: settings.reminder,
+    social: settings.social,
+    reminder_at: settings.reminderAt,
+    quiet_from: settings.quietFrom,
+    quiet_until: settings.quietUntil,
+  };
+}
+
 export const gameQuestRowSchema = z.object({
   period: z.enum(['day', 'week']),
   period_start: isoDay,
@@ -349,7 +379,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 19;
+export const LATEST_SCHEMA_VERSION = 20;
 
 /**
  * The newest migration Settings asks the owner to run. Version 15 makes FSRS
@@ -357,7 +387,7 @@ export const LATEST_SCHEMA_VERSION = 19;
  * screens for it exist (docs/fsrs-only-progress.md), so the app does not ask
  * for it yet. Raise this to LATEST_SCHEMA_VERSION when they do.
  */
-export const RECOMMENDED_SCHEMA_VERSION = 19;
+export const RECOMMENDED_SCHEMA_VERSION = 20;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -646,6 +676,12 @@ export interface VocabularyDatabase {
   gameCommit?(payload: string, signature: string): Promise<z.infer<typeof gameCommitRowSchema>>;
   /** Needs schema version 18: one of the competition's functions, with named arguments; its rows as JSON. */
   competitionCall?(fn: CompetitionFunction, args: Record<string, string | string[] | null>): Promise<unknown[]>;
+  /** Needs schema version 20: the account's reminder choices; null before it chose any. */
+  notificationSettings?(): Promise<NotificationSettings | null>;
+  saveNotificationSettings?(settings: NotificationSettings): Promise<void>;
+  pushDevices?(): Promise<Array<{ endpoint: string; p256dh: string; auth: string }>>;
+  addPushDevice?(device: { endpoint: string; p256dh: string; auth: string }): Promise<void>;
+  removePushDevice?(endpoint: string): Promise<void>;
   /** Needs schema version 19: the events an admin switched on or off; one not listed is on. */
   gameEvents?(): Promise<Array<z.infer<typeof gameEventRowSchema>>>;
   setCardTrashed(id: string, trashed: boolean): Promise<boolean>;
@@ -1788,6 +1824,44 @@ export function createSupabaseDatabase(
         rewards: parse(gameRewardRowSchema, rewards.data, 'rewards'),
         inventory: parse(z.object({ item_id: z.string() }), inventory.data, 'items').map((row) => row.item_id),
       };
+    },
+
+    async notificationSettings() {
+      if (schemaVersion < 20) throw new DatabaseError('schema_missing', 'Reminders need the latest database update (version 20).');
+      const { data, error, status } = await client
+        .from('notification_settings')
+        .select('streak, league, reminder, social, reminder_at, quiet_from, quiet_until')
+        .maybeSingle();
+      if (error) throw toDatabaseError(error, status);
+      return data === null ? null : notificationSettingsFromRow(data);
+    },
+
+    async saveNotificationSettings(settings) {
+      if (schemaVersion < 20) throw new DatabaseError('schema_missing', 'Reminders need the latest database update (version 20).');
+      const { error, status } = await client.from('notification_settings').upsert(notificationSettingsToRow(settings), { onConflict: 'user_id' });
+      if (error) throw toDatabaseError(error, status);
+    },
+
+    async pushDevices() {
+      if (schemaVersion < 20) throw new DatabaseError('schema_missing', 'Reminders need the latest database update (version 20).');
+      const { data, error, status } = await client.from('push_subscriptions').select('endpoint, p256dh, auth').order('created_at');
+      if (error) throw toDatabaseError(error, status);
+      const rows = z.array(z.object({ endpoint: z.string(), p256dh: z.string(), auth: z.string() })).safeParse(data ?? []);
+      if (!rows.success) throw new DatabaseError('unavailable', 'The database returned devices in an unexpected shape.');
+      return rows.data;
+    },
+
+    async addPushDevice(device) {
+      if (schemaVersion < 20) throw new DatabaseError('schema_missing', 'Reminders need the latest database update (version 20).');
+      // A device another account had is taken over by this one: the browser now belongs to whoever subscribed last.
+      const { error, status } = await client.rpc('push_take_device', { p_endpoint: device.endpoint, p_p256dh: device.p256dh, p_auth: device.auth });
+      if (error) throw toDatabaseError(error, status);
+    },
+
+    async removePushDevice(endpoint) {
+      if (schemaVersion < 20) throw new DatabaseError('schema_missing', 'Reminders need the latest database update (version 20).');
+      const { error, status } = await client.from('push_subscriptions').delete().eq('endpoint', endpoint);
+      if (error) throw toDatabaseError(error, status);
     },
 
     async gameEvents() {

@@ -31,6 +31,9 @@ import {
   updateExampleRequestSchema,
   updateSettingsRequestSchema,
   adminActionRequestSchema,
+  notificationSettingsSchema,
+  pushSubscribeRequestSchema,
+  pushUnsubscribeRequestSchema,
   buyRequestSchema,
   equipRequestSchema,
   gameEventsSchema,
@@ -59,6 +62,8 @@ import { AiError, AiErrorCode } from './ai-service.js';
 import type { StudyGoalsService } from './study-goals-service.js';
 import { GameError, unavailableGame, type GameService } from './game-service.js';
 import { CompetitionError, type CompetitionService } from './competition-service.js';
+import type { NotificationService, RunSummary } from './notification-service.js';
+import { timingSafeEqual } from 'node:crypto';
 import { leagueWeekOf, weekEndsAt } from '../shared/gamification/league.js';
 import { calendarDateInTimeZone } from '../shared/dates.js';
 import { AI_MODES } from './ai-service.js';
@@ -85,6 +90,10 @@ export interface AppDependencies {
   game?: GameService | null;
   /** Leagues, friends and profiles; `null` where they cannot be kept. */
   competition?: CompetitionService | null;
+  /** Reminders for the sample data's nobody. */
+  notifications?: NotificationService | null;
+  /** The reminder timer's run; `null` where it is not set up. */
+  reminders?: { run(): Promise<RunSummary> } | null;
 }
 
 /** What the current request may use. With accounts, all of it belongs to one signed-in user. */
@@ -102,11 +111,24 @@ interface Scope {
   gameReason: string | null;
   competition: CompetitionService | null;
   competitionReason: string | null;
+  notifications: NotificationService | null;
+  /** The interface language the account chose, for messages sent to it. */
+  language: 'vi' | 'en';
   /** The zone the account's days are counted in. */
   timeZone: string | null;
 }
 
 type AppEnv = { Variables: { scope: Scope } };
+
+/** The secret in an `Authorization: Bearer …` header, or `null`. */
+const bearerSecret = (header: string | undefined) => /^Bearer\s+(\S+)$/i.exec(header?.trim() ?? '')?.[1] ?? null;
+
+/** Compares secrets in constant time. */
+function sameSecret(given: string, expected: string): boolean {
+  const a = Buffer.from(given, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 const GAME_REFUSALS = {
   insufficient: [409, 'insufficient'],
@@ -188,6 +210,8 @@ export function createApp({
   studyGoals = null,
   game = null,
   competition = null,
+  notifications = null,
+  reminders = null,
 }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
@@ -288,6 +312,16 @@ export function createApp({
     return c.json(body);
   });
 
+  // The reminder timer (a scheduled job) calls this with CRON_TOKEN. The database checks the
+  // secret again: the server alone cannot read anyone's reminders.
+  app.post('/api/cron/notify', async (c) => {
+    const given = bearerSecret(c.req.header('authorization'));
+    const expected = config.cronSecret;
+    if (expected === null || reminders === null) throw new HttpError(503, 'setup_incomplete', 'Reminders are not set up on the server (CRON_TOKEN, VAPID keys).');
+    if (given === null || !sameSecret(given, expected)) throw new HttpError(401, 'unauthorized', 'Not the reminder timer.');
+    return c.json(await reminders.run());
+  });
+
   // ---- Everything registered below this guard requires access. ----
 
   app.use('/api/*', async (c, next) => {
@@ -310,6 +344,8 @@ export function createApp({
         gameReason: session.gameReason ?? null,
         competition: session.competition ?? null,
         competitionReason: session.competitionReason ?? null,
+        notifications: session.notifications ?? null,
+        language: session.uiLanguage ?? 'vi',
         timeZone: session.timeZone,
         session,
       });
@@ -328,6 +364,8 @@ export function createApp({
       gameReason: game === null ? 'XP and levels are not kept with this data.' : null,
       competition,
       competitionReason: competition === null ? 'Leagues and friends are not kept with this data.' : null,
+      notifications,
+      language: 'vi',
       timeZone: config.timeZone,
     });
     await next();
@@ -650,6 +688,33 @@ export function createApp({
     await compete(() => requireCompetition(c).moderate(target, action));
     return c.json({ ok: true });
   });
+
+  // ---- Reminders by web push (phase 4) ----
+
+  const requireNotifications = (c: Context<AppEnv>): NotificationService => {
+    const { notifications: service } = c.get('scope');
+    if (service == null) throw new HttpError(409, 'not_supported', 'Reminders are not available with this data.');
+    return service;
+  };
+
+  app.get('/api/notifications', async (c) => c.json(await requireNotifications(c).view()));
+
+  app.put('/api/notifications', async (c) => {
+    const settings = await parseBody(c, notificationSettingsSchema.partial().strict());
+    return c.json(await requireNotifications(c).save(settings));
+  });
+
+  app.post('/api/notifications/subscribe', async (c) => {
+    const { endpoint, keys } = await parseBody(c, pushSubscribeRequestSchema);
+    return c.json(await requireNotifications(c).subscribe({ endpoint, p256dh: keys.p256dh, auth: keys.auth }));
+  });
+
+  app.post('/api/notifications/unsubscribe', async (c) => {
+    const { endpoint } = await parseBody(c, pushUnsubscribeRequestSchema);
+    return c.json(await requireNotifications(c).unsubscribe(endpoint));
+  });
+
+  app.post('/api/notifications/test', async (c) => c.json(await requireNotifications(c).test(c.get('scope').language)));
 
   app.get('/api/sessions/:id/summary', async (c) => {
     const parsed = pageIdSchema.safeParse(c.req.param('id'));

@@ -34,6 +34,7 @@ import { SupabaseVocabularyRepository } from './supabase-repository.js';
 import { createAiService, loadAiConfig } from '../ai-service-impl.js';
 import { StudyGoalsService, createStudyGoalStore } from '../study-goals-service.js';
 import { CompetitionService, createDatabaseCompetitionStore } from '../competition-service.js';
+import { NotificationService, createWebPushSender, type VapidKeys } from '../notification-service.js';
 import { GameService, createDatabaseGameStore } from '../game-service.js';
 import { SUGGESTED_STUDY_GOALS } from '../../shared/study-goals.js';
 import { AiError, AiErrorCode } from '../ai-service.js';
@@ -109,6 +110,8 @@ export interface SupabaseAccountsOptions {
   gameSigningKey?: string | null;
   /** Accounts that may moderate (ADMIN_EMAILS); the database's `app_admins` must name them too. */
   adminEmails?: readonly string[];
+  /** Web push keys (VAPID_*): without them reminders stay off. */
+  vapid?: VapidKeys | null;
 }
 
 const FALLBACK_TIME_ZONE = 'UTC';
@@ -122,6 +125,7 @@ let aiConfigProblemLogged = false;
 export function createSupabaseAccounts(options: SupabaseAccountsOptions): AccountGateway {
   const { url, publicKey, rules, cardFields, defaults, defaultTimeZone, writesRequested, now } = options;
   const verifier = options.verifier ?? createSupabaseVerifier(url, publicKey);
+  const pushSender = options.vapid == null ? null : createWebPushSender(options.vapid);
   const ratingMap = options.ratingMap ?? DEFAULT_RATING_MAP;
   const connect =
     options.connect ??
@@ -287,7 +291,14 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           : !repository.capabilities.competition
             ? 'Leagues and friends need the latest database update (version 18).'
             : 'Leagues and friends are not set up on the server yet (GAME_SIGNING_KEY).';
+      const notifications = new NotificationService({
+        database,
+        sender: pushSender,
+        publicKey: options.vapid?.publicKey ?? null,
+        available: repository.capabilities.notifications,
+      });
       return {
+        notifications,
         game,
         gameReason,
         competition,

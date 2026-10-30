@@ -34,6 +34,8 @@ import {
   gameBadgeRowSchema,
   COMPETITION_FUNCTIONS,
   gameEventRowSchema,
+  notificationSettingsFromRow,
+  notificationSettingsToRow,
   gameCommitRowSchema,
   gameFreezeRowSchema,
   gameLedgerRowSchema,
@@ -709,6 +711,42 @@ export function createPgVocabularyDatabase(
             ? (await json('select item_id from public.inventory order by acquired_at, item_id')).map((row) => (row as { item_id: string }).item_id)
             : [],
       };
+    },
+
+    async notificationSettings() {
+      const rows = await run((session) =>
+        session.query<Row>(
+          `select streak, league, reminder, social, reminder_at::text, quiet_from::text, quiet_until::text from public.notification_settings`,
+        ),
+      );
+      return rows[0] === undefined ? null : notificationSettingsFromRow(rows[0]);
+    },
+
+    async saveNotificationSettings(settings) {
+      const row = notificationSettingsToRow(settings);
+      await run((session) =>
+        session.query(
+          `insert into public.notification_settings (streak, league, reminder, social, reminder_at, quiet_from, quiet_until)
+           values ($1, $2, $3, $4, $5::time, $6::time, $7::time)
+           on conflict (user_id) do update set streak = excluded.streak, league = excluded.league, reminder = excluded.reminder,
+             social = excluded.social, reminder_at = excluded.reminder_at, quiet_from = excluded.quiet_from, quiet_until = excluded.quiet_until`,
+          [row.streak, row.league, row.reminder, row.social, row.reminder_at, row.quiet_from, row.quiet_until],
+        ),
+      );
+    },
+
+    async pushDevices() {
+      return run((session) =>
+        session.query<{ endpoint: string; p256dh: string; auth: string }>('select endpoint, p256dh, auth from public.push_subscriptions order by created_at'),
+      );
+    },
+
+    async addPushDevice(device) {
+      await run((session) => session.query('select public.push_take_device($1, $2, $3)', [device.endpoint, device.p256dh, device.auth]));
+    },
+
+    async removePushDevice(endpoint) {
+      await run((session) => session.query('delete from public.push_subscriptions where endpoint = $1', [endpoint]));
     },
 
     async gameEvents() {

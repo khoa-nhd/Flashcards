@@ -247,6 +247,8 @@ Copy `.env.example` to `.env` and fill in:
 | `REVIEW_TIMEZONE` | Optional. The zone a new account starts with if its browser reports none. |
 | `REVIEW_WRITES_ENABLED` | Optional. Exactly `false` freezes all changes; anything else leaves saving on. |
 | `GAME_SIGNING_KEY` | Optional. Signs the game's changes (XP, levels, quests; schema version 17) so only the server can write them. The same value goes into `public.game_signing_key` in the database. 32 characters or more. Without it the game stays off. Leagues and friends (schema version 18) sign with it too. |
+| `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | Optional. Web push keys for reminders (schema version 20), made with `npx web-push generate-vapid-keys`. `VAPID_SUBJECT` is a `mailto:` address. Without the keys no reminder is sent. |
+| `CRON_TOKEN` | Optional. What the reminder timer (`.github/workflows/reminders.yml`) presents to `POST /api/cron/notify`. 32 characters or more. The database keeps its SHA-256 in `public.notify_secret`. |
 | `ADMIN_EMAILS` | Optional. Comma-separated emails that may open the moderation page (`/admin`). The account must also be listed in `public.app_admins` in the database. |
 | `AI_PROVIDER` | Optional. `openai` (anything OpenAI-compatible) or `anthropic`. Without it AI Chat stays off. |
 | `AI_MODEL` | Optional. The model id the provider expects, e.g. `gpt-4o-mini`, `gemini-3.8-flash` or `claude-sonnet-5-5`. A retired model answers HTTP 404, which the app reports as a model-or-address problem. |
