@@ -1,10 +1,11 @@
 # Reminders (docs/gamification-plan.md, phase 4): every 15 minutes, asks the app
 # to send what is due. Vercel's free plan runs its own cron only once a day.
 #
-# Needs two repository secrets (Settings -> Secrets and variables -> Actions):
-#   APP_URL       the app's address, such as https://example.vercel.app
-#   CRON_TOKEN   the same value as CRON_TOKEN on Vercel
-# Without them the job does nothing.
+# Needs three repository secrets (Settings -> Secrets and variables -> Actions):
+#   APP_URL                         the app's Production address
+#   CRON_TOKEN                      the same value as CRON_TOKEN on Vercel
+#   VERCEL_AUTOMATION_BYPASS_SECRET Vercel's protected-deployment bypass
+# Missing secrets or a non-JSON response fail the run.
 name: Reminders
 
 on:
@@ -23,11 +24,19 @@ jobs:
         env:
           APP_URL: ${{ secrets.APP_URL }}
           CRON_TOKEN: ${{ secrets.CRON_TOKEN }}
+          VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
         run: |
-          if [ -z "$APP_URL" ] || [ -z "$CRON_TOKEN" ]; then
-            echo "APP_URL or CRON_TOKEN is not set; nothing to do."
-            exit 0
+          if [ -z "$APP_URL" ] || [ -z "$CRON_TOKEN" ] || [ -z "$VERCEL_AUTOMATION_BYPASS_SECRET" ]; then
+            echo "APP_URL, CRON_TOKEN, or VERCEL_AUTOMATION_BYPASS_SECRET is not set."
+            exit 1
           fi
-          curl --fail-with-body --silent --show-error --max-time 120 \
+          response=$(curl --fail-with-body --silent --show-error --max-time 120 \
             -X POST "${APP_URL%/}/api/cron/notify" \
-            -H "Authorization: Bearer ${CRON_TOKEN}"
+            -H "Authorization: Bearer ${CRON_TOKEN}" \
+            -H "x-vercel-protection-bypass: ${VERCEL_AUTOMATION_BYPASS_SECRET}" \
+            -H "Accept: application/json")
+          if ! printf '%s' "$response" | jq -e 'type == "object" and (.people | type == "number") and (.sent | type == "number") and (.gone | type == "number") and (.failed | type == "number")' >/dev/null; then
+            echo "The app did not return a reminder summary JSON response."
+            exit 1
+          fi
+          printf '%s\n' "$response"
