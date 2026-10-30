@@ -352,10 +352,34 @@ lỗ gian lận: tự chèn lượt ôn giả để lấy XP.
 
 ### 2.8 Chủ dự án làm
 
-- Chạy `…_competition.sql`; thêm user id của mình vào `app_admins`; đặt
-  `ADMIN_EMAILS` trên Vercel; redeploy.
-- Bật đăng ký công khai trong Supabase Auth nếu đang tắt, và xem lại giới hạn
-  email xác nhận.
+1. Supabase → SQL Editor: chạy `supabase/migrations/20261031090000_competition.sql`
+   (cần v17 và khóa ký đã đặt; giải đấu ký bằng cùng `GAME_SIGNING_KEY`).
+2. Thêm mình làm admin: Authentication → Users, chép User UID của mình, rồi
+   `insert into public.app_admins (user_id) values ('<UID>');`
+3. Vercel → Environment Variables: `ADMIN_EMAILS=<email của bạn>`, rồi Redeploy.
+4. Bật đăng ký công khai trong Supabase Auth nếu đang tắt, và xem lại giới hạn
+   email xác nhận.
+
+### 2.9 Đã làm (khác với kế hoạch ở đâu)
+
+- **Khóa quyền ghi** bằng trigger: `review_logs`, `card_states` và `study_days`
+  từ chối mọi ghi qua endpoint bảng của API (`request.path` không bắt đầu bằng
+  `/rpc/`). Các hàm ghi hiện có giữ nguyên, không đổi luật FSRS. SQL Editor
+  (không có request path) vẫn ghi được.
+- **Giới hạn** 600 ms giữa hai câu và 90 câu/phút tính theo giờ của database
+  (`review_logs.recorded_at`, cột mới). Câu vượt giới hạn vẫn lưu, vẫn đổi lịch,
+  chỉ được 0 XP (lý do `capped`) và không tính nhiệm vụ. Lịch sử trước v18 không
+  có `recorded_at` nên không bị giới hạn.
+- **Mọi ghi** của giai đoạn 2 đi qua một hàm `game_apply` có chữ ký HMAC như
+  `game_commit`, hết hạn sau 60 giây. Dữ liệu người khác chỉ đọc qua các hàm
+  `security definer` trả cột công khai; trình duyệt chỉ thấy biệt danh.
+- **Bot** không lưu: tính từ id nhóm và số ghế (`shared/gamification/league.ts`).
+  Bấm vào bot hiện hồ sơ "giữ riêng tư" (level, hạng, vài huy hiệu).
+- **Chốt tuần** khi có request đầu tiên sau 0h thứ Hai (giờ Việt Nam); chốt hai
+  lần không đổi gì. Phần thưởng `league` không có XP.
+- **Thách đấu**: thắng 100 XP, hòa mỗi người 50 (mặc định tôi đặt, cần duyệt).
+- Hồ sơ ở `/profile?u=<biệt danh>` vì router chỉ có đường dẫn cố định.
+- Bảng `league_weeks` và cột `is_bot` trong kế hoạch không cần nữa.
 
 ---
 

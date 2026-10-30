@@ -17,6 +17,11 @@ export const ROUTES = {
   insights: '/insights',
   settings: '/settings',
   achievements: '/achievements',
+  league: '/league',
+  friends: '/friends',
+  /** A player's profile is `/profile?u=<nickname>`; without it, one's own. */
+  profile: '/profile',
+  admin: '/admin',
   chat: '/chat',
   help: '/help',
 } as const;

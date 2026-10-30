@@ -184,6 +184,8 @@ export const gameAnswerRowSchema = z.object({
   duration_ms: z.number().int().nullable(),
   mode: z.string().nullable(),
   mastered: z.boolean(),
+  // Version 18 and later.
+  recorded_at: timestamp.nullable().optional(),
 });
 
 export const gameMetricsRowSchema = z.object({
@@ -226,6 +228,27 @@ export const gameLedgerRowSchema = z.object({
   reason: z.string(),
   earned_on: isoDay,
 });
+/**
+ * The competition's functions (schema version 18). Each returns rows; the
+ * competition service parses them. Only these names can be called.
+ */
+export const COMPETITION_FUNCTIONS = [
+  'competition_me',
+  'game_apply',
+  'league_board',
+  'league_unsettled',
+  'league_weeks_to_settle',
+  'profile_by_nickname',
+  'profile_search',
+  'profile_badges',
+  'streak_days',
+  'friends_list',
+  'challenges_list',
+  'is_app_admin',
+  'admin_reports',
+] as const;
+export type CompetitionFunction = (typeof COMPETITION_FUNCTIONS)[number];
+
 export const gameCommitRowSchema = z.object({
   outcome: z.enum(['ok', 'stale']),
   version: z.coerce.number().int(),
@@ -317,7 +340,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 17;
+export const LATEST_SCHEMA_VERSION = 18;
 
 /**
  * The newest migration Settings asks the owner to run. Version 15 makes FSRS
@@ -325,7 +348,7 @@ export const LATEST_SCHEMA_VERSION = 17;
  * screens for it exist (docs/fsrs-only-progress.md), so the app does not ask
  * for it yet. Raise this to LATEST_SCHEMA_VERSION when they do.
  */
-export const RECOMMENDED_SCHEMA_VERSION = 17;
+export const RECOMMENDED_SCHEMA_VERSION = 18;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -612,6 +635,8 @@ export interface VocabularyDatabase {
   gameBadgeMetrics?(): Promise<z.infer<typeof gameMetricsRowSchema>>;
   /** Needs schema version 17: applies a change the server signed. */
   gameCommit?(payload: string, signature: string): Promise<z.infer<typeof gameCommitRowSchema>>;
+  /** Needs schema version 18: one of the competition's functions, with named arguments; its rows as JSON. */
+  competitionCall?(fn: CompetitionFunction, args: Record<string, string | null>): Promise<unknown[]>;
   setCardTrashed(id: string, trashed: boolean): Promise<boolean>;
   applyReview(args: ReviewWriteArgs): Promise<ReviewWriteRow>;
   findReviewByRequestId(requestId: string): Promise<{ mastery: number; reviewDate: IsoDate | null } | null>;
@@ -1791,6 +1816,15 @@ export function createSupabaseDatabase(
       const row = z.array(gameCommitRowSchema).safeParse(data ?? []);
       if (!row.success || row.data[0] === undefined) throw new DatabaseError('unavailable', 'The database answered the game change in an unexpected shape.');
       return row.data[0];
+    },
+
+    async competitionCall(fn, args) {
+      if (schemaVersion < 18) throw new DatabaseError('schema_missing', 'Leagues and friends need the latest database update (version 18).');
+      if (!COMPETITION_FUNCTIONS.includes(fn)) throw new DatabaseError('invalid', 'That is not one of the competition functions.');
+      const { data, error, status } = await client.rpc(fn, args);
+      if (error) throw toDatabaseError(error, status);
+      if (!Array.isArray(data)) throw new DatabaseError('unavailable', 'The database answered in an unexpected shape.');
+      return data;
     },
 
     async undoFsrsReview(args) {

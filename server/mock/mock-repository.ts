@@ -178,6 +178,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     weakRecovery: true,
     fsrsOnly: false,
     game: true,
+    competition: true,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */
@@ -947,6 +948,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         durationMs: log.durationMs,
         mode: log.reviewMode,
         mastered: log.kind === 'review' && (detail?.counted ?? true) && after >= MASTER_DAYS && before < MASTER_DAYS,
+        recordedAt: log.at,
       };
     });
     const practice = this.practice.map(
@@ -962,6 +964,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
         durationMs: entry.durationMs,
         mode: entry.mode,
         mastered: false,
+        recordedAt: entry.at,
       }),
     );
     return [...reviews, ...practice];

@@ -14,7 +14,9 @@ import { ReviewService } from './review-service.js';
 import { createSchedulerStore } from './scheduler-store.js';
 import { createSupabaseAccounts } from './supabase/supabase-accounts.js';
 import { StudyGoalsService, createStudyGoalStore } from './study-goals-service.js';
+import { CompetitionService } from './competition-service.js';
 import { GameService, createMemoryGameStore } from './game-service.js';
+import { createMemoryCompetitionStore } from './mock/mock-competition.js';
 import { SUGGESTED_STUDY_GOALS } from '../shared/study-goals.js';
 import { VocabularyService } from './vocabulary-service.js';
 
@@ -42,6 +44,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
             defaultTimeZone: config.timeZone,
             writesRequested: config.writesRequested,
             gameSigningKey: config.gameSigningKey,
+            adminEmails: config.adminEmails,
           });
     return { app: createApp({ config, service: null, accounts }), config };
   }
@@ -107,8 +110,9 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
   });
   // The sample data has no account either, so its goals and its game are kept in memory too.
   const goalStore = createStudyGoalStore();
+  const gameStore = createMemoryGameStore({ answers: () => repository.gameAnswers(), metrics: () => repository.gameMetrics() });
   const game = new GameService({
-    store: createMemoryGameStore({ answers: () => repository.gameAnswers(), metrics: () => repository.gameMetrics() }),
+    store: gameStore,
     account: 'sample',
     repository,
     catalog: repository,
@@ -124,7 +128,21 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
         coveredDays: (facts) => game.coveredDays(facts),
       })
     : null;
-  return { app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game }), config };
+  const competition = new CompetitionService({
+    store: createMemoryCompetitionStore({
+      account: 'sample',
+      xpBetween: (from, to) => gameStore.xpBetween(from, to),
+      totalXp: () => gameStore.xpBetween('1970-01-01T00:00:00Z', '9999-01-01T00:00:00Z'),
+      metDays: () => [],
+      give: (reward) => gameStore.give(reward),
+    }),
+    account: 'sample',
+    // The sample data has no sign-in, so its moderation page is open to try.
+    email: 'sample@example.test',
+    adminEmails: ['sample@example.test'],
+    timeZone,
+  });
+  return { app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game, competition }), config };
 }
 
 let shared: ReturnType<typeof buildApp> | undefined;

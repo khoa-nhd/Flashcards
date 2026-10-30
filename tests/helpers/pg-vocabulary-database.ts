@@ -32,6 +32,7 @@ import {
   studyDayCountsRowSchema,
   gameAnswerRowSchema,
   gameBadgeRowSchema,
+  COMPETITION_FUNCTIONS,
   gameCommitRowSchema,
   gameFreezeRowSchema,
   gameLedgerRowSchema,
@@ -727,6 +728,16 @@ export function createPgVocabularyDatabase(
     async gameBadgeMetrics() {
       const rows = await run((session) => session.query<Row>('select * from public.game_badge_metrics()'));
       return gameMetricsRowSchema.parse(rows[0]);
+    },
+
+    async competitionCall(fn, args) {
+      if (!COMPETITION_FUNCTIONS.includes(fn)) throw new Error(`not a competition function: ${fn}`);
+      const names = Object.keys(args);
+      const call = names.map((name, at) => `${name} => $${at + 1}`).join(', ');
+      const rows = await run((session) =>
+        session.query<{ row: unknown }>(`select to_jsonb(t) as row from public.${fn}(${call}) t`, names.map((name) => args[name])),
+      );
+      return rows.map((each) => each.row);
     },
 
     async gameCommit(payload, signature) {

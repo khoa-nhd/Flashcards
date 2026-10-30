@@ -14,6 +14,7 @@ import { ReviewActivityCard, useReviewActivity } from '../components/ReviewActiv
 import { StatTile } from '../components/StatTile.js';
 import { StudyGoalsCard, StudyGoalsSkeleton, useStudyGoals } from '../components/StudyGoals.js';
 import { QuestsCard } from '../components/Quests.js';
+import { LeagueCard } from '../components/League.js';
 import { knownGame } from '../lib/game-state.js';
 import { EARLY_DAYS_DEFAULT } from '../lib/review-scope.js';
 import { VocabularyGate } from '../components/VocabularyGate.js';
@@ -278,6 +279,8 @@ export function DashboardPage() {
             ) : null}
 
             <QuestsCard />
+
+            <LeagueCard />
 
             <ReviewActivityCard activity={activity} />
 

@@ -59,6 +59,16 @@ import {
   type SimulationResponse,
   type StudyGoalsResponse,
   type GameResponse,
+  adminResponseSchema,
+  friendsResponseSchema,
+  inviteResponseSchema,
+  leagueResponseSchema,
+  profileResponseSchema,
+  profileSearchResponseSchema,
+  type AdminResponse,
+  type FriendsResponse,
+  type LeagueResponse,
+  type ProfileResponse,
   type UpdateStudyGoalsInput,
   type UpdateEntryInput,
   type VocabularyEntry,
@@ -74,6 +84,9 @@ import type { DailyGoal } from '../../shared/session-planner.js';
 import { ALL_SCOPE, type ReviewScope } from './review-scope.js';
 import { TIMEOUTS } from '../config.js';
 
+/** The reply to a change that has nothing more to say. */
+const okSchema = z.object({ ok: z.literal(true) });
+
 /** Any failed request, reduced to a stable `code` and a message fit for the reviewer. */
 export class ApiError extends Error {
   constructor(
@@ -82,6 +95,8 @@ export class ApiError extends Error {
     public readonly status: number | null = null,
     /** Existing words, when a create or rename was refused as a duplicate. */
     public readonly duplicates: VocabularyEntry[] = [],
+    /** What is wrong with a nickname that was refused (length, characters, blocked, taken). */
+    public readonly problem: string | null = null,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -153,6 +168,23 @@ export interface AnalyticsApi {
   saveGameSettings(settings: { earlyDays: number }): Promise<GameResponse>;
 }
 
+/** Leagues, nicknames, friends, profiles and moderation. Other players appear by nickname only. */
+export interface CompetitionApi {
+  fetchLeague(): Promise<LeagueResponse>;
+  /** A player's profile by nickname, or one's own for `null`. */
+  fetchProfile(nickname: string | null): Promise<ProfileResponse>;
+  saveProfile(update: { nickname?: string; inLeagues?: boolean }): Promise<ProfileResponse>;
+  searchPlayers(query: string): Promise<z.infer<typeof profileSearchResponseSchema>>;
+  fetchFriends(): Promise<FriendsResponse>;
+  friendAction(action: 'follow' | 'unfollow' | 'block' | 'unblock' | 'challenge', nickname: string): Promise<void>;
+  createInvite(): Promise<z.infer<typeof inviteResponseSchema>>;
+  acceptInvite(token: string): Promise<void>;
+  acceptChallenge(id: string): Promise<void>;
+  reportPlayer(nickname: string, reason: string): Promise<void>;
+  fetchAdmin(): Promise<AdminResponse>;
+  moderate(target: string, action: 'rename' | 'hide' | 'unhide' | 'resolve'): Promise<void>;
+}
+
 /** Collections, further examples and relationships. None of these calls can change a word or its schedule. */
 export interface LibraryApi {
   fetchLibrary(): Promise<LibraryResponse>;
@@ -215,7 +247,15 @@ export interface AiApi {
 
 export type { AiConversation, AiMessage, AiStreamChunk, AiConversationListResponse, AiMessageListResponse } from '../../shared/api.js';
 
-export type AppApi = ReviewApi & VocabularyApi & AccountApi & AnalyticsApi & PracticeApi & LibraryApi & TransferApi & AiApi;
+export type AppApi = ReviewApi &
+  VocabularyApi &
+  AccountApi &
+  AnalyticsApi &
+  PracticeApi &
+  LibraryApi &
+  TransferApi &
+  AiApi &
+  CompetitionApi;
 
 /** How requests prove who is asking, where the app has accounts. */
 export interface ApiAuth {
@@ -298,6 +338,7 @@ async function request<T>(path: string, schema: ZodType<T> | null, init: CallOpt
         error.success ? error.data.error.message : `The server responded with an error (${response.status}).`,
         response.status,
         error.success ? (error.data.duplicates ?? []) : [],
+        error.success ? (error.data.problem ?? null) : null,
       );
     }
 
@@ -556,6 +597,43 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         timeoutMs: TIMEOUTS.actionMs,
         timeoutMessage: SAVE_TIMEOUT_MESSAGE,
       }),
+
+    fetchLeague: () =>
+      call('/api/league', leagueResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading the league took too long.' }),
+
+    fetchProfile: (nickname) =>
+      call(nickname === null ? '/api/profile' : `/api/profile?u=${encodeURIComponent(nickname)}`, profileResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.quickMs,
+        timeoutMessage: 'Loading the profile took too long.',
+      }),
+
+    saveProfile: (body) => change('/api/profile', 'PUT', body, profileResponseSchema),
+
+    searchPlayers: (query) =>
+      call(`/api/players?q=${encodeURIComponent(query)}`, profileSearchResponseSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.quickMs,
+        timeoutMessage: 'Searching took too long.',
+      }),
+
+    fetchFriends: () =>
+      call('/api/friends', friendsResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading your friends took too long.' }),
+
+    friendAction: (action, nickname) => change(`/api/friends/${action}`, 'POST', { nickname }, okSchema).then(() => undefined),
+
+    createInvite: () => change('/api/friends/invite', 'POST', {}, inviteResponseSchema),
+
+    acceptInvite: (token) => change('/api/friends/invite/accept', 'POST', { token }, okSchema).then(() => undefined),
+
+    acceptChallenge: (id) => change(`/api/challenges/${encodeURIComponent(id)}/accept`, 'POST', {}, okSchema).then(() => undefined),
+
+    reportPlayer: (nickname, reason) => change('/api/reports', 'POST', { nickname, reason }, okSchema).then(() => undefined),
+
+    fetchAdmin: () =>
+      call('/api/admin', adminResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading the reports took too long.' }),
+
+    moderate: (target, action) => change('/api/admin/action', 'POST', { target, action }, okSchema).then(() => undefined),
 
     importWords: (items, wordsPerDay, startIndex) =>
       call('/api/vocabulary/import', importResponseSchema, {

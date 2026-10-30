@@ -30,6 +30,12 @@ import {
   updateEntryRequestSchema,
   updateExampleRequestSchema,
   updateSettingsRequestSchema,
+  adminActionRequestSchema,
+  inviteAcceptRequestSchema,
+  nicknameRequestSchema,
+  profileUpdateRequestSchema,
+  reportRequestSchema,
+  type LeagueResponse,
   type AccountSettings,
   type ApiErrorBody,
   type AppConfigResponse,
@@ -48,6 +54,8 @@ import { type AiService } from './ai-service-impl.js';
 import { AiError, AiErrorCode } from './ai-service.js';
 import type { StudyGoalsService } from './study-goals-service.js';
 import { unavailableGame, type GameService } from './game-service.js';
+import { CompetitionError, type CompetitionService } from './competition-service.js';
+import { leagueWeekOf, weekEndsAt } from '../shared/gamification/league.js';
 import { calendarDateInTimeZone } from '../shared/dates.js';
 import { AI_MODES } from './ai-service.js';
 
@@ -71,6 +79,8 @@ export interface AppDependencies {
   studyGoals?: StudyGoalsService | null;
   /** XP, levels, quests and badges; `null` where they cannot be kept. */
   game?: GameService | null;
+  /** Leagues, friends and profiles; `null` where they cannot be kept. */
+  competition?: CompetitionService | null;
 }
 
 /** What the current request may use. With accounts, all of it belongs to one signed-in user. */
@@ -86,11 +96,20 @@ interface Scope {
   game: GameService | null;
   /** Why there is no game, where there is none. */
   gameReason: string | null;
+  competition: CompetitionService | null;
+  competitionReason: string | null;
   /** The zone the account's days are counted in. */
   timeZone: string | null;
 }
 
 type AppEnv = { Variables: { scope: Scope } };
+
+const COMPETITION_REFUSALS = {
+  not_found: [404, 'not_found'],
+  invalid: [400, 'invalid_request'],
+  taken: [409, 'conflict'],
+  forbidden: [403, 'forbidden'],
+} as const;
 
 function errorResponse(c: Context, error: HttpError) {
   const body: ApiErrorBody & Record<string, unknown> = {
@@ -157,6 +176,7 @@ export function createApp({
   exporter = null,
   studyGoals = null,
   game = null,
+  competition = null,
 }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
@@ -277,6 +297,8 @@ export function createApp({
         studyGoals: session.studyGoals ?? null,
         game: session.game ?? null,
         gameReason: session.gameReason ?? null,
+        competition: session.competition ?? null,
+        competitionReason: session.competitionReason ?? null,
         timeZone: session.timeZone,
         session,
       });
@@ -293,6 +315,8 @@ export function createApp({
       studyGoals,
       game,
       gameReason: game === null ? 'XP and levels are not kept with this data.' : null,
+      competition,
+      competitionReason: competition === null ? 'Leagues and friends are not kept with this data.' : null,
       timeZone: config.timeZone,
     });
     await next();
@@ -475,6 +499,100 @@ export function createApp({
   app.put('/api/game/settings', async (c) => {
     const settings = await parseBody(c, gameSettingsRequestSchema);
     return c.json(await requireGame(c).saveSettings(settings));
+  });
+
+  // ---- Competition: leagues, nicknames, friends, profiles, moderation. Other accounts by nickname only. ----
+
+  const requireCompetition = (c: Context<AppEnv>): CompetitionService => {
+    const { competition, competitionReason } = c.get('scope');
+    if (competition === null) throw new HttpError(409, 'not_supported', competitionReason ?? 'Leagues and friends are not available.');
+    return competition;
+  };
+
+  /** The competition's own refusals, as HTTP. */
+  const compete = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      if (!(error instanceof CompetitionError)) throw error;
+      const [status, code] = COMPETITION_REFUSALS[error.failure];
+      throw new HttpError(status, code, error.message, { body: error.problem === null ? undefined : { problem: error.problem } });
+    }
+  };
+
+  app.get('/api/league', async (c) => {
+    const { competition, competitionReason } = c.get('scope');
+    if (competition === null) {
+      const week = leagueWeekOf(new Date());
+      return c.json({
+        available: false,
+        reason: competitionReason ?? 'Leagues are not available.',
+        week,
+        endsAt: weekEndsAt(week),
+        nickname: null,
+        tier: 1,
+        inLeagues: false,
+        weekXp: 0,
+        group: null,
+      } satisfies LeagueResponse);
+    }
+    return c.json(await compete(() => competition.league()));
+  });
+
+  app.get('/api/profile', async (c) => {
+    const nickname = c.req.query('u')?.trim() || null;
+    if (nickname !== null && nickname.length > 60) throw new HttpError(400, 'invalid_request', 'That is not a nickname.');
+    return c.json(await compete(() => requireCompetition(c).profile(nickname)));
+  });
+
+  app.put('/api/profile', async (c) => {
+    const update = await parseBody(c, profileUpdateRequestSchema);
+    return c.json(await compete(() => requireCompetition(c).saveProfile(update)));
+  });
+
+  app.get('/api/players', async (c) => {
+    const query = (c.req.query('q') ?? '').slice(0, 40);
+    return c.json({ players: await compete(() => requireCompetition(c).search(query)) });
+  });
+
+  app.get('/api/friends', async (c) => c.json(await compete(() => requireCompetition(c).friends())));
+
+  for (const action of ['follow', 'unfollow', 'block', 'unblock', 'challenge'] as const) {
+    app.post(`/api/friends/${action}`, async (c) => {
+      const { nickname } = await parseBody(c, nicknameRequestSchema);
+      await compete(() => requireCompetition(c)[action](nickname));
+      return c.json({ ok: true });
+    });
+  }
+
+  app.post('/api/friends/invite', async (c) => c.json(await compete(() => requireCompetition(c).invite())));
+
+  app.post('/api/friends/invite/accept', async (c) => {
+    const { token } = await parseBody(c, inviteAcceptRequestSchema);
+    await compete(() => requireCompetition(c).acceptInvite(token));
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/challenges/:id/accept', async (c) => {
+    const id = z.uuid().safeParse(c.req.param('id'));
+    if (!id.success) throw new HttpError(400, 'invalid_request', 'That is not a challenge.');
+    await compete(() => requireCompetition(c).acceptChallenge(id.data));
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/reports', async (c) => {
+    const { nickname, reason } = await parseBody(c, reportRequestSchema);
+    await compete(() => requireCompetition(c).report(nickname, reason));
+    return c.json({ ok: true });
+  });
+
+  // Moderation: the server checks ADMIN_EMAILS, and the database its own list, before anything is shown or done.
+  app.get('/api/admin', async (c) => c.json({ reports: await compete(() => requireCompetition(c).reports()) }));
+
+  app.post('/api/admin/action', async (c) => {
+    const { target, action } = await parseBody(c, adminActionRequestSchema);
+    await compete(() => requireCompetition(c).moderate(target, action));
+    return c.json({ ok: true });
   });
 
   app.get('/api/sessions/:id/summary', async (c) => {

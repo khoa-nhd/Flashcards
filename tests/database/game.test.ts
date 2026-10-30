@@ -182,7 +182,8 @@ describe('game_pending_answers', () => {
 describe('upgrading to version 17', () => {
   it('runs on a database at version 16 with history, and can be run again', async () => {
     const migrations = (await import('../helpers/test-database.js')).readMigrations();
-    const old = await createTestDatabase({ migrations: migrations.length - 1 });
+    const at = migrations.findIndex((migration) => migration.name.endsWith('_gamification_core.sql'));
+    const old = await createTestDatabase({ migrations: at });
     try {
       const user = await old.createUser('owner@example.test');
       const [word] = await old.as(user, (s) =>
@@ -195,7 +196,7 @@ describe('upgrading to version 17', () => {
          values ($1, $2, gen_random_uuid(), 'review', 'remember', '2026-10-20', '2026-10-20T08:00:00Z', 3, 4, 'mastery_v1')`,
         [user, word!.id],
       );
-      const v17 = migrations.at(-1)!;
+      const v17 = migrations[at]!;
       await old.db.exec(v17.sql);
       await old.db.exec(v17.sql);
       expect(await old.admin('select public.app_schema_version() as v')).toEqual([{ v: 17 }]);

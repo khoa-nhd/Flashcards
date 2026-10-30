@@ -490,6 +490,59 @@ export interface Database {
         Args: { p_payload: string; p_signature: string };
         Returns: Array<{ outcome: 'ok' | 'stale'; version: number; total_xp: number }>;
       };
+      /** From schema version 18; the rows are parsed in server/competition-service.ts. */
+      competition_me: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      game_apply: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      league_board: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      league_unsettled: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      league_weeks_to_settle: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      profile_by_nickname: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      profile_search: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      profile_badges: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      streak_days: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      friends_list: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      challenges_list: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      is_app_admin: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
+      admin_reports: {
+        Args: Record<string, string | null>;
+        Returns: Array<Record<string, unknown>>;
+      };
       study_day_counts: {
         Args: { p_day: string };
         Returns: Array<{ new_words: number; reviews: number }>;

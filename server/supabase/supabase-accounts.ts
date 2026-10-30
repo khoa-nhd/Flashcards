@@ -33,6 +33,7 @@ import { createSupabaseLibraryStore } from './supabase-library.js';
 import { SupabaseVocabularyRepository } from './supabase-repository.js';
 import { createAiService, loadAiConfig } from '../ai-service-impl.js';
 import { StudyGoalsService, createStudyGoalStore } from '../study-goals-service.js';
+import { CompetitionService, createDatabaseCompetitionStore } from '../competition-service.js';
 import { GameService, createDatabaseGameStore } from '../game-service.js';
 import { SUGGESTED_STUDY_GOALS } from '../../shared/study-goals.js';
 import { AiError, AiErrorCode } from '../ai-service.js';
@@ -106,6 +107,8 @@ export interface SupabaseAccountsOptions {
   now?: () => Date;
   /** Signs the game's changes (GAME_SIGNING_KEY). Without it the game stays off. */
   gameSigningKey?: string | null;
+  /** Accounts that may moderate (ADMIN_EMAILS); the database's `app_admins` must name them too. */
+  adminEmails?: readonly string[];
 }
 
 const FALLBACK_TIME_ZONE = 'UTC';
@@ -253,9 +256,29 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           : !repository.capabilities.game
             ? 'XP and levels need the latest database update (version 17).'
             : 'XP and levels are not set up on the server yet (GAME_SIGNING_KEY).';
+      // Leagues and friends sign their writes with the same key, and need version 18.
+      const competition =
+        repository.capabilities.competition && gameKey !== null
+          ? new CompetitionService({
+              store: createDatabaseCompetitionStore(database, account.id, gameKey),
+              account: account.id,
+              email: account.email,
+              adminEmails: options.adminEmails ?? [],
+              timeZone,
+              now,
+            })
+          : null;
+      const competitionReason =
+        competition !== null
+          ? null
+          : !repository.capabilities.competition
+            ? 'Leagues and friends need the latest database update (version 18).'
+            : 'Leagues and friends are not set up on the server yet (GAME_SIGNING_KEY).';
       return {
         game,
         gameReason,
+        competition,
+        competitionReason,
         account,
         timeZone,
         database: { version: schemaVersion, latest: RECOMMENDED_SCHEMA_VERSION },

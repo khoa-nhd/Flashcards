@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ProfileSettings } from '../components/ProfileSettings.js';
 import { useApp, useSettings, useSync, useVocabulary } from '../app-context.js';
 import { AccountSection, DatabaseStatus, TimeZoneSection, TrashSection } from '../components/AccountSettings.js';
 import { ConfirmDialog } from '../components/ConfirmDialog.js';
@@ -80,6 +81,7 @@ export function SettingsPage() {
       <div className="flex max-w-2xl flex-col gap-6 [&_p]:max-w-[70ch]">
         {account !== null && <AccountSection account={account} />}
         {account !== null && <TimeZoneSection />}
+        <ProfileSettings />
         {fsrsOnly ? (
           <FsrsSettingsSection />
         ) : (

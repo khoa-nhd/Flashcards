@@ -114,6 +114,13 @@ export function HelpPage() {
               'Ôn sớm lấy các từ sẽ đến hạn trong vài ngày tới (bạn chọn số ngày) và tính vào lịch như mọi lượt ôn. Ôn ngẫu nhiên lấy các từ đã học theo thứ tự ngẫu nhiên và, trừ khi bạn bật tính lịch, giữ nguyên lịch ôn.',
             )}
           </p>
+          <p className={`${HELP} mt-2`}>
+            {pick(
+              language,
+              'Leagues: each week you are in a group of twenty in your league, ranked by the week’s XP; the top five go up a league on Monday and the bottom five go down. When there are not enough players yet, the league adds simulated rivals. An answer less than 0.6 seconds after the one before, or past 90 in a minute, is saved as usual but earns no XP. Friends are players who follow each other: they see each other’s streak, keep one together, and can challenge each other for the week. Others only ever see your nickname, level, league, streak and badges, never your words.',
+              'Giải đấu: mỗi tuần bạn ở trong một nhóm hai mươi người cùng hạng, xếp theo XP của tuần; năm người đầu lên hạng vào thứ Hai, năm người cuối xuống hạng. Khi chưa đủ người, giải đấu có thêm đối thủ mô phỏng. Câu trả lời cách câu trước chưa tới 0,6 giây, hoặc quá 90 câu trong một phút, vẫn được lưu như thường nhưng không có XP. Bạn bè là những người theo dõi nhau: thấy chuỗi ngày của nhau, giữ một chuỗi chung và có thể thách đấu nhau theo tuần. Người khác chỉ thấy biệt danh, level, hạng, chuỗi ngày và huy hiệu của bạn, không bao giờ thấy từ vựng.',
+            )}
+          </p>
         </section>
 
         <section className={`${CARD} p-5`}>

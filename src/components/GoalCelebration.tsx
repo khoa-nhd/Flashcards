@@ -251,6 +251,8 @@ const REWARD_ICON: Record<GameRewardView['kind'], IconName> = {
   freeze_granted: 'snow',
   freeze_used: 'snow',
   comeback: 'refresh',
+  league: 'trophy',
+  challenge: 'trophy',
 };
 
 function RewardsScene({ rewards, onClose }: { rewards: readonly GameRewardView[]; onClose: () => void }) {

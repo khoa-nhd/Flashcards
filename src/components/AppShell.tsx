@@ -30,6 +30,8 @@ const PRIMARY: NavItem[] = [
 ];
 
 const SECONDARY: NavItem[] = [
+  { route: 'league', label: 'League', labelVi: 'Giải đấu', short: 'League', shortVi: 'Giải đấu', icon: 'league' },
+  { route: 'friends', label: 'Friends', labelVi: 'Bạn bè', short: 'Friends', shortVi: 'Bạn bè', icon: 'friends' },
   { route: 'practice', label: 'Practice', labelVi: 'Luyện tập', short: 'Practice', shortVi: 'Luyện tập', icon: 'practice' },
   { route: 'collections', label: 'Collections', labelVi: 'Bộ sưu tập', short: 'Collections', shortVi: 'Bộ sưu tập', icon: 'collections' },
   { route: 'weak', label: 'Weak words', labelVi: 'Từ yếu', short: 'Weak', shortVi: 'Từ yếu', icon: 'weak' },
@@ -69,7 +71,11 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
       ? pick(language, 'Import', 'Nhập danh sách')
       : active === 'achievements'
         ? pick(language, 'Achievements', 'Thành tích')
-        : currentNav === undefined
+        : active === 'profile'
+          ? pick(language, 'Profile', 'Hồ sơ')
+          : active === 'admin'
+            ? pick(language, 'Moderation', 'Quản trị')
+            : currentNav === undefined
         ? pick(language, 'Vocabulary', 'Từ vựng')
         : navLabel(currentNav);
 

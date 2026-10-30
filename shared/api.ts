@@ -147,6 +147,8 @@ export const capabilitiesSchema = z.object({
   fsrsOnly: z.boolean().default(false),
   /** XP, levels, quests, badges and streak freezes are kept (schema version 17). */
   game: z.boolean().default(false),
+  /** Leagues, nicknames, friends and profiles (schema version 18). */
+  competition: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -164,6 +166,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   weakRecovery: false,
   fsrsOnly: false,
   game: false,
+  competition: false,
 };
 
 /**
@@ -1062,6 +1065,8 @@ export const apiErrorSchema = z.object({
   current: reviewStateSchema.optional(),
   /** Existing entries with the same word, when a create or rename was refused as a duplicate. */
   duplicates: z.array(vocabularyEntrySchema).optional(),
+  /** What is wrong with a nickname that was refused. */
+  problem: z.string().optional(),
 });
 
 export type CardField = z.infer<typeof cardFieldSchema>;
@@ -1118,7 +1123,7 @@ export const gameQuestSchema = z.object({
 
 export const gameRewardSchema = z.object({
   id: z.string(),
-  kind: z.enum(['level', 'badge', 'quest', 'quests_all', 'checkin', 'freeze_granted', 'freeze_used', 'comeback']),
+  kind: z.enum(['level', 'badge', 'quest', 'quests_all', 'checkin', 'freeze_granted', 'freeze_used', 'comeback', 'league', 'challenge']),
   payload: z.record(z.string(), z.unknown()),
   createdAt: z.string(),
 });
@@ -1154,6 +1159,132 @@ export const gameClaimRequestSchema = z.strictObject({
 export const gameSettingsRequestSchema = z.strictObject({
   earlyDays: z.number().int().min(1).max(14),
 });
+
+// ---- Competition (docs/gamification-plan.md, phase 2) ----
+// Other accounts appear only by nickname: never an email, an id, a word or a schedule.
+
+export const NICKNAME_PROBLEMS = ['length', 'characters', 'blocked', 'taken'] as const;
+
+const tierSchema = z.number().int().min(1).max(8);
+
+export const leagueRowSchema = z.object({
+  /** Null for a profile an admin hid. */
+  nickname: z.string().nullable(),
+  level: z.number().int(),
+  xp: z.number().int(),
+  rank: z.number().int(),
+  me: z.boolean(),
+  zone: z.enum(['up', 'down', 'stay']),
+});
+
+export const leagueResponseSchema = z.object({
+  available: z.boolean(),
+  reason: z.string().nullable(),
+  /** The Monday the league week started, in Vietnam's time, and when it ends. */
+  week: isoDateSchema,
+  endsAt: z.string(),
+  nickname: z.string().nullable(),
+  tier: tierSchema,
+  inLeagues: z.boolean(),
+  weekXp: z.number().int(),
+  /** Null until the first XP of the week puts the account in a group. */
+  group: z.object({ tier: tierSchema, rows: z.array(leagueRowSchema) }).nullable(),
+});
+
+export const profileResponseSchema = z.object({
+  nickname: z.string(),
+  frame: z.string().nullable(),
+  title: z.string().nullable(),
+  level: z.number().int(),
+  totalXp: z.number().int(),
+  tier: tierSchema,
+  streak: z.number().int(),
+  mastered: z.number().int(),
+  badges: z.array(z.object({ badge: z.string(), tier: z.number().int() })),
+  me: z.boolean(),
+  /** A profile its owner keeps to themselves: no following, no challenges. */
+  limited: z.boolean(),
+  following: z.boolean(),
+  followedBy: z.boolean(),
+  blocked: z.boolean(),
+  /** Only on one's own profile. */
+  inLeagues: z.boolean().optional(),
+  admin: z.boolean().optional(),
+});
+
+export const profileUpdateRequestSchema = z.strictObject({
+  nickname: z.string().max(60).optional(),
+  inLeagues: z.boolean().optional(),
+});
+
+export const profileSearchResponseSchema = z.object({
+  players: z.array(z.object({ nickname: z.string(), level: z.number().int(), tier: tierSchema })),
+});
+
+export const friendSchema = z.object({
+  nickname: z.string(),
+  level: z.number().int(),
+  tier: tierSchema,
+  weekXp: z.number().int(),
+  /** Following each other; only friends see each other's streak. */
+  mutual: z.boolean(),
+  streak: z.number().int().nullable(),
+  /** Days in a row both met their goals. */
+  sharedStreak: z.number().int().nullable(),
+});
+
+export const challengeSchema = z.object({
+  id: z.string(),
+  week: isoDateSchema,
+  /** This week's, still running. */
+  current: z.boolean(),
+  nickname: z.string().nullable(),
+  /** Sent by me; otherwise sent to me. */
+  mine: z.boolean(),
+  accepted: z.boolean(),
+  settled: z.boolean(),
+  result: z.enum(['won', 'lost', 'draw']).nullable(),
+  myXp: z.number().int(),
+  otherXp: z.number().int(),
+});
+
+export const friendsResponseSchema = z.object({
+  week: isoDateSchema,
+  endsAt: z.string(),
+  nickname: z.string().nullable(),
+  weekXp: z.number().int(),
+  friends: z.array(friendSchema),
+  challenges: z.array(challengeSchema),
+});
+
+export const nicknameRequestSchema = z.strictObject({ nickname: z.string().min(1).max(60) });
+export const inviteAcceptRequestSchema = z.strictObject({ token: z.string().min(16).max(64) });
+export const inviteResponseSchema = z.object({ token: z.string(), expiresAt: z.string() });
+export const reportRequestSchema = z.strictObject({ nickname: z.string().min(1).max(60), reason: z.string().trim().min(1).max(300) });
+
+export const adminReportSchema = z.object({
+  id: z.string(),
+  target: z.string(),
+  nickname: z.string(),
+  hidden: z.boolean(),
+  reason: z.string(),
+  createdAt: z.string(),
+  reports: z.number().int(),
+});
+export const adminResponseSchema = z.object({ reports: z.array(adminReportSchema) });
+export const adminActionRequestSchema = z.strictObject({
+  target: z.uuid(),
+  action: z.enum(['rename', 'hide', 'unhide', 'resolve']),
+});
+
+export type LeagueResponse = z.infer<typeof leagueResponseSchema>;
+export type LeagueRow = z.infer<typeof leagueRowSchema>;
+export type ProfileResponse = z.infer<typeof profileResponseSchema>;
+export type FriendsResponse = z.infer<typeof friendsResponseSchema>;
+export type Friend = z.infer<typeof friendSchema>;
+export type Challenge = z.infer<typeof challengeSchema>;
+export type AdminResponse = z.infer<typeof adminResponseSchema>;
+export type AdminReport = z.infer<typeof adminReportSchema>;
 export type ArchiveEntriesRequest = z.infer<typeof archiveEntriesRequestSchema>;
 export type ArchiveEntriesResponse = z.infer<typeof archiveEntriesResponseSchema>;
 

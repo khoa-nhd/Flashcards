@@ -18,6 +18,10 @@ import { BankPage } from './pages/BankPage.js';
 import { CalendarPage } from './pages/CalendarPage.js';
 import { ChatPage } from './pages/ChatPage.js';
 import { AchievementsPage } from './pages/AchievementsPage.js';
+import { AdminPage } from './pages/AdminPage.js';
+import { FriendsPage } from './pages/FriendsPage.js';
+import { LeaguePage } from './pages/LeaguePage.js';
+import { ProfilePage } from './pages/ProfilePage.js';
 import { CollectionsPage } from './pages/CollectionsPage.js';
 import { DashboardPage } from './pages/DashboardPage.js';
 import { HelpPage } from './pages/HelpPage.js';
@@ -42,6 +46,10 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   insights: { title: 'Insights', render: () => <InsightsPage /> },
   settings: { title: 'Settings', render: () => <SettingsPage /> },
   achievements: { title: 'Achievements', render: () => <AchievementsPage /> },
+  league: { title: 'League', render: () => <LeaguePage /> },
+  friends: { title: 'Friends', render: () => <FriendsPage /> },
+  profile: { title: 'Profile', render: () => <ProfilePage /> },
+  admin: { title: 'Moderation', render: () => <AdminPage /> },
   help: { title: 'Help', render: () => <HelpPage /> },
 };
 

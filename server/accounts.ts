@@ -11,6 +11,7 @@ export interface Account {
 }
 
 /** Everything one request may do, bound to the account that made it and to nothing else. */
+import type { CompetitionService } from './competition-service.js';
 import type { GameService } from './game-service.js';
 import type { StudyGoalsService } from './study-goals-service.js';
 
@@ -47,6 +48,9 @@ export interface AccountSession {
   /** XP, levels, quests and badges; `null` with `gameReason` saying why. */
   game?: GameService | null;
   gameReason?: string | null;
+  /** Leagues, nicknames, friends and moderation; `null` with `competitionReason` saying why. */
+  competition?: CompetitionService | null;
+  competitionReason?: string | null;
   vocabulary: VocabularyService;
   analytics: AnalyticsService;
   library: LibraryService;

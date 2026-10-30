@@ -109,6 +109,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     weakRecovery: schemaVersion >= 14,
     fsrsOnly: schemaVersion >= 15,
     game: schemaVersion >= 17,
+    competition: schemaVersion >= 18,
   };
 }
 

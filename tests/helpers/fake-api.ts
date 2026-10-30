@@ -629,6 +629,37 @@ export function createFakeApi({
       game = { ...game, earlyDays };
       return structuredClone(game);
     }),
+    // Leagues and friends: not kept by this fake, as by a server without schema version 18.
+    fetchLeague: vi.fn<AppApi['fetchLeague']>(async () => ({
+      available: false,
+      reason: 'Leagues and friends need the latest database update (version 18).',
+      week: '2026-10-05',
+      endsAt: '2026-10-11T17:00:00.000Z',
+      nickname: null,
+      tier: 1,
+      inLeagues: false,
+      weekXp: 0,
+      group: null,
+    })),
+    fetchProfile: vi.fn<AppApi['fetchProfile']>(async () => {
+      throw new ApiError('not_supported', 'Leagues and friends are not available.', 409);
+    }),
+    saveProfile: vi.fn<AppApi['saveProfile']>(async () => {
+      throw new ApiError('not_supported', 'Leagues and friends are not available.', 409);
+    }),
+    searchPlayers: vi.fn<AppApi['searchPlayers']>(async () => ({ players: [] })),
+    fetchFriends: vi.fn<AppApi['fetchFriends']>(async () => {
+      throw new ApiError('not_supported', 'Leagues and friends are not available.', 409);
+    }),
+    friendAction: vi.fn<AppApi['friendAction']>(async () => undefined),
+    createInvite: vi.fn<AppApi['createInvite']>(async () => ({ token: 't'.repeat(24), expiresAt: '2026-11-08T00:00:00.000Z' })),
+    acceptInvite: vi.fn<AppApi['acceptInvite']>(async () => undefined),
+    acceptChallenge: vi.fn<AppApi['acceptChallenge']>(async () => undefined),
+    reportPlayer: vi.fn<AppApi['reportPlayer']>(async () => undefined),
+    fetchAdmin: vi.fn<AppApi['fetchAdmin']>(async () => {
+      throw new ApiError('forbidden', 'Only an admin can do that.', 403);
+    }),
+    moderate: vi.fn<AppApi['moderate']>(async () => undefined),
     saveStudyGoals: vi.fn<AppApi['saveStudyGoals']>(async (input) => {
       const goals = {
         newWords: input.newWords ?? studyGoals.goals.newWords,

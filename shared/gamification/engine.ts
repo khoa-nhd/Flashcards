@@ -25,6 +25,7 @@ import {
   COMEBACK_AFTER_DAYS,
   COMEBACK_BONUS,
   COMEBACK_HOURS,
+  RATE_LIMIT,
   XP,
   answerReason,
   comboBonus,
@@ -53,6 +54,8 @@ export interface GameStateData {
   earlyDays: number;
   /** The day the combo high-water mark below belongs to. */
   comboDay: { on: IsoDate; longest: number } | null;
+  /** What the earning limits have counted so far (xp.ts, RATE_LIMIT). */
+  limits: { recent: string[]; last?: string };
 }
 
 export const INITIAL_STATE: GameStateData = {
@@ -68,6 +71,7 @@ export const INITIAL_STATE: GameStateData = {
   installedAt: null,
   earlyDays: 3,
   comboDay: null,
+  limits: { recent: [] },
 };
 
 export interface LedgerEntry {
@@ -89,7 +93,9 @@ export type RewardKind =
   | 'checkin'
   | 'freeze_granted'
   | 'freeze_used'
-  | 'comeback';
+  | 'comeback'
+  | 'league'
+  | 'challenge';
 
 export interface Reward {
   id: string;
@@ -169,6 +175,27 @@ const daysBetween = (from: IsoDate, to: IsoDate) =>
 const questKey = (quest: Quest) => `${quest.period}:${quest.start}:${quest.slot}`;
 
 /**
+ * Whether an answer is past an earning limit (xp.ts, RATE_LIMIT); if not, it
+ * is counted against them. Every answer counts towards the gap, so tapping
+ * fast earns nothing; only answers that earn count towards the minute.
+ * Answers saved before version 18 carry no database time and are not limited.
+ */
+function overLimit(limits: GameStateData['limits'], event: AnswerEvent): boolean {
+  if (!event.recordedAt) return false;
+  const at = time(event.recordedAt);
+  const previous = limits.last === undefined ? null : time(limits.last);
+  limits.last = event.recordedAt;
+  if (previous !== null && at >= previous && at - previous < RATE_LIMIT.minGapMs) return true;
+  limits.recent = limits.recent.filter((seen) => {
+    const then = time(seen);
+    return then <= at && at - then < 60_000;
+  });
+  if (limits.recent.length >= RATE_LIMIT.perMinute) return true;
+  limits.recent.push(event.recordedAt);
+  return false;
+}
+
+/**
  * Brings the game up to date: counts the answers, gives the goal XP, draws and
  * settles the quests, settles the streak's freezes, awards badges and
  * announces a new level. The returned change is what to store.
@@ -177,6 +204,8 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
   const { now, today, account, goals, newId } = context;
   const weekStart = weekStartOf(today);
   const state: GameStateData = { ...INITIAL_STATE, ...snapshot.state, checkin: { ...snapshot.state.checkin } };
+  const limits = snapshot.state.limits ?? INITIAL_STATE.limits;
+  state.limits = { ...limits, recent: [...limits.recent] };
   if (state.installedAt === null) state.installedAt = now;
   const installedAt = time(state.installedAt);
 
@@ -210,10 +239,10 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
 
     if (event.kind === 'undo') {
       const target = (event.undoes !== null ? (counted.get(event.undoes) ?? context.undone.get(event.undoes)) : undefined) ?? null;
-      const amount = target === null ? 0 : -target.amount;
+      const amount = target === null || target.amount === 0 ? 0 : -target.amount;
       ledger.push({ source: 'answer', sourceId: event.id, amount, base: amount, bonus: 0, reason: 'undo', at: event.at, on: event.on });
       // A counted answer taken back no longer counts towards today's or this week's quests.
-      if (target !== null && live) {
+      if (target !== null && target.reason !== 'capped' && live) {
         for (const quest of current()) {
           if (quest.completedAt !== null) continue;
           if (quest.period === 'day' && target.on !== today) continue;
@@ -229,6 +258,12 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
     }
 
     const reason = answerReason(event)!;
+    if (live && overLimit(state.limits, event)) {
+      // Saved, and the schedule moved, but past a limit: it earns nothing.
+      ledger.push({ source: 'answer', sourceId: event.id, amount: 0, base: 0, bonus: 0, reason: 'capped', at: event.at, on: event.on });
+      counted.set(event.id, { amount: 0, reason: 'capped', on: event.on });
+      continue;
+    }
     const base = XP[reason];
     let bonus = 0;
 

@@ -105,6 +105,7 @@ export function createDatabaseGameStore(database: VocabularyDatabase, account: s
         durationMs: row.duration_ms,
         mode: row.mode,
         mastered: row.mastered,
+        recordedAt: row.recorded_at ?? null,
       }));
     },
     async ledger(answerIds) {
@@ -144,10 +145,17 @@ export function createDatabaseGameStore(database: VocabularyDatabase, account: s
 
 // ---- The memory store: the sample data's, kept for as long as the server runs ----
 
-export function createMemoryGameStore(source: { answers(): AnswerEvent[]; metrics(): GameMetrics }): GameStore {
+export interface MemoryGameStore extends GameStore {
+  /** XP earned from `from` (inclusive) to `to`: what the sample league counts. */
+  xpBetween(from: string, to: string): number;
+  /** Adds a reward from outside the game, as a league or a challenge does. */
+  give(reward: Omit<Reward, 'id' | 'createdAt'>): void;
+}
+
+export function createMemoryGameStore(source: { answers(): AnswerEvent[]; metrics(): GameMetrics }): MemoryGameStore {
   let version = 0;
   let state: GameStateData = { ...INITIAL_STATE };
-  const ledger = new Map<string, { source: string; amount: number; reason: string; on: IsoDate }>();
+  const ledger = new Map<string, { source: string; amount: number; reason: string; on: IsoDate; at: string }>();
   const quests = new Map<string, Quest>();
   const badges = new Map<string, { badge: BadgeId; tier: number; earnedAt: string }>();
   const freezes = new Map<string, { id: string; grantedOn: IsoDate; usedOn: IsoDate | null }>();
@@ -155,6 +163,14 @@ export function createMemoryGameStore(source: { answers(): AnswerEvent[]; metric
   const key = (quest: Pick<Quest, 'period' | 'start' | 'slot'>) => `${quest.period}:${quest.start}:${quest.slot}`;
 
   return {
+    xpBetween(from, to) {
+      const [start, end] = [Date.parse(from), Date.parse(to)];
+      return [...ledger.values()].filter((entry) => Date.parse(entry.at) >= start && Date.parse(entry.at) < end).reduce((sum, entry) => sum + entry.amount, 0);
+    },
+    give(reward) {
+      const id = randomUUID();
+      rewards.set(id, { ...reward, id, createdAt: new Date().toISOString(), claimed: false });
+    },
     async snapshot(today, weekStart) {
       return {
         version,
@@ -192,7 +208,7 @@ export function createMemoryGameStore(source: { answers(): AnswerEvent[]; metric
       if (change.version !== version) return 'stale';
       for (const entry of change.ledger) {
         const id = `${entry.source}:${entry.sourceId}`;
-        if (!ledger.has(id)) ledger.set(id, { source: entry.source, amount: entry.amount, reason: entry.reason, on: entry.on });
+        if (!ledger.has(id)) ledger.set(id, { source: entry.source, amount: entry.amount, reason: entry.reason, on: entry.on, at: entry.at });
       }
       for (const quest of change.quests) {
         const known = quests.get(key(quest));

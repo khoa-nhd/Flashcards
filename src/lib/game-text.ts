@@ -161,5 +161,54 @@ export function rewardText(language: UiLanguage, reward: GameRewardView): { titl
         title: pick(language, 'Welcome back', 'Chào mừng trở lại'),
         detail: pick(language, 'Double XP for the next 24 hours.', 'Nhân đôi XP trong 24 giờ tới.'),
       };
+    case 'league': {
+      const rank = Number(payload.rank);
+      const league = leagueName(language, Number(payload.tier));
+      if (payload.outcome === 'up') {
+        return {
+          title: pick(language, `Up to ${league}`, `Lên hạng ${league}`),
+          detail: pick(language, `You finished the week #${rank} in your league.`, `Bạn kết thúc tuần ở hạng ${rank} trong nhóm.`),
+        };
+      }
+      if (payload.outcome === 'down') {
+        return {
+          title: pick(language, `Down to ${league}`, `Xuống hạng ${league}`),
+          detail: pick(language, `You finished the week #${rank}. A new week, a new chance.`, `Bạn kết thúc tuần ở hạng ${rank}. Tuần mới, cơ hội mới.`),
+        };
+      }
+      return {
+        title: pick(language, `Staying in ${league}`, `Giữ hạng ${league}`),
+        detail: pick(language, `You finished the week #${rank} in your league.`, `Bạn kết thúc tuần ở hạng ${rank} trong nhóm.`),
+      };
+    }
+    case 'challenge': {
+      const against = typeof payload.against === 'string' ? payload.against : pick(language, 'a friend', 'một người bạn');
+      if (payload.outcome === 'won') {
+        return {
+          title: pick(language, `You beat ${against}`, `Bạn thắng ${against}`),
+          detail: pick(language, `Weekly challenge won${plus}`, `Thắng thách đấu tuần${plus}`),
+        };
+      }
+      return {
+        title: pick(language, `A draw with ${against}`, `Hòa với ${against}`),
+        detail: pick(language, `Weekly challenge drawn${plus}`, `Thách đấu tuần hòa${plus}`),
+      };
+    }
   }
+}
+
+/** A league tier's name: Bronze at 1 up to Star at 8. */
+export function leagueName(language: UiLanguage, tier: number): string {
+  const names: Array<[string, string]> = [
+    ['Bronze', 'Đồng'],
+    ['Silver', 'Bạc'],
+    ['Gold', 'Vàng'],
+    ['Platinum', 'Bạch kim'],
+    ['Jade', 'Ngọc'],
+    ['Diamond', 'Kim cương'],
+    ['Moon', 'Trăng'],
+    ['Star', 'Sao'],
+  ];
+  const [en, vi] = names[Math.min(names.length, Math.max(1, tier)) - 1]!;
+  return pick(language, en, vi);
 }

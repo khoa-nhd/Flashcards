@@ -14,6 +14,7 @@ import {
   studyGoalsResponseSchema,
   type VocabularyEntry,
 } from '../../shared/api.js';
+import { RATE_LIMIT } from '../../shared/gamification/xp.js';
 import { TODAY } from '../helpers/fixtures.js';
 import { call, createSupabaseTestApp, createTestUser, newId, type TestApp, type TestUser } from '../helpers/supabase-app.js';
 import { createTestDatabase, type TestDatabase } from '../helpers/test-database.js';
@@ -48,7 +49,14 @@ async function addWord(user: TestUser, word: string): Promise<VocabularyEntry> {
   return entryResponseSchema.parse(await response.json()).entry;
 }
 
+/**
+ * Waits as a reviewer would between two answers: one less than 600 ms after
+ * the last earns nothing (version 18), and a test answers faster than anyone can.
+ */
+const later = () => new Promise((resolve) => setTimeout(resolve, RATE_LIMIT.minGapMs + 50));
+
 const answer = async (user: TestUser, id: string, revision: number, extra: Record<string, unknown> = {}) => {
+  await later();
   const requestId = newId();
   const response = await call(app, user, '/api/review-action', {
     method: 'POST',
@@ -80,6 +88,7 @@ describe('XP for answers', () => {
     const word = await addWord(alice, 'candid');
     const { requestId } = await answer(alice, word.id, 0);
 
+    await later();
     const practice = await call(app, alice, '/api/practice', {
       method: 'POST',
       body: { requestId: newId(), pageId: word.id, mode: 'typing', answer: { kind: 'typed', text: 'candid' } },
