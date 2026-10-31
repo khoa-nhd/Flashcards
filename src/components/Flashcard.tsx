@@ -46,6 +46,17 @@ function dueLabel(nextReview: IsoDate | null, today: IsoDate | null): string | n
   return null;
 }
 
+/**
+ * Sizes the word to the card, not the window: the longest single word must fit
+ * on one line (a serif letter is about 0.6em wide), between 1.75rem and 4.5rem.
+ * Phrases still wrap between words; a word too long even at the smallest size
+ * breaks anywhere rather than overflow.
+ */
+function wordFontSize(word: string): string {
+  const longest = Math.max(1, ...word.split(/\s+/).map((part) => part.length));
+  return `clamp(1.75rem, calc(100cqi / ${(longest * 0.6).toFixed(2)}), 4.5rem)`;
+}
+
 const FACE =
   'card-face flex min-h-[18rem] flex-col rounded-xl border px-4 pb-12 pt-3 shadow-[0_20px_60px_-30px_rgba(0,0,0,0.9)] sm:min-h-[22rem] sm:px-6 sm:pb-16 sm:pt-5 sm:rounded-2xl sm:shadow-[0_30px_80px_-40px_rgba(0,0,0,0.95)]';
 
@@ -146,8 +157,11 @@ muted = false,
               )}
               {due !== null && <span className="shrink-0">{due}</span>}
             </div>
-            <div className="flex flex-1 flex-col items-center justify-center gap-3 py-6 text-center">
-              <h2 className="font-serif text-[clamp(2.5rem,8vw,4.5rem)] font-semibold leading-[1.05] tracking-[-0.025em] wrap-anywhere">
+            <div className="@container flex flex-1 flex-col items-center justify-center gap-3 py-6 text-center">
+              <h2
+                className="font-serif font-semibold leading-[1.05] tracking-[-0.025em] wrap-anywhere"
+                style={{ fontSize: wordFontSize(card.word) }}
+              >
                 {card.word}
               </h2>
               <SpeakButton word={card.word} lang={speechLang} />
