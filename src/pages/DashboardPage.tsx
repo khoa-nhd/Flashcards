@@ -16,6 +16,7 @@ import { StudyGoalsCard, StudyGoalsSkeleton, useStudyGoals } from '../components
 import { QuestsCard } from '../components/Quests.js';
 import { LeagueCard } from '../components/League.js';
 import { EventsCard } from '../components/Events.js';
+import { Fold } from '../components/Fold.js';
 import { ReminderPrompt } from '../components/Reminders.js';
 import { knownGame } from '../lib/game-state.js';
 import { EARLY_DAYS_DEFAULT } from '../lib/review-scope.js';
@@ -176,9 +177,9 @@ export function DashboardPage() {
             disabled={state.refreshing || state.status === 'loading'}
           >
             <Icon name="refresh" className="size-4" />
-            {state.refreshing
-              ? pick(language, 'Refreshing…', 'Đang làm mới…')
-              : pick(language, 'Refresh', 'Làm mới')}
+            <span className="sr-only sm:not-sr-only">
+              {state.refreshing ? pick(language, 'Refreshing…', 'Đang làm mới…') : pick(language, 'Refresh', 'Làm mới')}
+            </span>
           </button>
         }
       />
@@ -189,7 +190,7 @@ export function DashboardPage() {
             {/* Headline: what needs doing now, and the way to do it. */}
             <section
               aria-label="Ready to review"
-              className="pool pool-top overflow-hidden rounded-2xl border border-line px-6 py-7 md:px-9 md:py-9"
+              className="pool pool-top overflow-hidden rounded-2xl border border-line px-4 py-6 sm:px-6 sm:py-7 md:px-9 md:py-9"
             >
               <div className="flex flex-col gap-6 lg:grid lg:grid-cols-12 lg:items-center lg:gap-10">
                 <div className="flex min-w-0 flex-col lg:col-span-7">
@@ -288,6 +289,12 @@ export function DashboardPage() {
 
             <EventsCard />
 
+            {/* The numbers: useful, but not what to do next. Put away on a phone until asked for. */}
+            <Fold
+              id="dashboard-numbers"
+              title={pick(language, 'Your words in numbers', 'Số liệu từ vựng')}
+              hint={pick(language, 'Activity, memory strength, practice score, recently added', 'Hoạt động, sức nhớ, điểm luyện tập, từ mới thêm')}
+            >
             <ReviewActivityCard activity={activity} />
 
             {/* Next useful action - clearly distinguish due review from weak knowledge */}
@@ -722,6 +729,7 @@ export function DashboardPage() {
                 Insights
               </Link>
             </section>
+            </Fold>
           </div>
         )}
       </VocabularyGate>

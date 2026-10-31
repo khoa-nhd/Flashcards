@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Fold } from '../components/Fold.js';
 import { ProfileSettings } from '../components/ProfileSettings.js';
 import { ReminderSettings } from '../components/Reminders.js';
 import { useApp, useSettings, useSync, useVocabulary } from '../app-context.js';
@@ -80,10 +81,16 @@ export function SettingsPage() {
       />
 
       <div className="flex max-w-2xl flex-col gap-6 [&_p]:max-w-[70ch]">
-        {account !== null && <AccountSection account={account} />}
-        {account !== null && <TimeZoneSection />}
-        <ProfileSettings />
-        <ReminderSettings />
+        {/* Eleven sections read as five choices: each group opens on its own. */}
+        <Fold id="settings-account" title="Account and profile" hint="Nickname, leagues, time zone, sign-in">
+          {account !== null && <AccountSection account={account} />}
+          {account !== null && <TimeZoneSection />}
+          <ProfileSettings />
+        </Fold>
+        <Fold id="settings-reminders" title="Reminders" hint="Streak, daily reminder, league, quiet hours">
+          <ReminderSettings />
+        </Fold>
+        <Fold id="settings-learning" title="Learning" hint="Daily goals, scheduling, answer keys">
         {fsrsOnly ? (
           <FsrsSettingsSection />
         ) : (
@@ -117,6 +124,8 @@ export function SettingsPage() {
           </div>
         </section>
 
+        </Fold>
+        <Fold id="settings-display" title="Display" hint="Language, motion, vocabulary bank, charts">
         <section className={`${CARD} flex flex-col gap-4 p-5`}>
           <h2 className={SECTION_TITLE}>Vocabulary bank</h2>
           <div className="grid gap-4 sm:grid-cols-2">
@@ -212,6 +221,8 @@ export function SettingsPage() {
           </button>
         </section>
 
+        </Fold>
+        <Fold id="settings-data" title="Your data" hint="Backup and export, connection, deleted words">
         <section className={`${CARD} flex flex-col gap-3 p-5`}>
           <h2 className={SECTION_TITLE}>Backup</h2>
           <p className="text-sm text-muted">
@@ -315,6 +326,7 @@ export function SettingsPage() {
         {meta !== null && <TrashSection />}
 
         {account !== null && local.persistent && <DeviceStorageSection />}
+        </Fold>
       </div>
     </div>
   );

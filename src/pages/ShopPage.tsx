@@ -153,14 +153,14 @@ export function ShopPage() {
               <h2 className={SECTION_TITLE}>{pick(language, 'Today', 'Hôm nay')}</h2>
               <span className={HELP}>{pick(language, `New items in ${clock}`, `Món mới sau ${clock}`)}</span>
             </div>
-            <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <ul className="grid grid-cols-2 gap-3 lg:grid-cols-4">
               {data!.items.map((offer) => {
                 const item = itemById(offer.item)!;
                 const name = itemName(language, offer.item);
                 return (
                   <li
                     key={offer.item}
-                    className={`${CARD} flex flex-col items-center gap-3 border-2 p-4 text-center ${rarityBorder(item.rarity)}`}
+                    className={`${CARD} flex flex-col items-center gap-2 border-2 p-3 text-center sm:gap-3 sm:p-4 ${rarityBorder(item.rarity)}`}
                   >
                     <div className="flex h-24 w-full items-center justify-center">
                       <ItemPicture id={offer.item} />

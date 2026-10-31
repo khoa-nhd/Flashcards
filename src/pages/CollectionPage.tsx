@@ -258,6 +258,9 @@ function Wearables({
 function Cards({ data, language }: { data: CollectionResponse; language: UiLanguage }) {
   const cards = ITEMS.filter((item) => item.kind === 'card');
   const have = cards.filter((card) => data.owned.includes(card.id)).length;
+  // The cards collected show; the 88 slots, mostly empty at first, only when asked for.
+  const [all, setAll] = useState(false);
+  const shown = all ? cards : cards.filter((card) => data.owned.includes(card.id));
   return (
     <section className={`${CARD} flex flex-col gap-4 p-5`}>
       <div className="flex flex-wrap items-baseline justify-between gap-2">
@@ -279,8 +282,12 @@ function Cards({ data, language }: { data: CollectionResponse; language: UiLangu
           );
         })}
       </ul>
+      {shown.length === 0 && (
+        <p className={HELP}>{pick(language, 'No cards yet: they come from rare and legendary chests, and the shop.', 'Chưa có thẻ nào: thẻ có trong rương hiếm, rương huyền thoại và cửa hàng.')}</p>
+      )}
+      {shown.length > 0 && (
       <ul className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-        {cards.map((card) => {
+        {shown.map((card) => {
           const owned = data.owned.includes(card.id);
           return (
             <li
@@ -298,6 +305,10 @@ function Cards({ data, language }: { data: CollectionResponse; language: UiLangu
           );
         })}
       </ul>
+      )}
+      <button type="button" className={`${BUTTON_GHOST} self-start`} aria-expanded={all} onClick={() => setAll(!all)}>
+        {all ? pick(language, 'Show only mine', 'Chỉ hiện thẻ của tôi') : pick(language, `Show all ${cards.length}`, `Hiện cả ${cards.length} thẻ`)}
+      </button>
     </section>
   );
 }

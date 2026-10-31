@@ -13,7 +13,7 @@ import {
   weekEndsAt,
   weekStartsAt,
 } from '../../shared/gamification/league.js';
-import { nicknameProblem, randomNickname } from '../../shared/gamification/nickname.js';
+import { botNickname, nicknameProblem, randomNickname } from '../../shared/gamification/nickname.js';
 import { RATE_LIMIT, type AnswerEvent } from '../../shared/gamification/xp.js';
 
 const WEEK = '2026-10-26';
@@ -135,6 +135,15 @@ describe('nicknames', () => {
   it('catch swear words with accents dropped and letters repeated, but not innocent words', () => {
     for (const name of ['Fuuuck', 'f u c k', 'Dit me may', 'vcl lắm', 'Đồ lồn', 'admin']) expect(isBlocked(name), name).toBe(true);
     for (const name of ['Cá Lớn', 'Các bạn', 'Class act', 'Grape', 'Đèo Gió']) expect(isBlocked(name), name).toBe(false);
+  });
+
+  it('give rivals varied gamer-style handles, always usable', () => {
+    const names = Array.from({ length: 2000 }, (_, at) => botNickname(`group:${at}`));
+    expect(botNickname('a')).toBe(botNickname('a'));
+    for (const name of names) expect(nicknameProblem(name), name).toBeNull();
+    expect(new Set(names).size).toBeGreaterThan(1500);
+    // Not the animal names new accounts start with.
+    expect(names.filter((name) => /\d{4}$/.test(name) && name.includes(' '))).toEqual([]);
   });
 
   it('come out random but repeatable, and always usable', () => {

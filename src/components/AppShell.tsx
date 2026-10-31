@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useSync, useUiLanguage } from '../app-context.js';
 import { pick } from '../lib/i18n.js';
 import { ROUTES, type RouteKey } from '../lib/router.js';
@@ -20,27 +20,67 @@ interface NavItem {
   icon: IconName;
 }
 
-const PRIMARY: NavItem[] = [
-  { route: 'dashboard', label: 'Dashboard', labelVi: 'Tổng quan', short: 'Home', shortVi: 'Trang chủ', icon: 'dashboard' },
-  { route: 'review', label: 'Review', labelVi: 'Ôn tập', short: 'Review', shortVi: 'Ôn tập', icon: 'review' },
-  { route: 'add', label: 'Add vocabulary', labelVi: 'Thêm từ', short: 'Add', shortVi: 'Thêm', icon: 'add' },
-  { route: 'bank', label: 'Vocabulary bank', labelVi: 'Sổ từ', short: 'Bank', shortVi: 'Sổ từ', icon: 'bank' },
-  { route: 'calendar', label: 'Calendar', labelVi: 'Lịch', short: 'Calendar', shortVi: 'Lịch', icon: 'calendar' },
-  { route: 'chat', label: 'AI Chat', labelVi: 'Trợ lý AI', short: 'Chat', shortVi: 'Chat', icon: 'chat' },
+const item = (route: RouteKey, label: string, labelVi: string, short: string, shortVi: string, icon: IconName): NavItem => ({
+  route,
+  label,
+  labelVi,
+  short,
+  shortVi,
+  icon,
+});
+
+const DASHBOARD = item('dashboard', 'Dashboard', 'Tổng quan', 'Home', 'Trang chủ', 'dashboard');
+const REVIEW = item('review', 'Review', 'Ôn tập', 'Review', 'Ôn tập', 'review');
+const ADD = item('add', 'Add vocabulary', 'Thêm từ', 'Add', 'Thêm', 'add');
+const BANK = item('bank', 'Vocabulary bank', 'Sổ từ', 'Words', 'Sổ từ', 'bank');
+const PLAY = item('play', 'Play', 'Chơi', 'Play', 'Chơi', 'star');
+
+/** The pages, in three groups, so the menu reads as a few choices rather than eighteen. */
+const GROUPS: Array<{ id: 'study' | 'play' | 'more'; label: string; labelVi: string; items: NavItem[] }> = [
+  {
+    id: 'study',
+    label: 'Study',
+    labelVi: 'Học',
+    items: [
+      DASHBOARD,
+      REVIEW,
+      ADD,
+      BANK,
+      item('practice', 'Practice', 'Luyện tập', 'Practice', 'Luyện tập', 'practice'),
+      item('weak', 'Weak words', 'Từ yếu', 'Weak', 'Từ yếu', 'weak'),
+      item('calendar', 'Calendar', 'Lịch', 'Calendar', 'Lịch', 'calendar'),
+      item('collections', 'Collections', 'Bộ sưu tập', 'Collections', 'Bộ sưu tập', 'collections'),
+      item('chat', 'AI Chat', 'Trợ lý AI', 'Chat', 'Chat', 'chat'),
+    ],
+  },
+  {
+    id: 'play',
+    label: 'Play',
+    labelVi: 'Chơi',
+    items: [
+      item('achievements', 'Level and quests', 'Level và nhiệm vụ', 'Quests', 'Nhiệm vụ', 'trophy'),
+      item('league', 'League', 'Giải đấu', 'League', 'Giải đấu', 'league'),
+      item('friends', 'Friends', 'Bạn bè', 'Friends', 'Bạn bè', 'friends'),
+      item('shop', 'Shop', 'Cửa hàng', 'Shop', 'Cửa hàng', 'shop'),
+      item('collection', 'Companions & cards', 'Kho đồ', 'Items', 'Kho đồ', 'pet'),
+      item('boss', 'Weekly boss', 'Boss tuần', 'Boss', 'Boss', 'sword'),
+    ],
+  },
+  {
+    id: 'more',
+    label: 'More',
+    labelVi: 'Khác',
+    items: [
+      item('insights', 'Insights', 'Thống kê', 'Insights', 'Thống kê', 'insights'),
+      item('profile', 'Profile', 'Hồ sơ', 'Profile', 'Hồ sơ', 'user'),
+      item('settings', 'Settings', 'Cài đặt', 'Settings', 'Cài đặt', 'settings'),
+      item('help', 'Help', 'Trợ giúp', 'Help', 'Trợ giúp', 'help'),
+    ],
+  },
 ];
 
-const SECONDARY: NavItem[] = [
-  { route: 'league', label: 'League', labelVi: 'Giải đấu', short: 'League', shortVi: 'Giải đấu', icon: 'league' },
-  { route: 'shop', label: 'Shop', labelVi: 'Cửa hàng', short: 'Shop', shortVi: 'Cửa hàng', icon: 'shop' },
-  { route: 'collection', label: 'Companions & cards', labelVi: 'Kho đồ', short: 'Items', shortVi: 'Kho đồ', icon: 'pet' },
-  { route: 'friends', label: 'Friends', labelVi: 'Bạn bè', short: 'Friends', shortVi: 'Bạn bè', icon: 'friends' },
-  { route: 'practice', label: 'Practice', labelVi: 'Luyện tập', short: 'Practice', shortVi: 'Luyện tập', icon: 'practice' },
-  { route: 'collections', label: 'Collections', labelVi: 'Bộ sưu tập', short: 'Collections', shortVi: 'Bộ sưu tập', icon: 'collections' },
-  { route: 'weak', label: 'Weak words', labelVi: 'Từ yếu', short: 'Weak', shortVi: 'Từ yếu', icon: 'weak' },
-  { route: 'insights', label: 'Insights', labelVi: 'Thống kê', short: 'Insights', shortVi: 'Thống kê', icon: 'insights' },
-  { route: 'help', label: 'Help', labelVi: 'Trợ giúp', short: 'Help', shortVi: 'Trợ giúp', icon: 'help' },
-  { route: 'settings', label: 'Settings', labelVi: 'Cài đặt', short: 'Settings', shortVi: 'Cài đặt', icon: 'settings' },
-];
+const ALL_ITEMS = [PLAY, ...GROUPS.flatMap((group) => group.items)];
+const groupOf = (route: RouteKey | null) => GROUPS.find((group) => group.items.some((each) => each.route === route))?.id ?? null;
 
 export interface AppShellProps {
   /** The page being shown; `null` for an unknown address. */
@@ -52,6 +92,83 @@ export interface AppShellProps {
   /** The signed-in account, where the app has accounts. */
   account?: { email: string | null; signOut(): Promise<void> } | null;
   children: ReactNode;
+}
+
+/**
+ * The phone's "More" sheet: every page not in the bottom bar, in its group,
+ * as large tiles. It closes on a choice, a tap outside, or Escape.
+ */
+function MoreSheet({
+  openedAt,
+  active,
+  label,
+  onClose,
+}: {
+  /** When the sheet was opened; `null` while it is closed. */
+  openedAt: number | null;
+  active: RouteKey | null;
+  label: (item: NavItem) => string;
+  onClose: () => void;
+}) {
+  const language = useUiLanguage();
+  const open = openedAt !== null;
+  useEffect(() => {
+    if (!open) return;
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', escape);
+    return () => document.removeEventListener('keydown', escape);
+  }, [open, onClose]);
+  if (!open) return null;
+  // What the bottom bar already shows is left out.
+  const shown = new Set<RouteKey>(['dashboard', 'review', 'bank']);
+  return (
+    <div className="fixed inset-0 z-40 md:hidden" role="dialog" aria-modal="true" aria-label={pick(language, 'More pages', 'Thêm trang')}>
+      <button
+        type="button"
+        aria-label={pick(language, 'Close', 'Đóng')}
+        className="absolute inset-0 bg-scrim"
+        onClick={() => {
+          // The tap that opened the sheet can arrive a second time, on this backdrop that appeared under the finger.
+          if (openedAt !== null && Date.now() - openedAt > 400) onClose();
+        }}
+      />
+      <div className="absolute inset-x-0 bottom-0 max-h-[80dvh] overflow-y-auto rounded-t-3xl border-t border-line bg-surface px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-3">
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-line-strong" aria-hidden="true" />
+        {GROUPS.filter((group) => group.id !== 'play').map((group) => {
+          const items = group.items.filter((each) => !shown.has(each.route));
+          return (
+            <section key={group.id} className="mb-4">
+              <h2 className="mb-2 px-1 text-[0.6875rem] font-semibold uppercase tracking-[0.14em] text-faint">
+                {group.id === 'study' ? pick(language, 'Study tools', 'Công cụ học') : pick(language, 'You', 'Bạn')}
+              </h2>
+              <ul className="grid grid-cols-3 gap-2">
+                {items.map((each) => {
+                  const current = each.route === active;
+                  return (
+                    <li key={each.route}>
+                      <Link
+                        to={ROUTES[each.route]}
+                        aria-current={current ? 'page' : undefined}
+                        onClick={onClose}
+                        className={`flex h-20 flex-col items-center justify-center gap-1.5 rounded-2xl border px-1 text-center text-xs font-medium ${
+                          current ? 'border-accent/50 bg-accent-soft text-ink' : 'border-line text-muted active:bg-line/30'
+                        }`}
+                      >
+                        <Icon name={each.icon} className={current ? 'size-6 text-accent' : 'size-6'} />
+                        <span className="leading-tight">{label(each)}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </section>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 export function AppShell({ active, reviewCount, badge, account = null, children }: AppShellProps) {
@@ -67,24 +184,23 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
 
   // Importing is part of adding vocabulary, and is reached from there.
   const section: RouteKey | null = active === 'import' ? 'add' : active;
-  const currentNav = [...PRIMARY, ...SECONDARY].find((item) => item.route === active);
+  const currentNav = ALL_ITEMS.find((each) => each.route === active);
+  const [moreOpenedAt, setMoreOpenedAt] = useState<number | null>(null);
+  const moreOpen = moreOpenedAt !== null;
+  const closeMore = useCallback(() => setMoreOpenedAt(null), [setMoreOpenedAt]);
+  const group = groupOf(section);
   const title =
     active === 'import'
       ? pick(language, 'Import', 'Nhập danh sách')
-      : active === 'achievements'
-        ? pick(language, 'Achievements', 'Thành tích')
-        : active === 'profile'
-          ? pick(language, 'Profile', 'Hồ sơ')
-          : active === 'admin'
-            ? pick(language, 'Moderation', 'Quản trị')
-            : active === 'boss'
-              ? pick(language, 'Weekly boss', 'Boss tuần')
-            : currentNav === undefined
-        ? pick(language, 'Vocabulary', 'Từ vựng')
-        : navLabel(currentNav);
+      : active === 'admin'
+        ? pick(language, 'Moderation', 'Quản trị')
+        : currentNav === undefined
+          ? pick(language, 'Vocabulary', 'Từ vựng')
+          : navLabel(currentNav);
 
   const sideLink = (item: NavItem) => {
-    const current = item.route === section;
+    // Every game page sits under Play, which the hub links to.
+    const current = item.route === 'play' ? section === 'play' || group === 'play' : item.route === section;
     return (
       <Link
         key={item.route}
@@ -121,10 +237,15 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           )}
           <SyncStatus />
         </div>
-        <nav aria-label={pick(language, 'Main', 'Chính')} className="flex flex-1 flex-col gap-1 overflow-y-auto">
-          {PRIMARY.map(sideLink)}
-          <div className="my-2 border-t border-line" />
-          {SECONDARY.map(sideLink)}
+        <nav aria-label={pick(language, 'Main', 'Chính')} className="flex flex-1 flex-col gap-0.5 overflow-y-auto">
+          {GROUPS.map((each) => (
+            <div key={each.id} className="flex flex-col gap-0.5 pb-3">
+              <span className="px-3 pb-1 pt-1 text-[0.625rem] font-semibold uppercase tracking-[0.16em] text-faint">
+                {pick(language, each.label, each.labelVi)}
+              </span>
+              {each.id === 'play' ? sideLink(PLAY) : each.items.map(sideLink)}
+            </div>
+          ))}
         </nav>
         <XpCard />
         {account !== null && (
@@ -150,19 +271,6 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
           <div className="flex shrink-0 items-center gap-0.5">
             <SyncStatus />
             <XpChip />
-            {SECONDARY.map((item) => (
-              <Link
-                key={item.route}
-                to={ROUTES[item.route]}
-                aria-label={navLabel(item)}
-                aria-current={item.route === active ? 'page' : undefined}
-                className={`flex size-9 items-center justify-center rounded-[10px] ${
-                  item.route === active ? 'bg-accent-soft text-accent' : 'text-muted'
-                }`}
-              >
-                <Icon name={item.icon} />
-              </Link>
-            ))}
           </div>
         </header>
 
@@ -181,23 +289,23 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
 
         <nav
           aria-label={pick(language, 'Main', 'Chính')}
-          className="grid grid-cols-6 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)] md:hidden"
+          className="grid grid-cols-5 border-t border-line bg-paper pb-[env(safe-area-inset-bottom)] md:hidden"
         >
-          {PRIMARY.map((item) => {
-            const current = item.route === section;
+          {[DASHBOARD, REVIEW, BANK, PLAY].map((each) => {
+            const current = each.route === 'play' ? section === 'play' || group === 'play' : each.route === section;
             return (
               <Link
-                key={item.route}
-                to={ROUTES[item.route]}
+                key={each.route}
+                to={ROUTES[each.route]}
                 aria-current={current ? 'page' : undefined}
-                aria-label={navLabel(item)}
+                aria-label={navLabel(each)}
                 className={`relative flex h-14 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium ${
                   current ? 'text-accent' : 'text-muted'
                 }`}
               >
-                <Icon name={item.icon} />
-                <span>{navShort(item)}</span>
-                {item.route === 'review' && reviewCount !== null && reviewCount > 0 && (
+                <Icon name={each.icon} />
+                <span>{navShort(each)}</span>
+                {each.route === 'review' && reviewCount !== null && reviewCount > 0 && (
                   <span
                     aria-hidden="true"
                     className="absolute right-[calc(50%-1.4rem)] top-1.5 min-w-4 rounded-full bg-accent px-1 text-center text-[0.625rem] font-semibold leading-4 tabular-nums text-on-accent"
@@ -208,7 +316,22 @@ export function AppShell({ active, reviewCount, badge, account = null, children 
               </Link>
             );
           })}
+          <button
+            type="button"
+            aria-expanded={moreOpen}
+            aria-haspopup="dialog"
+            onClick={() => setMoreOpenedAt(Date.now())}
+            className={`flex h-14 flex-col items-center justify-center gap-0.5 text-[0.6875rem] font-medium ${
+              moreOpen || (section !== 'dashboard' && section !== 'review' && section !== 'bank' && group !== 'play' && section !== 'play')
+                ? 'text-accent'
+                : 'text-muted'
+            }`}
+          >
+            <Icon name="list" />
+            <span>{pick(language, 'More', 'Thêm')}</span>
+          </button>
         </nav>
+        <MoreSheet openedAt={moreOpenedAt} active={active} label={navLabel} onClose={closeMore} />
       </div>
       <Onboarding />
       <GameWatcher />

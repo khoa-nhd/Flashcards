@@ -21,8 +21,8 @@ import { pick, type UiLanguage } from '../lib/i18n.js';
 function Level({ game, language }: { game: GameResponse; language: UiLanguage }) {
   const { level, into, needed } = game.level;
   return (
-    <section className={`${CARD} pool pool-top flex flex-col gap-4 p-6 sm:flex-row sm:items-center sm:gap-8`}>
-      <div className="flex size-24 shrink-0 flex-col items-center justify-center rounded-full border-2 border-accent/60 bg-paper/60">
+    <section className={`${CARD} pool pool-top flex items-center gap-4 p-5 sm:gap-8 sm:p-6`}>
+      <div className="flex size-20 shrink-0 flex-col items-center justify-center rounded-full border-2 border-accent/60 bg-paper/60 sm:size-24">
         <span className="text-[0.625rem] font-semibold uppercase tracking-[0.2em] text-faint">Level</span>
         <span className="font-serif text-4xl font-semibold tabular-nums leading-none text-ink">{level}</span>
       </div>

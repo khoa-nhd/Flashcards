@@ -415,7 +415,8 @@ export function StudyGoalsCard({
           <h2 className="text-xs font-semibold uppercase tracking-[0.16em] text-faint">
             {pick(language, 'Daily goals', 'Mục tiêu ngày')}
           </h2>
-          <p className="mt-1 text-sm text-muted">
+          {/* On a phone the compact card keeps to the rings; the explanation is in Help. */}
+          <p className={`mt-1 text-sm text-muted ${compact && !data.streak.metToday ? 'hidden sm:block' : ''}`}>
             {data.streak.metToday
               ? pick(language, 'All goals are met today.', 'Hôm nay đã đạt tất cả mục tiêu.')
               : pick(
@@ -453,7 +454,7 @@ export function StudyGoalsCard({
       {risk !== null && <StreakWarning data={data} risk={risk} language={language} />}
 
       {!data.chosen && (
-        <p className="mt-3 rounded-lg border border-line bg-paper px-3 py-2 text-xs leading-relaxed text-muted">
+        <p className={`mt-3 rounded-lg border border-line bg-paper px-3 py-2 text-xs leading-relaxed text-muted ${compact ? 'hidden sm:block' : ''}`}>
           {pick(
             language,
             'These are suggested goals. Choose your own whenever you are ready.',

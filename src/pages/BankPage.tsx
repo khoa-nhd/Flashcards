@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useNarrow } from '../hooks/useNarrow.js';
 import type { VocabularyEntry } from '../../shared/api.js';
 import type { IsoDate } from '../../shared/dates.js';
 import type { StrengthBand } from '../../shared/scheduler/strength.js';
@@ -300,71 +301,51 @@ function BankList({ entries, today, trueMasteryMap, fsrsOnly, selected, onToggle
               onClick={() => openWord(entry.id)}
               className="flex min-w-0 flex-1 cursor-pointer items-center gap-3 px-3 py-3 text-left transition-colors hover:bg-line-strong/40"
             >
-              {fsrsOnly ? (
-                entry.memory === undefined ? (
-                  <span className="text-xs text-muted">—</span>
-                ) : (
-                  <StrengthPill memory={entry.memory} compact language={language} />
-                )
-              ) : (
-                <MasteryPill mastery={entry.mastery} />
-              )}
-              <span className="min-w-0 flex-1 truncate">
-                <span className="font-serif text-[1.0625rem] font-medium">{entry.word}</span>
-                {entry.meaning !== null && <span className="text-muted"> — {entry.meaning}</span>}
+              {/* The word and its meaning get the room; what describes it sits to the side, smaller. */}
+              <span className="flex min-w-0 flex-1 flex-col">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  <span className="truncate font-serif text-[1.0625rem] font-medium">{entry.word}</span>
+                  <QualityFlag entry={entry} />
+                </span>
+                {entry.meaning !== null && <span className="truncate text-sm text-muted">{entry.meaning}</span>}
               </span>
-              <QualityFlag entry={entry} />
-              {trueMastery && trueMastery.mastery !== null && (
-                <span className="shrink-0 flex items-center gap-2">
-                  <span
-                    className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                      trueMastery.tier === 'Excellent'
-                        ? 'bg-good-soft text-good-ink'
-                        : trueMastery.tier === 'Strong'
-                        ? 'bg-accent-soft text-accent'
-                        : trueMastery.tier === 'Good'
-                        ? 'bg-accent-soft text-accent'
-                        : trueMastery.tier === 'Developing'
-                        ? 'bg-warn-soft text-warn-ink'
-                        : trueMastery.tier === 'Weak'
-                        ? 'bg-bad-soft text-bad-ink'
-                        : 'bg-line-strong/60 text-muted'
-                    }`}
-                    title={
-                      `${fsrsOnly ? 'Practice score' : 'True Mastery'}: ${trueMastery.mastery}/100 (${trueMastery.tier})\n` +
-                      `Evidence: ${trueMastery.coverageLabel} (${trueMastery.totalEffectiveEvidence.toFixed(1)} effective evidence across ${trueMastery.modesWithEvidence} mode${trueMastery.modesWithEvidence === 1 ? '' : 's'})\n` +
-                      (trueMastery.modeStats?.length > 0
-                        ? trueMastery.modeStats
-                            .filter(s => s.total > 0)
-                            .map(s => `${s.mode}: ${s.correct}/${s.total} correct (${Math.round(s.accuracy * 100)}%), ${s.effectiveEvidence.toFixed(1)} evidence`)
-                            .join('\n')
-                        : '')
-                    }
-                  >
-                    {trueMastery.tier} ({trueMastery.mastery})
-                  </span>
-                  <span className="text-xs text-muted" title={trueMastery.coverageLabel}>
-                    {trueMastery.coverageLabel}
-                  </span>
+              <span className="flex shrink-0 flex-col items-end gap-1">
+                {fsrsOnly ? (
+                  entry.memory === undefined ? (
+                    <span className="text-xs text-muted">—</span>
+                  ) : (
+                    <StrengthPill memory={entry.memory} compact language={language} />
+                  )
+                ) : (
+                  <MasteryPill mastery={entry.mastery} />
+                )}
+                <span className="flex items-center gap-1.5 text-xs text-muted">
+                  {trueMastery && trueMastery.mastery !== null && (
+                    <span
+                      title={`${fsrsOnly ? 'Practice score' : 'True Mastery'}: ${trueMastery.mastery}/100 (${trueMastery.tier}) · ${trueMastery.coverageLabel}`}
+                      className={
+                        trueMastery.tier === 'Excellent'
+                          ? 'text-good-ink'
+                          : trueMastery.tier === 'Weak'
+                            ? 'text-bad-ink'
+                            : trueMastery.tier === 'Developing'
+                              ? 'text-warn-ink'
+                              : 'text-accent'
+                      }
+                    >
+                      {trueMastery.tier} {trueMastery.mastery} ·
+                    </span>
+                  )}
+                  {entry.reviewStatus === 'suspended'
+                    ? pick(language, 'archived', 'đã lưu trữ')
+                    : entry.reviewStatus === 'new'
+                      ? pick(language, 'new', 'mới')
+                      : entry.reviewStatus === 'mastered'
+                        ? 'mastered'
+                        : (entry.dueDate ?? entry.reviewDate) === null
+                          ? pick(language, 'no date', 'chưa có ngày')
+                          : relativeDay(entry.dueDate ?? entry.reviewDate, today)}
                 </span>
-              )}
-              {trueMastery && trueMastery.mastery === null && (
-                <span className="shrink-0 flex items-center gap-2">
-                  <span className="text-xs text-muted" title={trueMastery.coverageLabel}>
-                    {trueMastery.coverageLabel}
-                  </span>
-                </span>
-              )}
-              <span className="shrink-0 text-xs text-muted">
-                {entry.reviewStatus === 'suspended'
-                  ? pick(language, 'archived', 'đã lưu trữ')
-                  : entry.reviewStatus === 'new'
-                    ? pick(language, 'new', 'mới')
-                    : entry.reviewStatus === 'mastered'
-                      ? 'mastered'
-                      : (entry.dueDate ?? entry.reviewDate) === null
-                        ? pick(language, 'no date', 'chưa có ngày')
-                        : relativeDay(entry.dueDate ?? entry.reviewDate, today)}
               </span>
             </button>
           </li>
@@ -499,6 +480,13 @@ export function BankPage() {
     fsrsOnly ? key !== 'mastery' && key !== 'reviewDate' : key !== 'strength' && key !== 'due' && key !== 'reps' && key !== 'lapses',
   );
   const selectedEntries = state.entries.filter((entry) => selected.has(entry.id));
+  /** On a phone the filters other than search are put away until asked for. */
+  const [showFilters, setShowFilters] = useState(false);
+  // A table's columns do not fit a phone: there the compact list is the view.
+  const narrow = useNarrow();
+  const activeFilters = [query.status, query.strengthBand, query.mastery, query.missing, query.addedFrom, query.addedTo, collectionId].filter(
+    (value) => value !== null && value !== undefined,
+  ).length;
 
   return (
     <div className={PAGE}>
@@ -516,7 +504,7 @@ export function BankPage() {
             </Link>
             <button
               type="button"
-              className={BUTTON_SECONDARY}
+              className={`${BUTTON_SECONDARY} max-sm:hidden`}
               disabled={state.entries.length === 0}
               title="Download every word as a CSV file. Does not change anything."
               onClick={() => downloadFile(`${exportName}.csv`, 'text/csv;charset=utf-8', toCsv(sortEntries(state.entries, 'word', 'asc')))}
@@ -525,7 +513,7 @@ export function BankPage() {
             </button>
             <button
               type="button"
-              className={BUTTON_SECONDARY}
+              className={`${BUTTON_SECONDARY} max-sm:hidden`}
               disabled={state.entries.length === 0}
               title="Download every word as a JSON file. Does not change anything."
               onClick={() =>
@@ -544,14 +532,18 @@ export function BankPage() {
       <VocabularyGate state={state}>
         {today !== null && (
           <div className={`flex flex-col gap-4 ${state.refreshing ? 'opacity-70' : ''}`}>
-            <div className="flex flex-wrap gap-2" role="group" aria-label="Quick filters">
+            <div
+              className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] md:mx-0 md:flex-wrap md:overflow-visible md:px-0 md:pb-0"
+              role="group"
+              aria-label="Quick filters"
+            >
               {presets.map((item) => (
                 <button
                   key={item.key}
                   type="button"
                   aria-pressed={preset === item.key}
                   onClick={() => update({ search: '', ...item.filters(today) })}
-                  className={`cursor-pointer rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  className={`shrink-0 cursor-pointer whitespace-nowrap rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
                     preset === item.key
                       ? 'border-accent/60 bg-accent-soft text-accent'
                       : 'border-line-strong bg-transparent text-muted hover:border-muted hover:text-ink'
@@ -563,7 +555,8 @@ export function BankPage() {
             </div>
 
             <div className={`${CARD} flex flex-col gap-3 p-3`}>
-              <div className="relative">
+              <div className="flex gap-2">
+              <div className="relative min-w-0 flex-1">
                 <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-muted">
                   <Icon name="search" className="size-4" />
                 </span>
@@ -577,7 +570,21 @@ export function BankPage() {
                   onChange={(event) => update({ search: event.target.value }, { replace: true })}
                 />
               </div>
+                <button
+                  type="button"
+                  className={`${BUTTON_SECONDARY} shrink-0 md:hidden`}
+                  aria-expanded={showFilters}
+                  aria-controls="bank-filters"
+                  onClick={() => setShowFilters((open) => !open)}
+                >
+                  {pick(language, 'Filters', 'Bộ lọc')}
+                  {activeFilters > 0 && (
+                    <span className="rounded-full bg-accent px-1.5 text-[0.6875rem] font-semibold tabular-nums text-on-accent">{activeFilters}</span>
+                  )}
+                </button>
+              </div>
 
+              <div id="bank-filters" className={`flex-col gap-3 md:flex ${showFilters ? 'flex' : 'hidden'}`}>
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-5">
                 <FilterSelect
                   label={pick(language, 'Review status', 'Trạng thái ôn')}
@@ -656,13 +663,15 @@ export function BankPage() {
               </div>
 
               <div className="flex flex-wrap items-center gap-3">
+                {!narrow && (
                 <p className="text-sm text-muted" role="status">
                   {page.total === 0
                     ? 'No words match.'
                     : `Showing ${page.from}–${page.to} of ${page.total} ${page.total === 1 ? 'word' : 'words'}`}
                   {filtering && page.total > 0 && ` (filtered from ${state.entries.length})`}
                 </p>
-                {filtering && (
+                )}
+                {filtering && !narrow && (
                   <button
                     type="button"
                     className="cursor-pointer text-sm font-semibold text-accent hover:underline"
@@ -699,7 +708,7 @@ export function BankPage() {
                   >
                     {query.direction === 'asc' ? '↑ Ascending' : '↓ Descending'}
                   </button>
-                  <div className="flex rounded-xl border border-line p-0.5" role="group" aria-label="View">
+                  <div className="flex rounded-xl border border-line p-0.5 max-md:hidden" role="group" aria-label="View">
                     {(['table', 'list'] as const).map((view) => (
                       <button
                         key={view}
@@ -717,6 +726,18 @@ export function BankPage() {
                   </div>
                 </div>
               </div>
+              </div>
+              {/* On a phone the count stays in sight with the filters put away. */}
+              {narrow && (
+              <p className="flex items-center gap-3 text-sm text-muted" role="status">
+                {page.total === 0 ? 'No words match.' : `${page.total} ${page.total === 1 ? 'word' : 'words'}${filtering ? ` of ${state.entries.length}` : ''}`}
+                {filtering && (
+                  <button type="button" className="font-semibold text-accent" onClick={() => update(NO_FILTERS, { collection: null })}>
+                    Clear filters
+                  </button>
+                )}
+              </p>
+              )}
             </div>
 
             {fsrsOnly && selected.size > 0 && (
@@ -781,7 +802,7 @@ export function BankPage() {
                 )}
               </div>
             </>
-          ) : settings.bankView === 'table' ? (
+          ) : settings.bankView === 'table' && !narrow ? (
             <>
               <BankTable
                 entries={page.items as VocabularyEntry[]}

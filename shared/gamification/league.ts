@@ -10,7 +10,7 @@ import { addDays, calendarDateInTimeZone, type IsoDate } from '../dates.js';
 import { weekStartOf } from './engine.js';
 import { levelOf } from './levels.js';
 import { leagueStardust } from './economy.js';
-import { randomNickname } from './nickname.js';
+import { botNickname } from './nickname.js';
 import { seededRandom } from './quests.js';
 
 export const TIERS = 8;
@@ -132,7 +132,7 @@ export function botFor(groupId: string, tier: number, seat: number): Bot {
 
   return {
     seat,
-    nickname: randomNickname(`bot:${groupId}:${seat}`),
+    nickname: botNickname(`bot:${groupId}:${seat}`),
     personality,
     target,
     totalXp,

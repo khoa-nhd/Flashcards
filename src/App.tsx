@@ -20,6 +20,7 @@ import { ChatPage } from './pages/ChatPage.js';
 import { AchievementsPage } from './pages/AchievementsPage.js';
 import { AdminPage } from './pages/AdminPage.js';
 import { BossPage } from './pages/BossPage.js';
+import { PlayPage } from './pages/PlayPage.js';
 import { CollectionPage } from './pages/CollectionPage.js';
 import { ShopPage } from './pages/ShopPage.js';
 import { FriendsPage } from './pages/FriendsPage.js';
@@ -56,6 +57,7 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   shop: { title: 'Shop', render: () => <ShopPage /> },
   collection: { title: 'Collection', render: () => <CollectionPage /> },
   boss: { title: 'Weekly boss', render: () => <BossPage /> },
+  play: { title: 'Play', render: () => <PlayPage /> },
   help: { title: 'Help', render: () => <HelpPage /> },
 };
 

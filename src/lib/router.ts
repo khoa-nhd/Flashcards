@@ -25,6 +25,7 @@ export const ROUTES = {
   shop: '/shop',
   collection: '/collection',
   boss: '/boss',
+  play: '/play',
   chat: '/chat',
   help: '/help',
 } as const;
