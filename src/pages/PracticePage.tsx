@@ -48,6 +48,8 @@ const SOURCE_LABELS: Record<(typeof SOURCES)[number], string> = {
 };
 
 const LENGTHS = [5, 10, 20, 50] as const;
+/** The most questions a typed-in (custom) length may ask for. */
+const MAX_LENGTH = 500;
 
 const isSource = (value: string | null): value is (typeof SOURCES)[number] =>
   SOURCES.includes(value as (typeof SOURCES)[number]);
@@ -125,6 +127,7 @@ export function PracticePage() {
   const bossLoad = useCallback(() => (source === 'boss' ? api.fetchBoss() : Promise.resolve(null)), [api, source]);
   const boss = useRemote(bossLoad, 'Could not load the weekly boss.');
   const [length, setLength] = useState<number>(10);
+  const [customLength, setCustomLength] = useState(false);
   const [run, setRun] = useState<Run | null>(null);
   const [finished, setFinished] = useState<FinishedState | null>(null);
   /** Every answered question's outcome, kept outside `run` so a confirmation still lands after moving on. */
@@ -553,22 +556,17 @@ export function PracticePage() {
                 </p>
               </div>
               <div className="flex flex-wrap items-end gap-4">
-                <div className="flex flex-col gap-1.5 sm:w-44">
+                <div className="flex flex-col gap-1.5 sm:min-w-44">
                   <label htmlFor="comprehensive-length" className="text-sm font-medium">
                     Number of questions
                   </label>
-                  <select
+                  <LengthPicker
                     id="comprehensive-length"
-                    className={INPUT}
-                    value={length}
-                    onChange={(event) => setLength(Number(event.target.value))}
-                  >
-                    {LENGTHS.map((value) => (
-                      <option key={value} value={value}>
-                        Up to {value}
-                      </option>
-                    ))}
-                  </select>
+                    length={length}
+                    custom={customLength}
+                    onLength={setLength}
+                    onCustom={setCustomLength}
+                  />
                 </div>
                 <div>
                   <button
@@ -681,18 +679,13 @@ export function PracticePage() {
                   <label htmlFor="practice-length" className="text-sm font-medium">
                     How many
                   </label>
-                  <select
+                  <LengthPicker
                     id="practice-length"
-                    className={INPUT}
-                    value={length}
-                    onChange={(event) => setLength(Number(event.target.value))}
-                  >
-                    {LENGTHS.map((value) => (
-                      <option key={value} value={value}>
-                        Up to {value}
-                      </option>
-                    ))}
-                  </select>
+                    length={length}
+                    custom={customLength}
+                    onLength={setLength}
+                    onCustom={setCustomLength}
+                  />
                 </div>
               </div>
 
@@ -965,5 +958,60 @@ function PracticeStatsTable({
           : 'Practice mastery (capped at 3 per mode) is shown in the word detail panel.'}
       </p>
     </section>
+  );
+}
+
+/** How many questions: a few set lengths, or "Custom" with a number typed in (1 to MAX_LENGTH). */
+function LengthPicker({
+  id,
+  length,
+  custom,
+  onLength,
+  onCustom,
+}: {
+  id: string;
+  length: number;
+  custom: boolean;
+  onLength: (length: number) => void;
+  onCustom: (custom: boolean) => void;
+}) {
+  return (
+    <div className="flex gap-2">
+      <select
+        id={id}
+        className={`${INPUT} min-w-32 flex-1`}
+        value={custom ? 'custom' : length}
+        onChange={(event) => {
+          if (event.target.value === 'custom') {
+            onCustom(true);
+            return;
+          }
+          onCustom(false);
+          onLength(Number(event.target.value));
+        }}
+      >
+        {LENGTHS.map((value) => (
+          <option key={value} value={value}>
+            Up to {value}
+          </option>
+        ))}
+        <option value="custom">Custom</option>
+      </select>
+      {custom && (
+        <input
+          type="number"
+          inputMode="numeric"
+          min={1}
+          max={MAX_LENGTH}
+          aria-label="Custom number of questions"
+          className={`${INPUT} max-w-20 shrink-0`}
+          value={length}
+          onChange={(event) => {
+            const typed = Math.trunc(Number(event.target.value));
+            if (event.target.value !== '' && Number.isFinite(typed)) onLength(Math.min(MAX_LENGTH, Math.max(1, typed)));
+          }}
+        />
+      )}
+    </div>
   );
 }
