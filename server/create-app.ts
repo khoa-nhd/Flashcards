@@ -31,6 +31,9 @@ import {
   updateExampleRequestSchema,
   updateSettingsRequestSchema,
   adminActionRequestSchema,
+  pvpAnswerRequestSchema,
+  pvpJoinRequestSchema,
+  type PvpLobby,
   notificationSettingsSchema,
   pushSubscribeRequestSchema,
   pushUnsubscribeRequestSchema,
@@ -63,6 +66,7 @@ import type { StudyGoalsService } from './study-goals-service.js';
 import { GameError, unavailableGame, type GameService } from './game-service.js';
 import { CompetitionError, type CompetitionService } from './competition-service.js';
 import type { NotificationService, RunSummary } from './notification-service.js';
+import type { PvpService } from './pvp-service.js';
 import { timingSafeEqual } from 'node:crypto';
 import { leagueWeekOf, weekEndsAt } from '../shared/gamification/league.js';
 import { calendarDateInTimeZone } from '../shared/dates.js';
@@ -92,6 +96,8 @@ export interface AppDependencies {
   competition?: CompetitionService | null;
   /** Reminders for the sample data's nobody. */
   notifications?: NotificationService | null;
+  /** Word duels for the sample data's nobody. */
+  pvp?: PvpService | null;
   /** The reminder timer's run; `null` where it is not set up. */
   reminders?: { run(): Promise<RunSummary> } | null;
 }
@@ -112,6 +118,7 @@ interface Scope {
   competition: CompetitionService | null;
   competitionReason: string | null;
   notifications: NotificationService | null;
+  pvp: PvpService | null;
   /** The interface language the account chose, for messages sent to it. */
   language: 'vi' | 'en';
   /** The zone the account's days are counted in. */
@@ -212,6 +219,7 @@ export function createApp({
   competition = null,
   notifications = null,
   reminders = null,
+  pvp = null,
 }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
@@ -345,6 +353,7 @@ export function createApp({
         competition: session.competition ?? null,
         competitionReason: session.competitionReason ?? null,
         notifications: session.notifications ?? null,
+        pvp: session.pvp ?? null,
         language: session.uiLanguage ?? 'vi',
         timeZone: session.timeZone,
         session,
@@ -365,6 +374,7 @@ export function createApp({
       competition,
       competitionReason: competition === null ? 'Leagues and friends are not kept with this data.' : null,
       notifications,
+      pvp,
       language: 'vi',
       timeZone: config.timeZone,
     });
@@ -688,6 +698,79 @@ export function createApp({
     await compete(() => requireCompetition(c).moderate(target, action));
     return c.json({ ok: true });
   });
+
+  // ---- Word duels (phase 5): the server referees; answers are judged here. ----
+
+  const requirePvp = (c: Context<AppEnv>): PvpService => {
+    const service = c.get('scope').pvp;
+    if (service == null) throw new HttpError(409, 'not_supported', 'Word duels need the latest database update (version 21).');
+    return service;
+  };
+
+  app.get('/api/pvp', async (c) => {
+    const service = c.get('scope').pvp;
+    if (service == null) {
+      const unavailable: PvpLobby = {
+        available: false,
+        reason: 'Word duels need the latest database update (version 21).',
+        season: new Date().toISOString().slice(0, 7),
+        rating: 1000,
+        tier: 2,
+        record: { wins: 0, losses: 0, draws: 0 },
+        consented: false,
+        lockedUntil: null,
+        waiting: null,
+        matchId: null,
+        invites: [],
+        headToHead: [],
+        recent: [],
+      };
+      return c.json(unavailable);
+    }
+    return c.json(await compete(() => service.lobby()));
+  });
+
+  app.post('/api/pvp/consent', async (c) => {
+    await requirePvp(c).consent();
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/pvp/queue', async (c) => {
+    await parseBody(c, pvpJoinRequestSchema);
+    return c.json(await requirePvp(c).join());
+  });
+
+  app.post('/api/pvp/tick', async (c) => c.json(await requirePvp(c).tick()));
+
+  app.post('/api/pvp/leave', async (c) => {
+    await requirePvp(c).leave();
+    return c.json({ ok: true });
+  });
+
+  app.post('/api/pvp/invite', async (c) => {
+    const { nickname } = await parseBody(c, nicknameRequestSchema);
+    return c.json(await requirePvp(c).invite(nickname));
+  });
+
+  app.post('/api/pvp/accept', async (c) => {
+    const { nickname } = await parseBody(c, nicknameRequestSchema);
+    return c.json(await requirePvp(c).accept(nickname));
+  });
+
+  const matchId = (c: Context<AppEnv>) => {
+    const id = z.uuid().safeParse(c.req.param('id'));
+    if (!id.success) throw new HttpError(400, 'invalid_request', 'That is not a match.');
+    return id.data;
+  };
+
+  app.post('/api/pvp/match/:id', async (c) => c.json(await requirePvp(c).view(matchId(c))));
+
+  app.post('/api/pvp/match/:id/answer', async (c) => {
+    const { index, choice } = await parseBody(c, pvpAnswerRequestSchema);
+    return c.json(await requirePvp(c).answer(matchId(c), index, choice));
+  });
+
+  app.post('/api/pvp/match/:id/forfeit', async (c) => c.json(await requirePvp(c).forfeit(matchId(c))));
 
   // ---- Reminders by web push (phase 4) ----
 

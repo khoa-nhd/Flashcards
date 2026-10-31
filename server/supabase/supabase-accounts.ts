@@ -35,6 +35,7 @@ import { createAiService, loadAiConfig } from '../ai-service-impl.js';
 import { StudyGoalsService, createStudyGoalStore } from '../study-goals-service.js';
 import { CompetitionService, createDatabaseCompetitionStore } from '../competition-service.js';
 import { NotificationService, createWebPushSender, type VapidKeys } from '../notification-service.js';
+import { PvpService, createDatabasePvpStore } from '../pvp-service.js';
 import { GameService, createDatabaseGameStore } from '../game-service.js';
 import { SUGGESTED_STUDY_GOALS } from '../../shared/study-goals.js';
 import { AiError, AiErrorCode } from '../ai-service.js';
@@ -291,6 +292,22 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           : !repository.capabilities.competition
             ? 'Leagues and friends need the latest database update (version 18).'
             : 'Leagues and friends are not set up on the server yet (GAME_SIGNING_KEY).';
+      // Word duels need version 21, and the key that signs (and seals) their changes.
+      const pvp =
+        repository.capabilities.pvp && gameKey !== null && competition !== null
+          ? new PvpService({
+              store: createDatabasePvpStore(database, account.id, gameKey),
+              account: account.id,
+              signingKey: gameKey,
+              timeZone,
+              catalog: repository,
+              repository,
+              resolve: (nickname) => competition.resolve(nickname),
+              leadingPet: async () => (game === null ? null : game.leadingPet()),
+              ensureProfile: () => competition.me(),
+              now,
+            })
+          : null;
       const notifications = new NotificationService({
         database,
         sender: pushSender,
@@ -298,6 +315,7 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
         available: repository.capabilities.notifications,
       });
       return {
+        pvp,
         notifications,
         game,
         gameReason,

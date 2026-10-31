@@ -26,6 +26,7 @@ export const ROUTES = {
   collection: '/collection',
   boss: '/boss',
   play: '/play',
+  pvp: '/pvp',
   chat: '/chat',
   help: '/help',
 } as const;

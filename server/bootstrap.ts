@@ -15,6 +15,9 @@ import { createSchedulerStore } from './scheduler-store.js';
 import { createSupabaseAccounts } from './supabase/supabase-accounts.js';
 import { StudyGoalsService, createStudyGoalStore } from './study-goals-service.js';
 import { CompetitionService } from './competition-service.js';
+import { randomBytes } from 'node:crypto';
+import { PvpService } from './pvp-service.js';
+import { createMemoryPvpStore } from './mock/mock-pvp.js';
 import { createClient } from '@supabase/supabase-js';
 import webPush from 'web-push';
 import {
@@ -179,6 +182,18 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     owns: (item) => game.owns(item),
     economy: true,
   });
+  // The sample data's duels: in memory, against rivals only. Their answers are sealed with a key made for this run.
+  const pvp = new PvpService({
+    store: createMemoryPvpStore('sample', async () => (await competition.me()).nickname, (reward) => gameStore.give(reward)),
+    account: 'sample',
+    signingKey: config.gameSigningKey ?? randomBytes(32).toString('hex'),
+    timeZone,
+    catalog: repository,
+    repository,
+    resolve: (nickname) => competition.resolve(nickname),
+    leadingPet: () => game.leadingPet(),
+    ensureProfile: () => competition.me(),
+  });
   // The sample data's reminders: kept in memory, sent with keys made for this run unless some are given.
   const keys = config.vapid ?? { ...webPush.generateVAPIDKeys(), subject: 'mailto:sample@example.test' };
   const notifications = new NotificationService({
@@ -188,7 +203,7 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     available: true,
   });
   return {
-    app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game, competition, notifications }),
+    app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game, competition, notifications, pvp }),
     config,
   };
 }

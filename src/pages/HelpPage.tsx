@@ -128,6 +128,13 @@ export function HelpPage() {
               'Bụi sao có từ level, nhiệm vụ, rương và giải đấu, dùng để mua đồ trong cửa hàng (không bao giờ bằng tiền thật). Mỗi ngày đạt mục tiêu được một rương. Linh vật học cùng bạn: mỗi con cộng thêm chút XP (tất cả cộng lại tối đa +25%), lớn qua bốn hình dạng khi bạn học, và buồn khi bạn nghỉ hai ngày. Boss tuần gồm những từ bạn hay quên nhất và bị đánh bại bằng luyện tập, không bao giờ đổi lịch ôn. Giờ vàng (một giờ trong khoảng 19:00–22:00) nhân đôi XP, Chủ nhật thêm 50%, và mọi phần thưởng cộng lại với nhau.',
             )}
           </p>
+          <p className={`${HELP} mt-2`}>
+            {pick(
+              language,
+              'Word duels: two players answer the same questions, half from each one’s words, for two minutes. A right answer takes 10 health from the other player, 15 within three seconds; a wrong one locks you for three seconds. Your opponent sees some of your words and their meanings, nothing else. Answers on your own words count as practice and never change a schedule. Ranked duels move a rating that starts at 1,000 and is pulled halfway back to 1,000 each month; when no one is free within ten seconds you meet a simulated rival. Duels with a friend are not rated. Leaving matches again and again pauses matchmaking for five minutes.',
+              'Đấu từ vựng: hai người trả lời cùng bộ câu hỏi, mỗi người góp một nửa số từ, trong hai phút. Trả lời đúng trừ đối thủ 10 máu, 15 nếu trong 3 giây; sai bị khóa 3 giây. Đối thủ thấy một số từ của bạn và nghĩa của chúng, không gì khác. Câu trả lời trên từ của bạn được tính là luyện tập và không bao giờ đổi lịch ôn. Đấu xếp hạng thay đổi điểm hạng bắt đầu từ 1.000 và mỗi tháng kéo về một nửa khoảng cách tới 1.000; nếu sau mười giây chưa có ai, bạn gặp một đối thủ mô phỏng. Đấu với bạn bè không tính hạng. Bỏ trận nhiều lần sẽ tạm khóa ghép trận năm phút.',
+            )}
+          </p>
         </section>
 
         <section className={`${CARD} p-5`}>

@@ -196,6 +196,26 @@ export function rewardText(language: UiLanguage, reward: GameRewardView): { titl
         detail: pick(language, `You finished the week #${rank} in your league.`, `Bạn kết thúc tuần ở hạng ${rank} trong nhóm.`),
       };
     }
+    case 'pvp': {
+      const against = typeof payload.opponent === 'string' ? payload.opponent : pick(language, 'a rival', 'một đối thủ');
+      const stardust = typeof payload.stardust === 'number' && payload.stardust > 0 ? ` · +${payload.stardust} ✦` : '';
+      const title =
+        payload.result === 'won'
+          ? pick(language, `You beat ${against}`, `Bạn thắng ${against}`)
+          : payload.result === 'draw'
+            ? pick(language, `A draw with ${against}`, `Hòa với ${against}`)
+            : pick(language, `${against} won this one`, `${against} thắng trận này`);
+      return { title, detail: pick(language, `Word duel${plus}${stardust}`, `Đấu từ vựng${plus}${stardust}`) };
+    }
+    case 'pvp_season':
+      return {
+        title: pick(language, `Season ${String(payload.season)} is over`, `Mùa ${String(payload.season)} đã kết thúc`),
+        detail: pick(
+          language,
+          `You finished in ${leagueName(language, Number(payload.tier))} · +${String(payload.stardust ?? 0)} stardust`,
+          `Bạn kết thúc ở hạng ${leagueName(language, Number(payload.tier))} · +${String(payload.stardust ?? 0)} bụi sao`,
+        ),
+      };
     case 'chest':
       return {
         title: chestName(language, typeof payload.rarity === 'string' ? payload.rarity : 'common'),

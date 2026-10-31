@@ -713,6 +713,22 @@ export function createPgVocabularyDatabase(
       };
     },
 
+    async pvpRows(table, filter) {
+      const where: string[] = [];
+      const params: unknown[] = [];
+      if (filter.id !== undefined) where.push(`id = $${params.push(filter.id)}`);
+      if (filter.matchId !== undefined) where.push(`match_id = $${params.push(filter.matchId)}`);
+      if (filter.unfinished === true) where.push('finished_at is null');
+      const order = table === 'pvp_matches' ? 'order by created_at desc' : table === 'pvp_questions' ? 'order by idx' : '';
+      const rows = await run((session) =>
+        session.query<{ row: unknown }>(
+          `select to_jsonb(t) as row from (select * from public.${table} ${where.length > 0 ? `where ${where.join(' and ')}` : ''} ${order} limit ${filter.limit ?? 100}) t`,
+          params,
+        ),
+      );
+      return rows.map((each) => each.row);
+    },
+
     async notificationSettings() {
       const rows = await run((session) =>
         session.query<Row>(

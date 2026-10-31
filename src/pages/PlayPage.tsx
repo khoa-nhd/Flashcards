@@ -89,6 +89,7 @@ export function PlayPage() {
       )}
 
       <div className="grid grid-cols-2 gap-3">
+        <Tile to={ROUTES.pvp} icon="sword" title={pick(language, 'Word duels', 'Đấu từ vựng')} detail={pick(language, 'Two minutes against another player', 'Hai phút đối đầu người khác')} wide />
         <Tile
           to={ROUTES.achievements}
           icon="trophy"

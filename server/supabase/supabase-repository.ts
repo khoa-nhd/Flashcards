@@ -112,6 +112,7 @@ export function capabilitiesAt(schemaVersion: number): Capabilities {
     competition: schemaVersion >= 18,
     economy: schemaVersion >= 19,
     notifications: schemaVersion >= 20,
+    pvp: schemaVersion >= 21,
   };
 }
 

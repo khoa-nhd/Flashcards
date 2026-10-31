@@ -153,6 +153,8 @@ export const capabilitiesSchema = z.object({
   economy: z.boolean().default(false),
   /** Reminders by web push (schema version 20). */
   notifications: z.boolean().default(false),
+  /** PvP word duels (schema version 21). */
+  pvp: z.boolean().default(false),
 });
 
 /** A store that supports none of the optional features: the starting point for one that supports some. */
@@ -173,6 +175,7 @@ export const NO_CAPABILITIES: z.infer<typeof capabilitiesSchema> = {
   competition: false,
   economy: false,
   notifications: false,
+  pvp: false,
 };
 
 /**
@@ -1143,6 +1146,8 @@ export const gameRewardSchema = z.object({
     'chest',
     'boss',
     'set',
+    'pvp',
+    'pvp_season',
   ]),
   payload: z.record(z.string(), z.unknown()),
   createdAt: z.string(),
@@ -1307,6 +1312,65 @@ export const pushUnsubscribeRequestSchema = z.strictObject({ endpoint: z.string(
 
 export type NotificationSettings = z.infer<typeof notificationSettingsSchema>;
 export type NotificationsResponse = z.infer<typeof notificationsResponseSchema>;
+
+// ---- PvP (docs/gamification-plan.md, phase 5) ----
+
+export const pvpLobbySchema = z.object({
+  available: z.boolean(),
+  reason: z.string().nullable(),
+  season: z.string(),
+  rating: z.number().int(),
+  tier: z.number().int().min(1).max(8),
+  record: z.object({ wins: z.number().int(), losses: z.number().int(), draws: z.number().int() }),
+  /** The warning that the other player will see some of one's words has been shown. */
+  consented: z.boolean(),
+  /** Matchmaking is locked until then, after leaving matches. */
+  lockedUntil: z.string().nullable(),
+  waiting: z.object({ mode: z.enum(['ranked', 'friend']), since: z.string(), friend: z.string().nullable() }).nullable(),
+  /** A match in progress, to go back to. */
+  matchId: z.string().nullable(),
+  invites: z.array(z.object({ nickname: z.string(), at: z.string() })),
+  headToHead: z.array(z.object({ nickname: z.string(), wins: z.number().int(), losses: z.number().int(), draws: z.number().int() })),
+  recent: z.array(
+    z.object({ id: z.string(), mode: z.enum(['ranked', 'friend', 'rival']), opponent: z.string().nullable(), result: z.enum(['won', 'lost', 'draw']), at: z.string() }),
+  ),
+});
+
+export const pvpTickSchema = z.object({ state: z.enum(['idle', 'waiting', 'match']), matchId: z.string().nullable() });
+
+const pvpPlayerSchema = z.object({
+  nickname: z.string().nullable(),
+  rating: z.number().int(),
+  hp: z.number().int(),
+  correct: z.number().int(),
+});
+
+export const pvpMatchSchema = z.object({
+  id: z.string(),
+  mode: z.enum(['ranked', 'friend', 'rival']),
+  /** The server's clock, so the page can count down from its own. */
+  now: z.number(),
+  endsAt: z.number(),
+  me: pvpPlayerSchema.extend({ wrong: z.number().int(), lockedUntil: z.number(), skill: z.string().nullable() }),
+  them: pvpPlayerSchema,
+  /** The question to answer now, without its answer; null once there are none or the match is over. */
+  question: z.object({ index: z.number().int(), direction: z.enum(['en-vi', 'vi-en']), prompt: z.string(), options: z.array(z.string()) }).nullable(),
+  /** How the last answer went, for the page to show. */
+  last: z.object({ index: z.number().int(), correct: z.boolean(), crit: z.boolean(), damage: z.number().int(), right: z.number().int() }).nullable(),
+  finished: z.boolean(),
+  result: z.enum(['won', 'lost', 'draw']).nullable(),
+  reason: z.enum(['hp', 'time', 'left']).nullable(),
+  reward: z.object({ xp: z.number().int(), stardust: z.number().int(), ratingFrom: z.number().int(), ratingTo: z.number().int() }).nullable(),
+  /** After the match: the other side's words, to add to one's own. */
+  words: z.array(z.object({ word: z.string(), meaning: z.string() })),
+});
+
+export const pvpAnswerRequestSchema = z.strictObject({ index: z.number().int().min(0).max(200), choice: z.number().int().min(0).max(3) });
+export const pvpJoinRequestSchema = z.strictObject({ mode: z.literal('ranked') });
+
+export type PvpLobby = z.infer<typeof pvpLobbySchema>;
+export type PvpMatch = z.infer<typeof pvpMatchSchema>;
+export type PvpTick = z.infer<typeof pvpTickSchema>;
 
 export type ShopResponse = z.infer<typeof shopResponseSchema>;
 export type BuyRequest = z.infer<typeof buyRequestSchema>;

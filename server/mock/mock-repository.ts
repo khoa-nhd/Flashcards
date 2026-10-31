@@ -181,6 +181,7 @@ export class MockVocabularyRepository implements VocabularyRepository, Vocabular
     competition: true,
     economy: true,
     notifications: true,
+    pvp: true,
   };
 
   /** Whether this id is a live sample word; what the library's foreign keys check in the real store. */

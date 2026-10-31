@@ -283,6 +283,12 @@ export const COMPETITION_FUNCTIONS = [
   // Version 19.
   'profile_showcase',
   'boss_progress',
+  // Version 21.
+  'pvp_apply',
+  'pvp_sides',
+  'pvp_today',
+  'pvp_invites',
+  'pvp_head_to_head',
 ] as const;
 export type CompetitionFunction = (typeof COMPETITION_FUNCTIONS)[number];
 
@@ -379,7 +385,7 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 20;
+export const LATEST_SCHEMA_VERSION = 21;
 
 /**
  * The newest migration Settings asks the owner to run. Version 15 makes FSRS
@@ -387,7 +393,7 @@ export const LATEST_SCHEMA_VERSION = 20;
  * screens for it exist (docs/fsrs-only-progress.md), so the app does not ask
  * for it yet. Raise this to LATEST_SCHEMA_VERSION when they do.
  */
-export const RECOMMENDED_SCHEMA_VERSION = 20;
+export const RECOMMENDED_SCHEMA_VERSION = 21;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({
@@ -676,6 +682,14 @@ export interface VocabularyDatabase {
   gameCommit?(payload: string, signature: string): Promise<z.infer<typeof gameCommitRowSchema>>;
   /** Needs schema version 18: one of the competition's functions, with named arguments; its rows as JSON. */
   competitionCall?(fn: CompetitionFunction, args: Record<string, string | string[] | null>): Promise<unknown[]>;
+  /**
+   * Needs schema version 21: the account's own PvP rows, as the API gives them;
+   * parsed in server/pvp-service.ts. `pvp_matches` newest first, at most `limit`.
+   */
+  pvpRows?(
+    table: 'pvp_ratings' | 'pvp_queue' | 'pvp_matches' | 'pvp_questions',
+    filter: { id?: string; matchId?: string; unfinished?: boolean; limit?: number },
+  ): Promise<unknown[]>;
   /** Needs schema version 20: the account's reminder choices; null before it chose any. */
   notificationSettings?(): Promise<NotificationSettings | null>;
   saveNotificationSettings?(settings: NotificationSettings): Promise<void>;
@@ -1824,6 +1838,18 @@ export function createSupabaseDatabase(
         rewards: parse(gameRewardRowSchema, rewards.data, 'rewards'),
         inventory: parse(z.object({ item_id: z.string() }), inventory.data, 'items').map((row) => row.item_id),
       };
+    },
+
+    async pvpRows(table, filter) {
+      if (schemaVersion < 21) throw new DatabaseError('schema_missing', 'Word duels need the latest database update (version 21).');
+      let query = client.from(table).select('*');
+      if (filter.id !== undefined) query = query.eq('id', filter.id);
+      if (filter.matchId !== undefined) query = query.eq('match_id', filter.matchId).order('idx');
+      if (filter.unfinished === true) query = query.is('finished_at', null);
+      if (table === 'pvp_matches') query = query.order('created_at', { ascending: false });
+      const { data, error, status } = await query.limit(filter.limit ?? 100);
+      if (error) throw toDatabaseError(error, status);
+      return data ?? [];
     },
 
     async notificationSettings() {

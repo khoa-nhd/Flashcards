@@ -684,6 +684,37 @@ export function createFakeApi({
     chooseStarter: vi.fn<AppApi['chooseStarter']>(async () => {
       throw new ApiError('not_supported', 'The collection is not available.', 409);
     }),
+    // Word duels: not kept by this fake, as by a server without schema version 21.
+    fetchPvp: vi.fn<AppApi['fetchPvp']>(async () => ({
+      available: false,
+      reason: 'Word duels need the latest database update (version 21).',
+      season: '2026-10',
+      rating: 1000,
+      tier: 2,
+      record: { wins: 0, losses: 0, draws: 0 },
+      consented: false,
+      lockedUntil: null,
+      waiting: null,
+      matchId: null,
+      invites: [],
+      headToHead: [],
+      recent: [],
+    })),
+    pvpConsent: vi.fn<AppApi['pvpConsent']>(async () => undefined),
+    pvpQueue: vi.fn<AppApi['pvpQueue']>(async () => ({ state: 'idle', matchId: null })),
+    pvpTick: vi.fn<AppApi['pvpTick']>(async () => ({ state: 'idle', matchId: null })),
+    pvpLeave: vi.fn<AppApi['pvpLeave']>(async () => undefined),
+    pvpInvite: vi.fn<AppApi['pvpInvite']>(async () => ({ state: 'idle', matchId: null })),
+    pvpAccept: vi.fn<AppApi['pvpAccept']>(async () => ({ state: 'idle', matchId: null })),
+    pvpMatch: vi.fn<AppApi['pvpMatch']>(async () => {
+      throw new ApiError('not_supported', 'Word duels are not available.', 409);
+    }),
+    pvpAnswer: vi.fn<AppApi['pvpAnswer']>(async () => {
+      throw new ApiError('not_supported', 'Word duels are not available.', 409);
+    }),
+    pvpForfeit: vi.fn<AppApi['pvpForfeit']>(async () => {
+      throw new ApiError('not_supported', 'Word duels are not available.', 409);
+    }),
     // Reminders: not kept by this fake, as by a server without VAPID keys.
     fetchNotifications: vi.fn<AppApi['fetchNotifications']>(async () => ({
       available: false,

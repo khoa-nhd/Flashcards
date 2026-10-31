@@ -646,6 +646,39 @@ trước khi trả lời, chỉ hai người trong trận đọc được trận
 giây, bot tất định, XP giảm sau trận 20, câu trả lời được ghi như luyện tập và
 không đổi lịch FSRS, nâng cấp từ v20.
 
+### 5.7 Chủ dự án làm
+
+1. Supabase → SQL Editor: chạy `supabase/migrations/20261103090000_pvp.sql`
+   (sau v20). Không cần biến môi trường mới: trận dùng `GAME_SIGNING_KEY` của
+   giai đoạn 1.
+2. Mở app → Chơi → Đấu từ vựng → "Tôi hiểu" → "Tìm đối thủ".
+
+### 5.8 Đã làm (khác với kế hoạch ở đâu)
+
+- **Không dùng Supabase Realtime.** Trang trận hỏi server mỗi giây (`POST
+  /api/pvp/match/:id`); chính nhịp này đánh dấu người chơi còn ở đó, cho bot đi
+  các nước đến hạn và kết thúc trận khi một bên im quá 15 giây. Không cần bật
+  Realtime hay Presence, đổi lại trễ tối đa khoảng 1 giây. Hai lần ghi cùng lúc
+  không đè nhau: mỗi lần ghi chỉ áp lên đúng phiên bản trận nó đã đọc.
+- Đáp án lưu dưới dạng **niêm phong** (AES-256-GCM, khóa suy ra từ
+  `GAME_SIGNING_KEY`): người chơi đọc được dòng câu hỏi nhưng không đọc được đáp
+  án.
+- Bảng: `pvp_ratings`, `pvp_queue`, `pvp_matches`, `pvp_questions`,
+  `pvp_answers`. Mùa là tháng theo giờ UTC, chung cho mọi người, lưu ngay trong `pvp_ratings`;
+  lịch sử đối đầu là hàm `pvp_head_to_head`, không phải bảng riêng.
+- Đáp án sai cùng loại từ chỉ áp dụng cho bộ từ phổ biến (có loại từ); với từ
+  của người dùng, đáp án sai lấy từ các từ khác của hai người và bộ từ phổ biến,
+  không trùng nghĩa.
+- Câu trả lời trên **từ của mình** được lưu như một lượt luyện tập (nhận diện,
+  chấm tự động, không đổi lịch) và có 5 XP như luyện tập thường. Câu trả lời
+  đúng trên **từ của đối thủ** không có lịch nào để ghi, nên 5 XP mỗi câu được
+  cộng vào phần thưởng cuối trận cùng +30 XP khi thắng; giảm một nửa từ trận 21
+  chỉ áp dụng cho phần thưởng cuối trận này.
+- Mời bạn bè ngay trong app (chỉ bạn theo dõi lẫn nhau), chưa có link mời; lời
+  mời hết hạn sau 60 giây.
+- Chỉ linh vật đứng đầu (đang dẫn đầu) ra trận và dùng kỹ năng của nó.
+- Bỏ trận lần thứ ba trong một ngày (ngày UTC của database) khóa ghép 5 phút.
+
 ---
 
 ## Thứ tự làm và điểm dừng

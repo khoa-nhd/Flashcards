@@ -60,6 +60,12 @@ import {
   type StudyGoalsResponse,
   type GameResponse,
   adminResponseSchema,
+  pvpLobbySchema,
+  pvpMatchSchema,
+  pvpTickSchema,
+  type PvpLobby,
+  type PvpMatch,
+  type PvpTick,
   notificationsResponseSchema,
   type NotificationSettings,
   type NotificationsResponse,
@@ -203,6 +209,17 @@ export interface CompetitionApi {
   equip(choice: { pets?: string[]; theme?: string | null }): Promise<CollectionResponse>;
   chooseStarter(pet: string): Promise<CollectionResponse>;
   fetchBoss(): Promise<BossResponse>;
+  // Phase 5: word duels.
+  fetchPvp(): Promise<PvpLobby>;
+  pvpConsent(): Promise<void>;
+  pvpQueue(): Promise<PvpTick>;
+  pvpTick(): Promise<PvpTick>;
+  pvpLeave(): Promise<void>;
+  pvpInvite(nickname: string): Promise<PvpTick>;
+  pvpAccept(nickname: string): Promise<PvpTick>;
+  pvpMatch(id: string): Promise<PvpMatch>;
+  pvpAnswer(id: string, index: number, choice: number): Promise<PvpMatch>;
+  pvpForfeit(id: string): Promise<PvpMatch>;
   // Phase 4: reminders.
   fetchNotifications(): Promise<NotificationsResponse>;
   saveNotifications(settings: Partial<NotificationSettings>): Promise<NotificationsResponse>;
@@ -677,6 +694,17 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
     chooseStarter: (pet) => change('/api/collection/starter', 'POST', { pet }, collectionResponseSchema),
 
     fetchBoss: () => call('/api/boss', bossResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading the boss took too long.' }),
+
+    fetchPvp: () => call('/api/pvp', pvpLobbySchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading duels took too long.' }),
+    pvpConsent: () => change('/api/pvp/consent', 'POST', {}, okSchema).then(() => undefined),
+    pvpQueue: () => change('/api/pvp/queue', 'POST', { mode: 'ranked' }, pvpTickSchema),
+    pvpTick: () => change('/api/pvp/tick', 'POST', {}, pvpTickSchema),
+    pvpLeave: () => change('/api/pvp/leave', 'POST', {}, okSchema).then(() => undefined),
+    pvpInvite: (nickname) => change('/api/pvp/invite', 'POST', { nickname }, pvpTickSchema),
+    pvpAccept: (nickname) => change('/api/pvp/accept', 'POST', { nickname }, pvpTickSchema),
+    pvpMatch: (id) => change(`/api/pvp/match/${encodeURIComponent(id)}`, 'POST', {}, pvpMatchSchema),
+    pvpAnswer: (id, index, choice) => change(`/api/pvp/match/${encodeURIComponent(id)}/answer`, 'POST', { index, choice }, pvpMatchSchema),
+    pvpForfeit: (id) => change(`/api/pvp/match/${encodeURIComponent(id)}/forfeit`, 'POST', {}, pvpMatchSchema),
 
     fetchNotifications: () =>
       call('/api/notifications', notificationsResponseSchema, { method: 'GET', timeoutMs: TIMEOUTS.quickMs, timeoutMessage: 'Loading your reminders took too long.' }),

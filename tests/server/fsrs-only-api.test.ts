@@ -67,10 +67,10 @@ const remember = (id: string, revision: number, extra: Record<string, unknown> =
 });
 
 describe('the schema version Settings reports', () => {
-  it('asks for version 20, where reminders are kept, and reports a database at 20 as up to date', async () => {
+  it('asks for version 21, where word duels are kept, and reports a database at 21 as up to date', async () => {
     const settings = accountSettingsSchema.parse(await (await call(app, alice, '/api/settings')).json());
     expect(settings.database).toEqual({ version: LATEST_SCHEMA_VERSION, latest: RECOMMENDED_SCHEMA_VERSION });
-    expect(RECOMMENDED_SCHEMA_VERSION).toBe(20);
+    expect(RECOMMENDED_SCHEMA_VERSION).toBe(21);
     expect(settings.database!.version >= settings.database!.latest).toBe(true);
   });
 });

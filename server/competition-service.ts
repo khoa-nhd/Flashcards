@@ -572,6 +572,13 @@ export class CompetitionService {
     }));
   }
 
+  /** A player by nickname, for a match with a friend: who it is, and whether the two follow each other. */
+  async resolve(nickname: string): Promise<{ id: string; mutual: boolean } | null> {
+    const row = await this.options.store.profile(tidyNickname(nickname));
+    if (row === null || row.is_me) return null;
+    return { id: row.member_id, mutual: row.following && row.followed_by };
+  }
+
   /** Another player's account, by nickname; never one's own. */
   private async other(nickname: string): Promise<ProfileRow> {
     const row = await this.options.store.profile(tidyNickname(nickname));

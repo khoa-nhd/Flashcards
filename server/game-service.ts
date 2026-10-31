@@ -711,6 +711,14 @@ export class GameService {
     return this.options.store.events!();
   }
 
+  /** The companion leading into battle: the first one leading, where the economy is kept. */
+  async leadingPet(): Promise<string | null> {
+    if (!this.economyOn()) return null;
+    const today = this.today();
+    const snapshot = await this.options.store.snapshot(today, weekStartOf(today));
+    return snapshot.state.pets?.active[0] ?? null;
+  }
+
   /** Whether the account owns an item: what may be worn on the public profile. */
   async owns(item: string): Promise<boolean> {
     if (!this.economyOn()) return false;

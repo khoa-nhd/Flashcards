@@ -136,7 +136,9 @@ export type RewardKind =
   | 'challenge'
   | 'chest'
   | 'boss'
-  | 'set';
+  | 'set'
+  | 'pvp'
+  | 'pvp_season';
 
 export interface Reward {
   id: string;

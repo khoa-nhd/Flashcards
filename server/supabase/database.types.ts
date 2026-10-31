@@ -192,6 +192,11 @@ export interface Database {
         Update: Record<string, never>;
         Relationships: [];
       };
+      /** From schema version 21: read only; written through pvp_apply. */
+      pvp_ratings: { Row: Record<string, unknown>; Insert: Record<string, never>; Update: Record<string, never>; Relationships: [] };
+      pvp_queue: { Row: Record<string, unknown>; Insert: Record<string, never>; Update: Record<string, never>; Relationships: [] };
+      pvp_matches: { Row: Record<string, unknown>; Insert: Record<string, never>; Update: Record<string, never>; Relationships: [] };
+      pvp_questions: { Row: Record<string, unknown>; Insert: Record<string, never>; Update: Record<string, never>; Relationships: [] };
       /** From schema version 20. */
       notification_settings: {
         Row: {
@@ -550,6 +555,11 @@ export interface Database {
       notify_social: { Args: { p_token: string; p_week: string }; Returns: Array<Record<string, unknown>> };
       notify_claim: { Args: { p_token: string; p_sends: unknown; p_state: unknown }; Returns: Array<Record<string, unknown>> };
       notify_gone: { Args: { p_token: string; p_endpoints: string[] }; Returns: undefined };
+      pvp_apply: { Args: Record<string, string | string[] | null>; Returns: Array<Record<string, unknown>> };
+      pvp_sides: { Args: Record<string, string | string[] | null>; Returns: Array<Record<string, unknown>> };
+      pvp_today: { Args: Record<string, string | string[] | null>; Returns: Array<Record<string, unknown>> };
+      pvp_invites: { Args: Record<string, string | string[] | null>; Returns: Array<Record<string, unknown>> };
+      pvp_head_to_head: { Args: Record<string, string | string[] | null>; Returns: Array<Record<string, unknown>> };
       push_take_device: { Args: { p_endpoint: string; p_p256dh: string; p_auth: string }; Returns: undefined };
       /** From schema version 18 (19 for the last two); the rows are parsed where they are used. */
       profile_showcase: {
