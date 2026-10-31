@@ -681,6 +681,77 @@ không đổi lịch FSRS, nâng cấp từ v20.
 
 ---
 
+## Giai đoạn 6 – Hoàn thiện và chỉnh số (không đổi schema)
+
+Không thêm tính năng; đo các con số bằng chính các hàm luật của game cho ba
+kiểu người học, rồi sửa chỗ lệch. Chưa có dữ liệu thật nên chỉ sửa con số do
+tôi tự đặt; con số chủ dự án đã chốt thì chỉ báo lại để chủ dự án quyết.
+
+Ba kiểu người học (mỗi ngày học): nhẹ 20 lượt ôn + 3 từ mới + 10 luyện tập, 5
+ngày/tuần; đều 50 + 10 + 20, 6 ngày; nhiều 150 + 20 + 50, mỗi ngày. Tính cả
+mục tiêu ngày, 3 nhiệm vụ, điểm danh, combo thường gặp, rương, nhiệm vụ tuần;
+không tính giờ vàng, Chủ nhật.
+
+| | XP một tuần | Level sau 30 ngày | Bụi sao sau 30 ngày |
+|---|---|---|---|
+| Nhẹ | ~3.100 | 22 | ~8.100 |
+| Đều | ~6.800 | 28 | ~11.700 |
+| Nhiều | ~18.100 | 35 | ~15.800 |
+
+### 6.1 Sức đối thủ giải đấu (đã sửa)
+
+- Bảng mặc định cũ (250 … 2.070 XP/tuần cho đối thủ đều đặn) quá yếu: chính
+  người học đều đặn của mục 1.2 (khoảng 400 XP/ngày, 2.800/tuần) đã vượt vạch
+  top 5 của hạng Ngôi sao (~2.500). Ai học đều cũng lên thẳng hạng cao nhất sau
+  7 tuần rồi không bao giờ xuống, giải đấu mất ý nghĩa.
+- Bảng mới: 600, 880, 1.300, 1.900, 2.800, 4.100, 6.100, 9.000 (tăng ~1,47 lần
+  mỗi hạng). Vạch top 5 (trung vị, nhóm 19 đối thủ): 730, 1.070, 1.590, 2.300,
+  3.410, 5.000, 7.360, 10.900. Người học kiểu 1.2 dừng ở hạng 4–5, kiểu "đều"
+  ở hạng 7, chỉ người học rất nhiều mỗi ngày giữ được Ngôi sao.
+- Level hiển thị của đối thủ cũng theo đó: bằng XP của số tuần đã leo tới hạng
+  đó (hạng 1: level 5–13 … hạng 8: level 34–37), thay vì khoảng 3 × hạng.
+- Đối thủ tính lại từ seed nên tuần đang chạy cũng đổi theo: sau khi deploy,
+  XP của đối thủ trong nhóm tuần này nhảy lên một lần. Kết quả các tuần đã chốt
+  (đã lưu) không đổi; một tuần đã qua mà chưa ai mở giải đấu để chốt thì được
+  chốt theo số mới.
+
+### 6.2 Bụi sao (chưa sửa, chờ chủ dự án)
+
+- Mục 3.1 ước "70–100/ngày", nhưng với tỉ lệ rương đã chốt (3.3), riêng rương
+  đã trung bình ~73/ngày; cộng nhiệm vụ thành ~145/ngày đạt mục tiêu, chưa kể
+  bụi sao lên level (20 × level, nhiều nhất trong tháng đầu).
+- Người học nhẹ có ~8.100 bụi sao sau 30 ngày: đủ ~68 món thường. Cả 118 món
+  theo giá cửa hàng là 43.560, tức mua gần hết trong khoảng 5 tháng.
+- Hướng có thể chọn: giảm bụi sao lên level (ví dụ 10 × level, tối đa 250), hoặc
+  giảm bụi sao rương hiếm, hoặc tăng giá. Chưa đổi vì đây là số đã chốt.
+
+### 6.3 Giao diện
+
+- Trang Chơi có thẻ "Trò chơi hoạt động thế nào" (4 dòng, nút "Đã hiểu"; nhớ
+  trên từng thiết bị) và tiêu đề cho trình đọc màn hình.
+- Đấu từ vựng có biểu tượng riêng (hai kiếm chéo), không trùng với boss tuần.
+- Tên hạng không còn hiện hai lần ở đầu trang Giải đấu và sảnh Đấu từ vựng.
+- Đã kiểm tra 12 trang game ở bề rộng điện thoại 375 px: không trang nào tràn
+  ngang.
+
+### 6.4 Giới hạn XP mỗi ngày (chủ dự án chốt 2026-10-31)
+
+- Trước đó chỉ có giới hạn tốc độ (0,6 giây/câu, 90 câu/phút), nên ôn ngẫu
+  nhiên (5 XP, một từ bao nhiêu lần cũng được) có thể cày hàng trăm XP mỗi phút.
+- Nay mỗi ngày (theo giờ tài khoản): ôn thẻ (đúng hạn, từ mới, ôn sớm, ôn ngẫu
+  nhiên) tối đa **500 XP gốc** (bằng 50 lượt ôn đúng hạn), luyện tập (mọi chế độ, kể cả boss và câu trả
+  lời trên từ của mình trong Đấu từ vựng) tối đa **500 XP gốc** (100 câu luyện tập), tính riêng.
+  Thưởng phần trăm (combo, giờ vàng…) vẫn cộng lên phần được trả. Câu chạm mức
+  được trả phần còn lại; câu sau đó vẫn lưu và xếp lịch như thường, không có
+  XP, không tính vào nhiệm vụ.
+- Thưởng ngoài câu trả lời (mục tiêu ngày, nhiệm vụ, điểm danh, rương, thưởng
+  cuối trận Đấu từ vựng) không bị giới hạn này.
+- Không đổi schema: số đã dùng nằm trong trạng thái game đã ký.
+- Trang ôn hiện "Đã đạt giới hạn XP hôm nay" khi câu trả lời không còn XP; trang
+  Thành tựu hiện số đã dùng hôm nay.
+
+---
+
 ## Thứ tự làm và điểm dừng
 
 1. Duyệt tài liệu này (và bảng "Quyết định mặc định").

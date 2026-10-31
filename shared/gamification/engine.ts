@@ -43,7 +43,10 @@ import {
   COMEBACK_AFTER_DAYS,
   COMEBACK_BONUS,
   COMEBACK_HOURS,
+  DAILY_XP_CAP,
   RATE_LIMIT,
+  poolOf,
+  type XpPool,
   XP,
   answerReason,
   comboBonus,
@@ -85,8 +88,8 @@ export interface GameStateData {
   setsDone: string[];
   /** The colour theme chosen, if any. */
   theme: string | null;
-  /** What the earning limits have counted so far (xp.ts, RATE_LIMIT). */
-  limits: { recent: string[]; last?: string };
+  /** What the earning limits have counted so far (xp.ts, RATE_LIMIT and DAILY_XP_CAP). */
+  limits: { recent: string[]; last?: string; days?: Record<IsoDate, Record<XpPool, number>> };
 }
 
 export const INITIAL_STATE: GameStateData = {
@@ -273,6 +276,22 @@ function overLimit(limits: GameStateData['limits'], event: AnswerEvent): boolean
   return false;
 }
 
+/** Base XP a pool can still earn on a day. */
+export function dailyXpLeft(limits: GameStateData['limits'], on: IsoDate, pool: XpPool): number {
+  return Math.max(0, DAILY_XP_CAP[pool] - (limits.days?.[on]?.[pool] ?? 0));
+}
+
+/** Counts base XP against its day's limit; returns what is still allowed of it. Keeps three days. */
+function underDailyCap(limits: GameStateData['limits'], on: IsoDate, pool: XpPool, base: number): number {
+  const allowed = Math.min(base, dailyXpLeft(limits, on, pool));
+  const days = { ...(limits.days ?? {}) };
+  const day = { review: 0, practice: 0, ...days[on] };
+  day[pool] += allowed;
+  days[on] = day;
+  limits.days = Object.fromEntries(Object.entries(days).sort(([a], [b]) => (a < b ? 1 : -1)).slice(0, 3));
+  return allowed;
+}
+
 /**
  * Brings the game up to date: counts the answers, gives the goal XP, draws and
  * settles the quests, settles the streak's freezes, awards badges and
@@ -283,7 +302,7 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
   const weekStart = weekStartOf(today);
   const state: GameStateData = { ...INITIAL_STATE, ...snapshot.state, checkin: { ...snapshot.state.checkin } };
   const limits = snapshot.state.limits ?? INITIAL_STATE.limits;
-  state.limits = { ...limits, recent: [...limits.recent] };
+  state.limits = { ...limits, recent: [...limits.recent], days: { ...(limits.days ?? {}) } };
   if (state.installedAt === null) state.installedAt = now;
   const installedAt = time(state.installedAt);
   const economy = context.economy ?? null;
@@ -346,7 +365,13 @@ export function sync(snapshot: GameSnapshot, context: SyncContext): GameChange {
       counted.set(event.id, { amount: 0, reason: 'capped', on: event.on });
       continue;
     }
-    const base = XP[reason];
+    const base = live ? underDailyCap(state.limits, event.on, poolOf(reason), XP[reason]) : XP[reason];
+    if (base === 0) {
+      // Past the day's limit for its kind (xp.ts, DAILY_XP_CAP): saved as usual, earning nothing.
+      ledger.push({ source: 'answer', sourceId: event.id, amount: 0, base: 0, bonus: 0, reason: 'capped', at: event.at, on: event.on });
+      counted.set(event.id, { amount: 0, reason: 'capped', on: event.on });
+      continue;
+    }
     let bonus = 0;
 
     if (live) {

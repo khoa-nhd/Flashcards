@@ -85,7 +85,7 @@ function Result({ match, language, onAgain }: { match: PvpMatch; language: UiLan
   return (
     <div className="flex flex-col gap-4">
       <section className={`${CARD} pool pool-top flex flex-col items-center gap-3 p-6 text-center`}>
-        <Icon name={match.result === 'won' ? 'trophy' : 'sword'} className={`size-12 ${match.result === 'won' ? 'text-[#f0c75e]' : 'text-muted'}`} />
+        <Icon name={match.result === 'won' ? 'trophy' : 'duel'} className={`size-12 ${match.result === 'won' ? 'text-[#f0c75e]' : 'text-muted'}`} />
         <h2 className="font-serif text-3xl font-semibold text-ink">{title}</h2>
         <p className={HELP}>{why}</p>
         <p className="text-sm tabular-nums text-muted">
@@ -346,7 +346,7 @@ function Lobby({ data, language, reload }: { data: PvpLobby; language: UiLanguag
 
       {data.invites.map((invite) => (
         <section key={invite.nickname} className={`${CARD} flex items-center gap-3 border-accent/40 p-4`}>
-          <Icon name="sword" className="size-5 shrink-0 text-accent" />
+          <Icon name="duel" className="size-5 shrink-0 text-accent" />
           <span className="min-w-0 flex-1 text-sm text-ink">{pick(language, `${invite.nickname} wants a duel`, `${invite.nickname} mời bạn đấu`)}</span>
           <button type="button" className={BUTTON_PRIMARY} disabled={busy !== null} onClick={() => void act('accept', () => api.pvpAccept(invite.nickname))}>
             {pick(language, 'Accept', 'Nhận lời')}
@@ -397,7 +397,7 @@ function Lobby({ data, language, reload }: { data: PvpLobby; language: UiLanguag
             </p>
           )}
           <button type="button" className={`${BUTTON_PRIMARY} self-start`} disabled={busy !== null || locked} onClick={() => void act('queue', () => api.pvpQueue())}>
-            {busy === 'queue' ? <Spinner /> : <Icon name="sword" className="size-4" />}
+            {busy === 'queue' ? <Spinner /> : <Icon name="duel" className="size-4" />}
             {pick(language, 'Find an opponent', 'Tìm đối thủ')}
           </button>
         </section>

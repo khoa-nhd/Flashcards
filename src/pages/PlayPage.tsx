@@ -2,17 +2,17 @@
  * The game in one place: a tile for each part, with where it stands now, so
  * the menu needs one entry for all of it.
  */
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useApp, useUiLanguage } from '../app-context.js';
 import { PetArt } from '../components/Collectibles.js';
 import { Icon, type IconName } from '../components/Icon.js';
 import { TierBadge, standing } from '../components/League.js';
 import { Link } from '../components/Link.js';
 import { ProgressBar } from '../components/Quests.js';
-import { CARD, PAGE } from '../components/ui.js';
+import { BUTTON_PRIMARY, CARD, PAGE } from '../components/ui.js';
 import { useRemote } from '../hooks/useRemote.js';
 import { useGame } from '../lib/game-state.js';
-import { pick } from '../lib/i18n.js';
+import { pick, type UiLanguage } from '../lib/i18n.js';
 import { ROUTES } from '../lib/router.js';
 
 function Tile({
@@ -45,6 +45,60 @@ function Tile({
   );
 }
 
+export const TOUR_KEY = 'flashcards:play-tour:v1';
+
+function tourSeen(): boolean {
+  try {
+    return window.localStorage.getItem(TOUR_KEY) !== null;
+  } catch {
+    // Blocked storage: show the tour rather than lose it, and let "Got it" hide it for now.
+    return false;
+  }
+}
+
+/** Four lines on how the game works, shown on this device until put away. */
+function Tour({ language }: { language: UiLanguage }) {
+  const [open, setOpen] = useState(() => !tourSeen());
+  if (!open) return null;
+  const close = () => {
+    try {
+      window.localStorage.setItem(TOUR_KEY, 'done');
+    } catch {
+      // It simply shows again next time.
+    }
+    setOpen(false);
+  };
+  const lines: Array<[IconName, string]> = [
+    ['star', pick(language, 'Every answer earns XP. Remember and Forget earn the same, so answer honestly.', 'Mỗi câu trả lời đều có XP. Nhớ và Quên được như nhau, nên cứ trả lời thật.')],
+    ['chest', pick(language, 'Meet your daily goals for a chest; quests add more XP and stardust.', 'Đạt mục tiêu ngày được một rương; nhiệm vụ cho thêm XP và bụi sao.')],
+    ['pet', pick(language, 'Stardust buys companions, cards and streak freezes, never with real money.', 'Bụi sao mua linh vật, thẻ và đóng băng streak, không bao giờ bằng tiền thật.')],
+    ['league', pick(language, 'Each week you race a league of twenty; duels are two-minute matches.', 'Mỗi tuần bạn đua trong một giải hai mươi người; đấu từ vựng là trận hai phút.')],
+  ];
+  return (
+    <section className={`${CARD} mb-4 flex flex-col gap-3 border-accent/40 p-5`} aria-labelledby="play-tour-title">
+      <h2 id="play-tour-title" className="font-serif text-xl font-semibold text-ink">
+        {pick(language, 'How the game works', 'Trò chơi hoạt động thế nào')}
+      </h2>
+      <ul className="flex flex-col gap-2.5">
+        {lines.map(([icon, text]) => (
+          <li key={icon} className="flex items-start gap-3 text-sm text-muted">
+            <Icon name={icon} className="mt-0.5 size-4 shrink-0 text-accent" />
+            <span>{text}</span>
+          </li>
+        ))}
+      </ul>
+      <span className="flex flex-wrap items-center gap-3">
+        <button type="button" className={BUTTON_PRIMARY} onClick={close}>
+          {pick(language, 'Got it', 'Đã hiểu')}
+        </button>
+        <Link to={ROUTES.help} className="text-sm text-muted underline-offset-4 hover:text-ink hover:underline">
+          {pick(language, 'More in Help', 'Xem thêm ở Trợ giúp')}
+        </Link>
+      </span>
+    </section>
+  );
+}
+
 export function PlayPage() {
   const { api } = useApp();
   const language = useUiLanguage();
@@ -60,6 +114,8 @@ export function PlayPage() {
 
   return (
     <div className={`${PAGE} mx-auto max-w-3xl`}>
+      <h1 className="sr-only">{pick(language, 'Play', 'Chơi')}</h1>
+      <Tour language={language} />
       {ready && (
         <section className={`${CARD} pool pool-top mb-4 flex items-center gap-4 p-4`}>
           <span className="flex size-14 shrink-0 flex-col items-center justify-center rounded-full border-2 border-accent/60">
@@ -89,7 +145,7 @@ export function PlayPage() {
       )}
 
       <div className="grid grid-cols-2 gap-3">
-        <Tile to={ROUTES.pvp} icon="sword" title={pick(language, 'Word duels', 'Đấu từ vựng')} detail={pick(language, 'Two minutes against another player', 'Hai phút đối đầu người khác')} wide />
+        <Tile to={ROUTES.pvp} icon="duel" title={pick(language, 'Word duels', 'Đấu từ vựng')} detail={pick(language, 'Two minutes against another player', 'Hai phút đối đầu người khác')} wide />
         <Tile
           to={ROUTES.achievements}
           icon="trophy"

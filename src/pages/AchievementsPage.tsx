@@ -35,6 +35,15 @@ function Level({ game, language }: { game: GameResponse; language: UiLanguage })
           {pick(language, `${game.totalXp.toLocaleString('en')} XP in all`, `Tổng ${game.totalXp.toLocaleString('vi')} XP`)} ·{' '}
           {pick(language, `longest combo ${game.combo.longest}`, `combo dài nhất ${game.combo.longest}`)}
         </p>
+        {game.dailyXp !== undefined && (
+          <p className={`${HELP} tabular-nums`}>
+            {pick(
+              language,
+              `Today’s XP limit: reviews ${game.dailyXp.review.earned.toLocaleString('en')}/${game.dailyXp.review.cap.toLocaleString('en')} · practice ${game.dailyXp.practice.earned.toLocaleString('en')}/${game.dailyXp.practice.cap.toLocaleString('en')}`,
+              `Giới hạn XP hôm nay: ôn ${game.dailyXp.review.earned.toLocaleString('vi')}/${game.dailyXp.review.cap.toLocaleString('vi')} · luyện tập ${game.dailyXp.practice.earned.toLocaleString('vi')}/${game.dailyXp.practice.cap.toLocaleString('vi')}`,
+            )}
+          </p>
+        )}
         {game.comebackUntil !== null && (
           <p className="text-xs font-semibold text-warn-ink">
             {pick(language, 'Double XP: welcome back.', 'Nhân đôi XP: chào mừng trở lại.')}

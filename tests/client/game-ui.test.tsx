@@ -71,6 +71,18 @@ describe('XP for each answer', () => {
     // The level beside the navigation moves with it.
     expect(await screen.findAllByRole('link', { name: /Level 2: 51 of 115 XP/ })).not.toHaveLength(0);
   });
+
+  it('says so when the day’s review XP is used up', async () => {
+    const { saves } = open('/review', { cards: [card(1), card(2)], game: playing() });
+    await screen.findByTestId('flashcard');
+    fireEvent.keyDown(document.body, { key: ' ', code: 'Space' });
+    fireEvent.keyDown(document.body, { key: 'ArrowRight', code: 'ArrowRight' });
+    await waitFor(() => expect(saves).toHaveLength(1));
+    await act(async () =>
+      saves[0]!.resolve({ outcome: 'applied', state: null, game: { xp: 0, totalXp: 140, level: 2, combo: 0, comboBonus: 0, reviewXpLeft: 0 } }),
+    );
+    expect(await screen.findByText('Daily XP limit reached')).toBeInTheDocument();
+  });
 });
 
 describe('today’s quests', () => {
@@ -124,9 +136,16 @@ describe('claiming rewards on the dashboard', () => {
 
 describe('the Achievements page', () => {
   it('shows the level, the check-in, freezes and every badge with the way to its next tier', async () => {
-    open('/achievements', { game: playing({ checkin: { day: 2, lastOn: '2026-10-09' }, freezes: { held: 1, max: 2 } }) });
+    open('/achievements', {
+      game: playing({
+        checkin: { day: 2, lastOn: '2026-10-09' },
+        freezes: { held: 1, max: 2 },
+        dailyXp: { review: { earned: 340, cap: 500 }, practice: { earned: 20, cap: 500 } },
+      }),
+    });
     expect(await screen.findByText('75 XP to level 3')).toBeInTheDocument();
     expect(screen.getByText('Streak freezes: 1 of 2')).toBeInTheDocument();
+    expect(screen.getByText('Today’s XP limit: reviews 340/500 · practice 20/500')).toBeInTheDocument();
     expect(screen.getByRole('listitem', { name: 'Day 2: 15 XP, done' })).toBeInTheDocument();
     expect(screen.getByRole('listitem', { name: 'Day 3: 20 XP' })).toBeInTheDocument();
     // Reviewer holds Bronze (100) and is on the way to Silver (1000).
@@ -136,5 +155,23 @@ describe('the Achievements page', () => {
   it('says why when the game cannot be kept', async () => {
     open('/achievements');
     expect(await screen.findByText(/XP and levels need the latest database update/)).toBeInTheDocument();
+  });
+});
+
+describe('the tour on the Play page', () => {
+  it('explains the game once, and stays away after it is put away', async () => {
+    open('/play', { game: playing() });
+    const tour = await screen.findByRole('region', { name: 'How the game works' });
+    expect(within(tour).getByText(/Remember and Forget earn the same/)).toBeInTheDocument();
+    fireEvent.click(within(tour).getByRole('button', { name: 'Got it' }));
+    expect(screen.queryByRole('region', { name: 'How the game works' })).not.toBeInTheDocument();
+    expect(within(screen.getByRole('main')).getByRole('heading', { level: 1, name: 'Play' })).toBeInTheDocument();
+  });
+
+  it('is not shown again on this device', async () => {
+    window.localStorage.setItem('flashcards:play-tour:v1', 'done');
+    open('/play', { game: playing() });
+    expect(await screen.findByText('Word duels')).toBeInTheDocument();
+    expect(screen.queryByRole('region', { name: 'How the game works' })).not.toBeInTheDocument();
   });
 });

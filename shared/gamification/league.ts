@@ -55,8 +55,13 @@ export interface Bot {
   sessions: Array<{ start: number; xp: number }>;
 }
 
-/** A steady rival's week in each tier, before each rival's own spread. Real data can replace it later. */
-export const BOT_WEEK_XP = [250, 340, 460, 620, 840, 1130, 1530, 2070] as const;
+/**
+ * A steady rival's week in each tier, before each rival's own spread. Set
+ * against the XP rules (docs/gamification-plan.md, 6.1): someone meeting a
+ * modest goal on most days (about 400 XP a day) settles in the middle tiers,
+ * and only heavy daily study reaches Star. Real data can replace it later.
+ */
+export const BOT_WEEK_XP = [600, 880, 1300, 1900, 2800, 4100, 6100, 9000] as const;
 
 const PERSONALITY_SHARE: Array<[Personality, number]> = [
   ['lazy', 0.3],
@@ -125,10 +130,8 @@ export function botFor(groupId: string, tier: number, seat: number): Bot {
   });
   sessions.sort((a, b) => a.start - b.start);
 
-  const level = Math.max(1, Math.round(tier * 3 + random() * 8 - 2));
-  let totalXp = 0;
-  for (let step = 1; step < level; step += 1) totalXp += Math.round(100 * 1.15 ** (step - 1));
-  totalXp += Math.floor(random() * 80);
+  // A rival climbed here a tier a week at least, so it has studied for as many weeks as its tier and a few more.
+  const totalXp = Math.round(BOT_WEEK_XP[Math.min(TIERS, Math.max(1, tier)) - 1]! * (tier + random() * 4));
 
   return {
     seat,

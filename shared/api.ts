@@ -295,6 +295,8 @@ export const answerGameSchema = z.object({
   /** Answers in a row so far, and the bonus that gives, in percent. */
   combo: z.number().int(),
   comboBonus: z.number().int(),
+  /** Base XP flashcard reviews can still earn today (DAILY_XP_CAP); absent from older servers. */
+  reviewXpLeft: z.number().int().optional(),
 });
 
 export const reviewActionResponseSchema = z.object({
@@ -1172,6 +1174,13 @@ export const gameResponseSchema = z.object({
   checkin: z.object({ day: z.number().int(), lastOn: isoDateSchema.nullable() }),
   /** How many days ahead "review early" reaches. */
   earlyDays: z.number().int().min(1).max(14),
+  /** Base XP earned today from reviews and from practice, against each one's daily limit. */
+  dailyXp: z
+    .object({
+      review: z.object({ earned: z.number().int(), cap: z.number().int() }),
+      practice: z.object({ earned: z.number().int(), cap: z.number().int() }),
+    })
+    .optional(),
   /** Rewards waiting to be claimed, oldest first. */
   rewards: z.array(gameRewardSchema),
   /** Phase 3 (schema version 19); absent or null where the economy is not kept. */

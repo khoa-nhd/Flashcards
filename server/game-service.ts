@@ -35,6 +35,7 @@ import { BADGES, type BadgeId, type BadgeMetrics } from '../shared/gamification/
 import { streakOf } from '../shared/study-goals.js';
 import {
   INITIAL_STATE,
+  dailyXpLeft,
   addItems,
   claim,
   isEmpty,
@@ -51,7 +52,7 @@ import {
 import { levelOf } from '../shared/gamification/levels.js';
 import type { Quest, QuestGoals, QuestKind } from '../shared/gamification/quests.js';
 import { FREEZE_MAX } from '../shared/gamification/streak.js';
-import { comboBonus, type AnswerEvent } from '../shared/gamification/xp.js';
+import { DAILY_XP_CAP, comboBonus, type AnswerEvent } from '../shared/gamification/xp.js';
 import type { GameSnapshotRows, VocabularyDatabase } from './supabase/supabase-database.js';
 import { DatabaseError } from './supabase/supabase-database.js';
 import type { VocabularyCatalog } from './vocabulary-catalog.js';
@@ -469,7 +470,14 @@ export class GameService {
 
   private summary(snapshot: GameSnapshot, xp: number): AnswerGame {
     const combo = snapshot.state.combo;
-    return { xp, totalXp: snapshot.totalXp, level: levelOf(snapshot.totalXp).level, combo, comboBonus: comboBonus(combo) };
+    return {
+      xp,
+      totalXp: snapshot.totalXp,
+      level: levelOf(snapshot.totalXp).level,
+      combo,
+      comboBonus: comboBonus(combo),
+      reviewXpLeft: dailyXpLeft({ ...INITIAL_STATE.limits, ...snapshot.state.limits }, this.today(), 'review'),
+    };
   }
 
   /** The days streak freezes covered, after spending any that a missed day calls for. */
@@ -805,6 +813,7 @@ export class GameService {
     });
     const week = snapshot.quests.find((each) => each.period === 'week' && each.start === weekStart);
     const combo = snapshot.state.combo;
+    const limits = { ...INITIAL_STATE.limits, ...snapshot.state.limits };
     const comebackUntil =
       snapshot.state.comebackUntil !== null && Date.parse(snapshot.state.comebackUntil) > this.now().getTime()
         ? snapshot.state.comebackUntil
@@ -829,6 +838,10 @@ export class GameService {
       freezes: { held: snapshot.freezes.filter((freeze) => freeze.usedOn === null).length, max: FREEZE_MAX },
       checkin: { day: snapshot.state.checkin.day, lastOn: snapshot.state.checkin.lastOn },
       earlyDays: snapshot.state.earlyDays,
+      dailyXp: {
+        review: { earned: DAILY_XP_CAP.review - dailyXpLeft(limits, today, 'review'), cap: DAILY_XP_CAP.review },
+        practice: { earned: DAILY_XP_CAP.practice - dailyXpLeft(limits, today, 'practice'), cap: DAILY_XP_CAP.practice },
+      },
       rewards: snapshot.rewards.map((reward) => ({ ...reward, payload: { ...reward.payload } })),
       economy: this.economyView(snapshot),
     };

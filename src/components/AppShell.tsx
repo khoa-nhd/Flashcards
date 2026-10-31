@@ -59,7 +59,7 @@ const GROUPS: Array<{ id: 'study' | 'play' | 'more'; label: string; labelVi: str
     labelVi: 'Chơi',
     items: [
       item('achievements', 'Level and quests', 'Level và nhiệm vụ', 'Quests', 'Nhiệm vụ', 'trophy'),
-      item('pvp', 'Word duels', 'Đấu từ vựng', 'Duels', 'Đấu', 'sword'),
+      item('pvp', 'Word duels', 'Đấu từ vựng', 'Duels', 'Đấu', 'duel'),
       item('league', 'League', 'Giải đấu', 'League', 'Giải đấu', 'league'),
       item('friends', 'Friends', 'Bạn bè', 'Friends', 'Bạn bè', 'friends'),
       item('shop', 'Shop', 'Cửa hàng', 'Shop', 'Cửa hàng', 'shop'),

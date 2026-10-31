@@ -73,10 +73,12 @@ describe('XP for answers', () => {
     const word = await addWord(alice, 'candid');
     const { reply } = await answer(alice, word.id, 0);
     // A word studied for the first time: 15, and 2 for having added it.
-    expect(reply.game).toMatchObject({ xp: 17, totalXp: 17, level: 1, combo: 1 });
+    expect(reply.game).toMatchObject({ xp: 17, totalXp: 17, level: 1, combo: 1, reviewXpLeft: 500 - 17 });
 
     const game = await gameOf(alice);
     expect(game).toMatchObject({ available: true, totalXp: 17, level: { level: 1, into: 17, needed: 100 } });
+    // What the day's XP limits have counted so far.
+    expect(game.dailyXp).toEqual({ review: { earned: 17, cap: 500 }, practice: { earned: 0, cap: 500 } });
     expect(game.quests.day).toHaveLength(3);
     expect(game.quests.week).not.toBeNull();
     // The first answer of the day is the day's check-in, waiting to be claimed.

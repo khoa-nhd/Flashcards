@@ -312,7 +312,7 @@ const REWARD_ICON: Record<GameRewardView['kind'], IconName> = {
   chest: 'chest',
   boss: 'trophy',
   set: 'star',
-  pvp: 'sword',
+  pvp: 'duel',
   pvp_season: 'league',
 };
 

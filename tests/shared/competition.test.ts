@@ -14,7 +14,7 @@ import {
   weekStartsAt,
 } from '../../shared/gamification/league.js';
 import { botNickname, nicknameProblem, randomNickname } from '../../shared/gamification/nickname.js';
-import { RATE_LIMIT, type AnswerEvent } from '../../shared/gamification/xp.js';
+import { DAILY_XP_CAP, RATE_LIMIT, type AnswerEvent } from '../../shared/gamification/xp.js';
 
 const WEEK = '2026-10-26';
 
@@ -218,7 +218,8 @@ describe('earning limits', () => {
 
   it('gives XP to at most 90 answers in any minute', () => {
     // 650 ms apart: the 91st to the 93rd fall in the same minute as the first, the 94th does not.
-    const given = amounts(Array.from({ length: 94 }, (_, at) => answer(at * 650)));
+    // Practice answers, so the day's limit on reviews (DAILY_XP_CAP) is not what stops them.
+    const given = amounts(Array.from({ length: 94 }, (_, at) => answer(at * 650, { kind: 'practice', mode: 'typing', counted: false, wasDue: false })));
     expect(given.slice(0, RATE_LIMIT.perMinute).every((amount) => amount > 0)).toBe(true);
     expect(given.slice(90, 93)).toEqual([0, 0, 0]);
     expect(given[93]).toBeGreaterThan(0);
@@ -238,5 +239,45 @@ describe('earning limits', () => {
     const fast = answer(100);
     const change = sync(snapshot, context([answer(0), fast, answer(5000, { kind: 'undo', undoes: fast.id })]));
     expect(change.ledger.map((entry) => entry.amount)).toEqual([10, 0, 0]);
+  });
+
+  describe('a day’s XP limit', () => {
+    const bases = (answers: AnswerEvent[], from: GameSnapshot = snapshot) =>
+      sync(from, context(answers)).ledger.filter((entry) => entry.source === 'answer').map((entry) => entry.base);
+    const reviews = (count: number, start = 0) => Array.from({ length: count }, (_, at) => answer((start + at) * 1000));
+
+    it('stops flashcard reviews at 500 base XP a day, what 50 due reviews earn, paying the part that reaches it', () => {
+      expect(DAILY_XP_CAP.review).toBe(50 * 10);
+      const given = bases([...reviews(49), answer(49_000, { isNew: true }), answer(50_000, { isNew: true }), answer(51_000)]);
+      expect(given.slice(0, 49).reduce((sum, base) => sum + base, 0)).toBe(490);
+      // A new word is worth 17: only 10 of it fits, then nothing.
+      expect(given.slice(49)).toEqual([DAILY_XP_CAP.review - 490, 0, 0]);
+    });
+
+    it('counts random and early reviews in it too', () => {
+      const given = bases([...reviews(50), answer(50_000, { counted: false }), answer(51_000, { wasDue: false })]);
+      expect(given.slice(50)).toEqual([0, 0]);
+    });
+
+    it('keeps practice apart, with its own 500', () => {
+      const practice = (at: number) => answer(at, { kind: 'practice', mode: 'typing', counted: false, wasDue: false });
+      const given = bases([...reviews(50), practice(50_000), practice(51_000)]);
+      expect(given.slice(50)).toEqual([5, 5]);
+      const morePractice = bases(Array.from({ length: 101 }, (_, at) => practice(at * 1000)));
+      expect(morePractice.slice(0, 100).every((base) => base === 5)).toBe(true);
+      expect(morePractice[100]).toBe(0);
+    });
+
+    it('carries over between counts, and starts again the next day', () => {
+      const first = sync(snapshot, context(reviews(50)));
+      const later = { ...snapshot, version: 1, state: first.state };
+      expect(bases([answer(200_000)], later)).toEqual([0]);
+      expect(bases([answer(200_000, { on: '2026-10-30' })], later)).toEqual([10]);
+    });
+
+    it('saves answers past it as capped, so they count towards no quest', () => {
+      const change = sync(snapshot, context(reviews(51)));
+      expect(change.ledger.at(-1)).toMatchObject({ amount: 0, reason: 'capped' });
+    });
   });
 });

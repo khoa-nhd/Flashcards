@@ -61,6 +61,17 @@ export function answerReason(event: AnswerEvent): AnswerReason | null {
  */
 export const RATE_LIMIT = { minGapMs: 600, perMinute: 90 } as const;
 
+/**
+ * The most base XP answers earn in one calendar day (the owner's rule,
+ * 2026-10-31): 500 from flashcard reviews (due, new, early and random), what
+ * 50 due reviews earn, and 500 from practice (100 answers), counted apart. Bonuses still add on top of what is
+ * earned. Past it an answer is saved and moves the schedule as usual, and earns
+ * nothing more that day; the part of an answer that reaches the limit is paid.
+ */
+export const DAILY_XP_CAP = { review: 500, practice: 500 } as const;
+export type XpPool = keyof typeof DAILY_XP_CAP;
+export const poolOf = (reason: AnswerReason): XpPool => (reason === 'practice' ? 'practice' : 'review');
+
 /** Answers further apart than this end the combo. */
 export const COMBO_GAP_MS = 2 * 60 * 1000;
 

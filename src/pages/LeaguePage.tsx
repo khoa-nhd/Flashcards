@@ -8,7 +8,7 @@ import type { LeagueResponse, LeagueRow } from '../../shared/api.js';
 import { MOVING, TIERS } from '../../shared/gamification/league.js';
 import { useApp, useUiLanguage } from '../app-context.js';
 import { Icon } from '../components/Icon.js';
-import { TierBadge, standing, timeLeft } from '../components/League.js';
+import { standing, timeLeft } from '../components/League.js';
 import { Link } from '../components/Link.js';
 import { PageHeader } from '../components/PageHeader.js';
 import { Spinner } from '../components/Spinner.js';
@@ -170,10 +170,7 @@ export function LeaguePage() {
           <section className={`${CARD} pool pool-top flex flex-col gap-4 p-5`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex flex-col gap-1">
-                <span className="flex items-center gap-2">
-                  <span className="font-serif text-2xl font-semibold text-ink">{leagueName(language, tier)}</span>
-                  <TierBadge tier={tier} />
-                </span>
+                <span className="font-serif text-2xl font-semibold text-ink">{leagueName(language, tier)}</span>
                 <span className={HELP}>
                   {standing(language, data!) ?? pick(language, 'Not in a group yet this week', 'Tuần này chưa vào nhóm')}
                 </span>

@@ -131,6 +131,8 @@ interface Float {
   xp: number;
   comboBonus: number;
   combo: number;
+  /** The answer earned nothing because today's review XP is used up. */
+  limit: boolean;
 }
 
 /**
@@ -146,9 +148,10 @@ export function XpFloat() {
   useEffect(
     () =>
       subscribeEarned((answer) => {
-        if (answer.xp === 0) return;
+        const limit = answer.xp === 0 && answer.reviewXpLeft === 0;
+        if (answer.xp === 0 && !limit) return;
         next.current += 1;
-        const float: Float = { id: next.current, xp: answer.xp, comboBonus: answer.comboBonus, combo: answer.combo };
+        const float: Float = { id: next.current, xp: answer.xp, comboBonus: answer.comboBonus, combo: answer.combo, limit };
         setFloats((current) => [...current.slice(-2), float]);
         setTimeout(() => setFloats((current) => current.filter((each) => each.id !== float.id)), 1400);
       }),
@@ -165,7 +168,9 @@ export function XpFloat() {
             float.xp > 0 ? 'bg-accent-soft text-accent' : 'bg-line text-muted'
           }`}
         >
-          {float.xp > 0 ? `+${float.xp}` : float.xp} XP
+          {float.limit
+            ? pick(language, 'Daily XP limit reached', 'Đã đạt giới hạn XP hôm nay')
+            : `${float.xp > 0 ? `+${float.xp}` : float.xp} XP`}
         </span>
       ))}
       {latest !== undefined && latest.comboBonus > 0 && (
