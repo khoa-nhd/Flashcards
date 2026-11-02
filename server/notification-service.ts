@@ -188,7 +188,25 @@ export interface RunSummary {
 /** One run of the timer: decide, claim, send, forget gone devices. */
 export async function runReminders(db: NotifyDatabase, sender: PushSender, now: Date): Promise<RunSummary> {
   const week = leagueWeekOf(now);
+  console.log(`[Reminders] Starting run at ${now.toISOString()}, week ${week}`);
+  
   const [candidates, league, social] = await Promise.all([db.candidates(now), db.league(week), db.social(week)]);
+  console.log(`[Reminders] Found ${candidates.length} candidates, ${league.length} league members, ${social.length} social entries`);
+  
+  // Log each candidate's state for debugging
+  for (const candidate of candidates) {
+    console.log(`[Reminders] Candidate ${candidate.user_id}:`, {
+      time_zone: candidate.time_zone,
+      local_time: candidate.local_time,
+      streak: candidate.streak,
+      reminder: candidate.reminder,
+      met_today: candidate.met_today,
+      streak_alive: candidate.streak_alive,
+      due: candidate.due,
+      sent: candidate.sent,
+    });
+  }
+  
   const members: LeagueMember[] = league.map((row) => ({
     group: row.group_id,
     tier: row.tier,
@@ -203,25 +221,47 @@ export async function runReminders(db: NotifyDatabase, sender: PushSender, now: 
       : { kind: 'challenge', user: row.user_id, other: row.other_id, nickname: row.other_nickname, id: row.ref ?? row.other_id },
   );
   const decision = decide(candidates.map(candidateFrom), members, links, now);
+  
+  console.log(`[Reminders] Decision: ${decision.sends.length} sends, ${decision.state.length} state updates`);
+  for (const send of decision.sends) {
+    console.log(`[Reminders] Sending to ${send.user}: ${send.key} - ${send.title}`);
+  }
+  
   const reminders = new Map(decision.sends.map((send) => [`${send.user}|${send.day}|${send.key}`, send]));
   // Claimed first: a reminder another run already claimed comes back with no device, and is not sent again.
   const claimed = await db.claim(
     decision.sends.map(({ user, day, key }) => ({ user, day, key })),
     decision.state,
   );
+  
+  console.log(`[Reminders] Claimed ${claimed.length} devices`);
+  
   let sent = 0;
   let failed = 0;
   const gone: string[] = [];
   for (const row of claimed) {
     const reminder = reminders.get(`${row.user_id}|${row.day}|${row.key}`);
     if (reminder === undefined) continue;
+    console.log(`[Reminders] Sending push to ${row.endpoint.substring(0, 50)}...`);
     const outcome = await sender.send({ endpoint: row.endpoint, p256dh: row.p256dh, auth: row.auth }, reminderPayload(reminder));
-    if (outcome === 'ok') sent += 1;
-    else if (outcome === 'gone') gone.push(row.endpoint);
-    else failed += 1;
+    if (outcome === 'ok') {
+      sent += 1;
+      console.log(`[Reminders] ✓ Sent successfully`);
+    }
+    else if (outcome === 'gone') {
+      gone.push(row.endpoint);
+      console.log(`[Reminders] ✗ Device gone`);
+    }
+    else {
+      failed += 1;
+      console.log(`[Reminders] ✗ Send failed`);
+    }
   }
   if (gone.length > 0) await db.gone(gone);
-  return { people: candidates.length, sent, gone: gone.length, failed };
+  
+  const summary = { people: candidates.length, sent, gone: gone.length, failed };
+  console.log(`[Reminders] Run complete:`, summary);
+  return summary;
 }
 
 // ---- Each account's own ----
