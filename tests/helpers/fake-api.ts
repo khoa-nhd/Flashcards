@@ -6,6 +6,7 @@ import type {
   AiMessage,
   AnalyticsResponse,
   DayPlanResponse,
+  GachaApiState,
   GameResponse,
   ImportResponse,
   LibraryResponse,
@@ -23,6 +24,14 @@ import type {
   WeakWordsResponse,
 } from '../../shared/api.js';
 import { EXPORT_FORMAT, EXPORT_VERSION } from '../../shared/export-format.js';
+import {
+  GACHA_KEY_CAP,
+  GACHA_KEYS_PER_DAY,
+  GACHA_SHARDS_PER_KEY,
+  chestById,
+  exchangeShards,
+  openChests,
+} from '../../shared/gacha.js';
 import { levelOf } from '../../shared/gamification/levels.js';
 import { collectionKey, orderPair, tidyName } from '../../shared/library.js';
 import { NO_GOAL, planDay, type PlanInput } from '../../shared/session-planner.js';
@@ -95,6 +104,8 @@ export interface FakeApiOptions {
   plan?: Partial<PlanFigures>;
   /** What the server says it did with a practice answer. */
   practiceOutcome?: PracticeResponse['outcome'];
+  /** Keys the purse starts with, for the chest room. */
+  gachaKeys?: number;
   /** Collections, further examples and links the account starts with. */
   library?: Partial<LibraryResponse>;
 }
@@ -290,6 +301,7 @@ export function createFakeApi({
   plan: planFigures = {},
   practiceOutcome = 'recorded',
   library: libraryStart = {},
+  gachaKeys = 5,
 }: FakeApiOptions = {}) {
   // Copied, so one test's changes never reach the data another test passed in.
   const library = {
@@ -337,6 +349,24 @@ export function createFakeApi({
     if (!found) throw new ApiError('not_found', 'That word is not in the vocabulary database.', 404);
     return found;
   };
+
+  // Loot chests: a small purse that the page can actually spend in a test.
+  let gachaState: GachaApiState = {
+    available: true,
+    keys: gachaKeys,
+    shards: 0,
+    pity: { sinceEpic: 0, sinceLegendary: 0 },
+    opens: 0,
+    dailyKeysAvailable: true,
+    dailyKeys: GACHA_KEYS_PER_DAY,
+    shardsPerKey: GACHA_SHARDS_PER_KEY,
+    inventory: [],
+  };
+  const gachaView = (): GachaApiState => ({
+    ...gachaState,
+    pity: { ...gachaState.pity },
+    inventory: gachaState.inventory.map((row) => ({ ...row })),
+  });
 
   const api = {
     // Echoes the selection it was asked for, as the server does.
@@ -744,6 +774,45 @@ export function createFakeApi({
       wrong: 0,
       won: false,
     })),
+    fetchGacha: vi.fn<AppApi['fetchGacha']>(async () => gachaView()),
+    openChest: vi.fn<AppApi['openChest']>(async ({ chestId, count }) => {
+      const chest = chestById(chestId);
+      if (chest === null) throw new ApiError('invalid_request', 'There is no chest with that id.', 400);
+      const cost = chest.costKeys * count;
+      if (gachaState.keys < cost) throw new ApiError('insufficient_keys', 'Not enough keys for that.', 409);
+      const opening = openChests({
+        chest,
+        pity: gachaState.pity,
+        owned: new Set(gachaState.inventory.map((row) => row.itemId)),
+        count,
+      });
+      const rows = new Map(gachaState.inventory.map((row) => [row.itemId, { ...row }]));
+      for (const result of opening.results) {
+        if (result.duplicate) continue;
+        const row = rows.get(result.itemId) ?? { itemId: result.itemId, quantity: 0 };
+        row.quantity += 1;
+        rows.set(result.itemId, row);
+      }
+      gachaState = {
+        ...gachaState,
+        keys: gachaState.keys - cost,
+        shards: gachaState.shards + opening.shardsGained,
+        pity: opening.pity,
+        opens: gachaState.opens + count,
+        inventory: [...rows.values()],
+      };
+      return { state: gachaView(), results: opening.results };
+    }),
+    exchangeShards: vi.fn<AppApi['exchangeShards']>(async ({ keys }) => {
+      const trade = exchangeShards(gachaState.shards, keys);
+      if (trade === null) throw new ApiError('not_enough_shards', 'Not enough shards for a key.', 409);
+      gachaState = {
+        ...gachaState,
+        keys: Math.min(GACHA_KEY_CAP, gachaState.keys + trade.keys),
+        shards: gachaState.shards - trade.cost,
+      };
+      return { state: gachaView(), results: [] };
+    }),
     saveStudyGoals: vi.fn<AppApi['saveStudyGoals']>(async (input) => {
       const goals = {
         newWords: input.newWords ?? studyGoals.goals.newWords,

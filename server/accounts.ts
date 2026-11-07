@@ -4,6 +4,7 @@ import type { LibraryService } from './library-service.js';
 import type { ReviewService } from './review-service.js';
 import type { VocabularyService } from './vocabulary-service.js';
 import type { AiService } from './ai-service-impl.js';
+import type { GachaService } from './gacha-service.js';
 
 export interface Account {
   id: string;
@@ -57,6 +58,8 @@ export interface AccountSession {
   /** Leagues, nicknames, friends and moderation; `null` with `competitionReason` saying why. */
   competition?: CompetitionService | null;
   competitionReason?: string | null;
+  /** Loot chests; only where the database has somewhere to keep them (schema version 22). */
+  gacha?: GachaService | null;
   vocabulary: VocabularyService;
   analytics: AnalyticsService;
   library: LibraryService;

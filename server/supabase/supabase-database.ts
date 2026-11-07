@@ -385,15 +385,13 @@ export type ReviewWriteRow = z.infer<typeof reviewWriteResultSchema>;
  * The newest migration this server knows how to use. A database that is
  * behind still serves everything its own version supports.
  */
-export const LATEST_SCHEMA_VERSION = 21;
+export const LATEST_SCHEMA_VERSION = 22;
 
 /**
- * The newest migration Settings asks the owner to run. Version 15 makes FSRS
- * the only schedule and converts the data for it; it is held back until the
- * screens for it exist (docs/fsrs-only-progress.md), so the app does not ask
- * for it yet. Raise this to LATEST_SCHEMA_VERSION when they do.
+ * The newest migration Settings asks the owner to run. Every screen its
+ * version adds already exists, so it follows LATEST_SCHEMA_VERSION.
  */
-export const RECOMMENDED_SCHEMA_VERSION = 21;
+export const RECOMMENDED_SCHEMA_VERSION = 22;
 
 /** One row of the review history. Columns newer than the database's schema version are simply absent. */
 export const reviewLogRowSchema = z.object({

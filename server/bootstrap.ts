@@ -4,6 +4,7 @@ import { DEFAULT_FSRS_SETTINGS } from '../shared/scheduler/fsrs.js';
 import { AnalyticsService } from './analytics-service.js';
 import { createApp } from './create-app.js';
 import { createGoalStore } from './goal-store.js';
+import { GachaService, createMemoryGachaStore } from './gacha-service.js';
 import { loadConfig, type AppConfig } from './env.js';
 import { ExportService } from './export-service.js';
 import { LibraryService } from './library-service.js';
@@ -202,8 +203,14 @@ export function buildApp(env: Record<string, string | undefined> = process.env):
     publicKey: keys.publicKey,
     available: true,
   });
+  // The sample data has no account either, so its chests are kept in memory, with a starting purse.
+  const gacha = new GachaService({
+    store: createMemoryGachaStore({ keys: 5, shards: 0, pity: { sinceEpic: 0, sinceLegendary: 0 }, opens: 0, lastGrantDay: null }),
+    accountId: 'sample',
+    timeZone,
+  });
   return {
-    app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game, competition, notifications, pvp }),
+    app: createApp({ config, service, vocabulary, analytics, library, exporter, studyGoals, game, competition, notifications, pvp, gacha }),
     config,
   };
 }

@@ -105,6 +105,9 @@ describe('schema', () => {
       { relname: 'collection_items', relrowsecurity: true },
       { relname: 'collections', relrowsecurity: true },
       { relname: 'follows', relrowsecurity: true },
+      { relname: 'gacha_inventory', relrowsecurity: true },
+      { relname: 'gacha_opens', relrowsecurity: true },
+      { relname: 'gacha_state', relrowsecurity: true },
       { relname: 'game_badges', relrowsecurity: true },
       { relname: 'game_events', relrowsecurity: true },
       { relname: 'game_freezes', relrowsecurity: true },
@@ -170,6 +173,19 @@ describe('schema', () => {
     expect(await can('authenticated', 'effective_reviews', 'SELECT')).toBe(true);
     expect(await can('authenticated', 'effective_reviews', 'INSERT')).toBe(false);
     expect(await can('authenticated', 'study_sessions', 'DELETE')).toBe(false);
+    // Chests: the state and the collection can be written, the record of
+    // openings is append-only, and nothing about them can be deleted.
+    for (const table of ['gacha_state', 'gacha_inventory']) {
+      expect(await can('authenticated', table, 'SELECT'), table).toBe(true);
+      expect(await can('authenticated', table, 'INSERT'), table).toBe(true);
+      expect(await can('authenticated', table, 'UPDATE'), table).toBe(true);
+      expect(await can('authenticated', table, 'DELETE'), table).toBe(false);
+      expect(await can('anon', table, 'SELECT'), table).toBe(false);
+    }
+    expect(await can('authenticated', 'gacha_opens', 'INSERT')).toBe(true);
+    expect(await can('authenticated', 'gacha_opens', 'SELECT')).toBe(true);
+    expect(await can('authenticated', 'gacha_opens', 'UPDATE')).toBe(false);
+    expect(await can('authenticated', 'gacha_opens', 'DELETE')).toBe(false);
     // The Add Word action may only change a message's own metadata.
     expect(await can('authenticated', 'ai_messages', 'UPDATE')).toBe(true);
     expect(await can('anon', 'ai_messages', 'UPDATE')).toBe(false);
@@ -213,6 +229,14 @@ describe('schema', () => {
       'collections SELECT {authenticated}',
       'collections UPDATE {authenticated}',
       'follows SELECT {authenticated}',
+      'gacha_inventory INSERT {authenticated}',
+      'gacha_inventory SELECT {authenticated}',
+      'gacha_inventory UPDATE {authenticated}',
+      'gacha_opens INSERT {authenticated}',
+      'gacha_opens SELECT {authenticated}',
+      'gacha_state INSERT {authenticated}',
+      'gacha_state SELECT {authenticated}',
+      'gacha_state UPDATE {authenticated}',
       // The game is read only: it is written through signed changes alone (game_commit).
       'game_badges SELECT {authenticated}',
       // Events are read by everyone; only an admin's signed operation switches them.
@@ -312,6 +336,9 @@ describe('isolation between users', () => {
       'study_sessions',
       'vocabulary_cards',
       'effective_reviews',
+      'gacha_state',
+      'gacha_inventory',
+      'gacha_opens',
     ]) {
       await expect(db.asAnon((s) => s.query(`select * from public.${table}`)), table).rejects.toMatchObject({ code: RLS_DENIED });
     }

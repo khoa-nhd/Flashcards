@@ -15,6 +15,8 @@ import {
   createExampleRequestSchema,
   createRelationRequestSchema,
   dailyGoalSchema,
+  gachaOpenRequestSchema,
+  shardExchangeRequestSchema,
   importRequestSchema,
   archiveEntriesRequestSchema,
   updateStudyGoalsRequestSchema,
@@ -68,6 +70,7 @@ import { GameError, unavailableGame, type GameService } from './game-service.js'
 import { CompetitionError, type CompetitionService } from './competition-service.js';
 import type { NotificationService, RunSummary } from './notification-service.js';
 import type { PvpService } from './pvp-service.js';
+import type { GachaService } from './gacha-service.js';
 import { timingSafeEqual } from 'node:crypto';
 import { leagueWeekOf, weekEndsAt } from '../shared/gamification/league.js';
 import { calendarDateInTimeZone } from '../shared/dates.js';
@@ -99,6 +102,8 @@ export interface AppDependencies {
   notifications?: NotificationService | null;
   /** Word duels for the sample data's nobody. */
   pvp?: PvpService | null;
+  /** Loot chests; `null` where the account's database cannot keep them. */
+  gacha?: GachaService | null;
   /** The reminder timer's run; `null` where it is not set up. */
   reminders?: { run(): Promise<RunSummary> } | null;
 }
@@ -120,6 +125,8 @@ interface Scope {
   competitionReason: string | null;
   notifications: NotificationService | null;
   pvp: PvpService | null;
+  /** Loot chests; `null` where the account's database cannot keep them. */
+  gacha: GachaService | null;
   /** The interface language the account chose, for messages sent to it. */
   language: 'vi' | 'en';
   /** The zone the account's days are counted in. */
@@ -221,6 +228,7 @@ export function createApp({
   notifications = null,
   reminders = null,
   pvp = null,
+  gacha = null,
 }: AppDependencies): Hono<AppEnv> {
   const app = new Hono<AppEnv>();
   // Everyone signs in to their own account, except with the built-in sample words, which belong to nobody.
@@ -364,6 +372,7 @@ export function createApp({
         competitionReason: session.competitionReason ?? null,
         notifications: session.notifications ?? null,
         pvp: session.pvp ?? null,
+        gacha: session.gacha ?? null,
         language: session.uiLanguage ?? 'vi',
         timeZone: session.timeZone,
         session,
@@ -385,6 +394,7 @@ export function createApp({
       competitionReason: competition === null ? 'Leagues and friends are not kept with this data.' : null,
       notifications,
       pvp,
+      gacha,
       language: 'vi',
       timeZone: config.timeZone,
     });
@@ -521,6 +531,26 @@ export function createApp({
   app.put('/api/study-goals', async (c) => {
     const changes = await parseBody(c, updateStudyGoalsRequestSchema);
     return c.json(await requireStudyGoals(c).save(changes));
+  });
+
+  // Loot chests. The rolls happen on the server; the browser is only told what fell out.
+  const requireGacha = (c: Context<AppEnv>): GachaService => {
+    const scoped = c.get('scope').gacha;
+    if (scoped === null) throw new HttpError(409, 'not_supported', 'Loot chests need the latest database update.');
+    return scoped;
+  };
+
+  app.get('/api/gacha', async (c) => c.json(await requireGacha(c).state()));
+
+  app.post('/api/gacha/open', async (c) => {
+    const request = await parseBody(c, gachaOpenRequestSchema);
+    return c.json(await requireGacha(c).open(request));
+  });
+
+  // Duplicates become shards; shards become keys.
+  app.post('/api/gacha/exchange', async (c) => {
+    const request = await parseBody(c, shardExchangeRequestSchema);
+    return c.json(await requireGacha(c).exchange(request));
   });
 
   // Practice in another study mode: judged and recorded, never moving a word's schedule.

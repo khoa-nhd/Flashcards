@@ -1,6 +1,7 @@
 /** The HTTP contract between the browser and the server, validated on both ends. */
 import { z } from 'zod';
 import { isIsoDate, isValidTimeZone } from './dates.js';
+import { RARITIES } from './gacha.js';
 import { LIBRARY_LIMITS, RELATION_KINDS } from './library.js';
 import { DEFAULT_SCHEDULER, SCHEDULERS } from './scheduler/active.js';
 import { fsrsStateSchema } from './scheduler/fsrs.js';
@@ -1068,6 +1069,50 @@ export const updateSettingsRequestSchema = z
     'Nothing to change',
   );
 
+// ---- Loot chests ----
+
+export const gachaRaritySchema = z.enum(RARITIES);
+
+/** One account's chests as the page draws them: the catalog itself is shared code. */
+export const gachaApiStateSchema = z.object({
+  available: z.boolean(),
+  keys: z.number().int().min(0),
+  shards: z.number().int().min(0),
+  pity: z.object({ sinceEpic: z.number().int().min(0), sinceLegendary: z.number().int().min(0) }),
+  opens: z.number().int().min(0),
+  /** True until today's keys have been collected. */
+  dailyKeysAvailable: z.boolean(),
+  dailyKeys: z.number().int().min(0),
+  shardsPerKey: z.number().int().min(1),
+  /** How many copies of each collectible the account owns. */
+  inventory: z.array(z.object({ itemId: z.string(), quantity: z.number().int().min(1) })),
+});
+
+export const gachaOpenRequestSchema = z.strictObject({
+  chestId: z.string().min(1).max(32),
+  /** One chest, or a batch of ten. */
+  count: z.number().int().min(1).max(10),
+  requestId: z.uuid(),
+});
+
+export const shardExchangeRequestSchema = z.strictObject({
+  keys: z.number().int().min(1).max(9),
+  requestId: z.uuid(),
+});
+
+export const gachaOpeningResultSchema = z.object({
+  itemId: z.string(),
+  rarity: gachaRaritySchema,
+  duplicate: z.boolean(),
+  /** Shards the duplicate became; 0 for a new item. */
+  shards: z.number().int().min(0),
+});
+
+export const gachaOpenResponseSchema = z.object({
+  state: gachaApiStateSchema,
+  results: z.array(gachaOpeningResultSchema),
+});
+
 export const apiErrorSchema = z.object({
   error: z.object({
     code: z.string(),
@@ -1519,6 +1564,11 @@ export type AdminResponse = z.infer<typeof adminResponseSchema>;
 export type AdminReport = z.infer<typeof adminReportSchema>;
 export type ArchiveEntriesRequest = z.infer<typeof archiveEntriesRequestSchema>;
 export type ArchiveEntriesResponse = z.infer<typeof archiveEntriesResponseSchema>;
+export type GachaApiState = z.infer<typeof gachaApiStateSchema>;
+export type GachaOpenRequest = z.infer<typeof gachaOpenRequestSchema>;
+export type ShardExchangeRequest = z.infer<typeof shardExchangeRequestSchema>;
+export type GachaOpeningResult = z.infer<typeof gachaOpeningResultSchema>;
+export type GachaOpenResult = z.infer<typeof gachaOpenResponseSchema>;
 
 // ---- AI Chat ----
 

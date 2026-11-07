@@ -159,6 +159,12 @@ export function PlayPage() {
           {quests.length > 0 && <ProgressBar share={done / quests.length} />}
         </Tile>
         <Tile
+          to={ROUTES.chests}
+          icon="chests"
+          title={pick(language, 'Chests', 'Rương kho báu')}
+          detail={pick(language, 'Keys from your daily goals', 'Khoá từ mục tiêu ngày')}
+        />
+        <Tile
           to={ROUTES.league}
           icon="league"
           title={pick(language, 'League', 'Giải đấu')}

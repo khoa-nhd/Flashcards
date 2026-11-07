@@ -19,9 +19,9 @@ import { LibraryService } from '../library-service.js';
 import { NO_LIBRARY_STORE } from '../library-store.js';
 import { ReviewService } from '../review-service.js';
 import { MASTERY_ONLY, createSchedulerStore } from '../scheduler-store.js';
-import { VocabularyService } from '../vocabulary-service.js';
-import {
-  DatabaseError,
+import { VocabularyService } from '../vocabulary-service.js';import { GachaService } from '../gacha-service.js';
+import { createSupabaseGachaStore } from './supabase-gacha-store.js';
+import { DatabaseError,
   LATEST_SCHEMA_VERSION,
   RECOMMENDED_SCHEMA_VERSION,
   createSupabaseDatabase,
@@ -342,6 +342,16 @@ export function createSupabaseAccounts(options: SupabaseAccountsOptions): Accoun
           now,
         }),
         vocabulary: new VocabularyService({ catalog: repository, rules, defaults, timeZone, writesRequested, scheduler, fsrsOnly, now }),
+        // Loot chests need version 22's tables; before that the page says so rather than failing halfway.
+        gacha:
+          schemaVersion >= 22
+            ? new GachaService({
+                store: createSupabaseGachaStore(url, publicKey, accessToken),
+                accountId: account.id,
+                timeZone,
+                now,
+              })
+            : null,
         studyGoals: fsrsOnly
           ? new StudyGoalsService({
               repository,

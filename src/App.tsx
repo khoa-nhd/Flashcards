@@ -27,6 +27,7 @@ const BankPage = lazy(() => import('./pages/BankPage.js').then((module) => ({ de
 const BossPage = lazy(() => import('./pages/BossPage.js').then((module) => ({ default: module.BossPage })));
 const CalendarPage = lazy(() => import('./pages/CalendarPage.js').then((module) => ({ default: module.CalendarPage })));
 const ChatPage = lazy(() => import('./pages/ChatPage.js').then((module) => ({ default: module.ChatPage })));
+const ChestsPage = lazy(() => import('./pages/ChestsPage.js').then((module) => ({ default: module.ChestsPage })));
 const CollectionPage = lazy(() =>
   import('./pages/CollectionPage.js').then((module) => ({ default: module.CollectionPage })),
 );
@@ -55,6 +56,7 @@ const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   calendar: { title: 'Calendar', render: () => <CalendarPage /> },
   chat: { title: 'AI Chat', render: () => <ChatPage /> },
   practice: { title: 'Practice', render: () => <PracticePage /> },
+  chests: { title: 'Chests', render: () => <ChestsPage /> },
   collections: { title: 'Collections', render: () => <CollectionsPage /> },
   weak: { title: 'Weak words', render: () => <WeakWordsPage /> },
   insights: { title: 'Insights', render: () => <InsightsPage /> },

@@ -12,6 +12,8 @@ import {
   dayPlanSchema,
   deletedResponseSchema,
   extraExampleSchema,
+  gachaApiStateSchema,
+  gachaOpenResponseSchema,
   importResponseSchema,
   libraryResponseSchema,
   practiceHistoryResponseSchema,
@@ -40,6 +42,9 @@ import {
   type AiMessageSavedResponse,
   type ArchiveEntriesResponse,
   type DayPlanResponse,
+  type GachaApiState,
+  type GachaOpenRequest,
+  type GachaOpenResult,
   type ImportResponse,
   type LibraryResponse,
   type PracticeHistoryResponse,
@@ -161,6 +166,15 @@ export interface AccountApi {
   chooseScheduler(scheduler: SchedulerId): Promise<SchedulerReport>;
   /** A what-if comparison at a target retention (the account's own when none is given). Stores nothing. */
   fetchSimulation(retention?: number): Promise<SimulationResponse>;
+}
+
+export interface GachaApi {
+  /** Today's chests: keys, shards, pity and what the account owns. */
+  fetchGacha(): Promise<GachaApiState>;
+  /** Opens one chest or a batch of ten, server-side, exactly once per request id. */
+  openChest(input: GachaOpenRequest): Promise<GachaOpenResult>;
+  /** Turns duplicate shards into keys. */
+  exchangeShards(input: { keys: number; requestId: string }): Promise<GachaOpenResult>;
 }
 
 export interface AnalyticsApi {
@@ -299,7 +313,8 @@ export type AppApi = ReviewApi &
   LibraryApi &
   TransferApi &
   AiApi &
-  CompetitionApi;
+  CompetitionApi &
+  GachaApi;
 
 /** How requests prove who is asking, where the app has accounts. */
 export interface ApiAuth {
@@ -602,6 +617,29 @@ export function createAppApi(auth: ApiAuth | null = null): AppApi {
         method: 'GET',
         timeoutMs: TIMEOUTS.queueMs,
         timeoutMessage: 'Loading the reviews for this month took too long.',
+      }),
+
+    fetchGacha: () =>
+      call('/api/gacha', gachaApiStateSchema, {
+        method: 'GET',
+        timeoutMs: TIMEOUTS.queueMs,
+        timeoutMessage: 'Loading your chests took too long.',
+      }),
+
+    openChest: (body) =>
+      call('/api/gacha/open', gachaOpenResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Opening the chest took too long. Nothing opens twice if you try again.',
+      }),
+
+    exchangeShards: (body) =>
+      call('/api/gacha/exchange', gachaOpenResponseSchema, {
+        method: 'POST',
+        body,
+        timeoutMs: TIMEOUTS.actionMs,
+        timeoutMessage: 'Trading the shards took too long.',
       }),
 
     fetchStudyGoals: () =>
