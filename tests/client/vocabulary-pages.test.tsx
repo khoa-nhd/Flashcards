@@ -47,7 +47,7 @@ describe('Add vocabulary', () => {
     api.createEntry.mockReturnValueOnce(pending.promise);
 
     await user.type(await screen.findByLabelText(/^Word/), 'luminous');
-    await user.type(screen.getByLabelText('Vietnamese meaning'), 'sáng chói');
+    await user.type(await screen.findByLabelText('Vietnamese meaning'), 'sáng chói');
     await user.type(screen.getByLabelText('Definition'), 'full of light');
     await user.click(addButton());
 

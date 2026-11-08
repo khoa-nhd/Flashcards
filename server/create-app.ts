@@ -1,5 +1,6 @@
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { compress } from 'hono/compress';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { z } from 'zod';
 import type { ZodType } from 'zod';
@@ -266,6 +267,10 @@ export function createApp({
 
   app.notFound((c) => errorResponse(c, new HttpError(404, 'not_found', 'No such endpoint.')));
 
+  // Everything this app answers is JSON, and a full vocabulary list is tens of kilobytes:
+  // compressed it is a quarter of that. The static frontend is served outside this app.
+  app.use('*', compress());
+
   app.use('/api/*', async (c, next) => {
     c.header('Cache-Control', 'no-store');
     await next();
@@ -317,6 +322,11 @@ export function createApp({
       auth: usesAccounts ? 'account' : 'none',
       supabase: usesAccounts ? config.supabase : null,
     };
+    // The answer only changes when the server is deployed again, and the app cannot paint
+    // until it arrives: five minutes of it in the browser saves that round trip on a repeat
+    // visit. Set here, after the no-store middleware, and left alone in development, where
+    // the answer changes with every restart.
+    if (config.isProduction) c.header('Cache-Control', 'public, max-age=300, stale-while-revalidate=86400');
     return c.json(body);
   });
 

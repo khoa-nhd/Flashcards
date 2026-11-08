@@ -18,7 +18,8 @@ async function open(path = '/chat') {
   window.history.replaceState(null, '', path);
   const fake = createFakeApi();
   render(<App api={fake.api} settings={createSettingsStore(null)} />);
-  await screen.findAllByRole('navigation');
+  // The chat page's own code is fetched when the page opens; its panel is the proof it is here.
+  await screen.findByRole('complementary', { name: 'Conversations' });
   return { ...fake, user: userEvent.setup() };
 }
 

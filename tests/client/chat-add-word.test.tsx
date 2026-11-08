@@ -39,7 +39,9 @@ async function openChat(options: { mode?: 'general' | 'vocabulary_expert'; conte
   fake.chats.set(conversation.id, { conversation, messages });
   window.history.replaceState(null, '', `/chat?conversation=${conversation.id}`);
   const view = render(<App api={fake.api} settings={createSettingsStore(null)} />);
-  await screen.findAllByRole('navigation');
+  // The chat page's own code is fetched when the page opens; an open conversation and its
+  // message box are the proof that it — and the conversation — are ready.
+  await screen.findByLabelText('Message');
   return { ...fake, conversation, messages, user: userEvent.setup(), ...view };
 }
 

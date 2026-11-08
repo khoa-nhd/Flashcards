@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Suspense, lazy, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { pageIdSchema, type AppConfigResponse } from '../shared/api.js';
 import { AppProvider, createAppServices, useApp, useSettings, type AccountControls } from './app-context.js';
 import { AppShell } from './components/AppShell.js';
@@ -13,29 +13,38 @@ import type { AuthClient } from './lib/auth.js';
 import { createLocalStore, createMemoryStore } from './lib/offline/storage.js';
 import { ROUTES, closeWord, matchRoute, useLocation, wordInQuery, type RouteKey } from './lib/router.js';
 import type { SettingsStore } from './lib/settings.js';
-import { AddPage } from './pages/AddPage.js';
-import { BankPage } from './pages/BankPage.js';
-import { CalendarPage } from './pages/CalendarPage.js';
-import { ChatPage } from './pages/ChatPage.js';
-import { AchievementsPage } from './pages/AchievementsPage.js';
-import { AdminPage } from './pages/AdminPage.js';
-import { BossPage } from './pages/BossPage.js';
-import { PlayPage } from './pages/PlayPage.js';
-import { PvpPage } from './pages/PvpPage.js';
-import { CollectionPage } from './pages/CollectionPage.js';
-import { ShopPage } from './pages/ShopPage.js';
-import { FriendsPage } from './pages/FriendsPage.js';
-import { LeaguePage } from './pages/LeaguePage.js';
-import { ProfilePage } from './pages/ProfilePage.js';
-import { CollectionsPage } from './pages/CollectionsPage.js';
+// A visit starts on the dashboard, or in a review session; those two are in the first
+// download. Every other page is reached from them, so its code arrives when it is opened.
 import { DashboardPage } from './pages/DashboardPage.js';
-import { HelpPage } from './pages/HelpPage.js';
-import { ImportPage } from './pages/ImportPage.js';
-import { InsightsPage } from './pages/InsightsPage.js';
-import { PracticePage } from './pages/PracticePage.js';
 import { ReviewPage } from './pages/ReviewPage.js';
-import { SettingsPage } from './pages/SettingsPage.js';
-import { WeakWordsPage } from './pages/WeakWordsPage.js';
+
+const AddPage = lazy(() => import('./pages/AddPage.js').then((module) => ({ default: module.AddPage })));
+const AchievementsPage = lazy(() =>
+  import('./pages/AchievementsPage.js').then((module) => ({ default: module.AchievementsPage })),
+);
+const AdminPage = lazy(() => import('./pages/AdminPage.js').then((module) => ({ default: module.AdminPage })));
+const BankPage = lazy(() => import('./pages/BankPage.js').then((module) => ({ default: module.BankPage })));
+const BossPage = lazy(() => import('./pages/BossPage.js').then((module) => ({ default: module.BossPage })));
+const CalendarPage = lazy(() => import('./pages/CalendarPage.js').then((module) => ({ default: module.CalendarPage })));
+const ChatPage = lazy(() => import('./pages/ChatPage.js').then((module) => ({ default: module.ChatPage })));
+const CollectionPage = lazy(() =>
+  import('./pages/CollectionPage.js').then((module) => ({ default: module.CollectionPage })),
+);
+const CollectionsPage = lazy(() =>
+  import('./pages/CollectionsPage.js').then((module) => ({ default: module.CollectionsPage })),
+);
+const FriendsPage = lazy(() => import('./pages/FriendsPage.js').then((module) => ({ default: module.FriendsPage })));
+const HelpPage = lazy(() => import('./pages/HelpPage.js').then((module) => ({ default: module.HelpPage })));
+const ImportPage = lazy(() => import('./pages/ImportPage.js').then((module) => ({ default: module.ImportPage })));
+const InsightsPage = lazy(() => import('./pages/InsightsPage.js').then((module) => ({ default: module.InsightsPage })));
+const LeaguePage = lazy(() => import('./pages/LeaguePage.js').then((module) => ({ default: module.LeaguePage })));
+const PlayPage = lazy(() => import('./pages/PlayPage.js').then((module) => ({ default: module.PlayPage })));
+const PracticePage = lazy(() => import('./pages/PracticePage.js').then((module) => ({ default: module.PracticePage })));
+const ProfilePage = lazy(() => import('./pages/ProfilePage.js').then((module) => ({ default: module.ProfilePage })));
+const PvpPage = lazy(() => import('./pages/PvpPage.js').then((module) => ({ default: module.PvpPage })));
+const SettingsPage = lazy(() => import('./pages/SettingsPage.js').then((module) => ({ default: module.SettingsPage })));
+const ShopPage = lazy(() => import('./pages/ShopPage.js').then((module) => ({ default: module.ShopPage })));
+const WeakWordsPage = lazy(() => import('./pages/WeakWordsPage.js').then((module) => ({ default: module.WeakWordsPage })));
 
 const PAGES: Record<RouteKey, { title: string; render: () => ReactNode }> = {
   dashboard: { title: 'Dashboard', render: () => <DashboardPage /> },
@@ -109,13 +118,15 @@ function Boot({ settings, apiFor, loadConfig = fetchAppConfig }: Pick<AppProps, 
     let current = true;
     (async () => {
       try {
-        const config = await loadConfig();
+        // Asked for at the same time as the config, not after it: the sign-in client is
+        // needed on the same screen, and waiting for the answer first would add a whole
+        // round trip of the chunk's own to the first paint.
+        const authModule = import('./lib/supabase-auth.js');
+        const [config, { createSupabaseAuth }] = await Promise.all([loadConfig(), authModule]);
         if (config.auth !== 'account') return { status: 'open' } as const;
         if (config.supabase === null) {
           return { status: 'failed', message: 'The server is not configured yet. Open /api/health for the details.' } as const;
         }
-        // Loaded only where accounts are in use.
-        const { createSupabaseAuth } = await import('./lib/supabase-auth.js');
         return { status: 'accounts', auth: createSupabaseAuth(config.supabase.url, config.supabase.publicKey) } as const;
       } catch (error) {
         return {
@@ -295,7 +306,16 @@ function Root() {
             </Link>
           </div>
         ) : (
-          PAGES[route].render()
+          // The page's own code may still be on its way; the shell stays, only the page area waits.
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center">
+                <Spinner className="size-6" />
+              </div>
+            }
+          >
+            {PAGES[route].render()}
+          </Suspense>
         )}
       </AppShell>
       {wordId !== null && pageIdSchema.safeParse(wordId).success && (

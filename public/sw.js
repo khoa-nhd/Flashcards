@@ -7,15 +7,22 @@
  * is a connection; the built assets are cache-first, since their names carry a
  * content hash. /api/ is never touched: requests to the server have to fail
  * honestly, because that is how the app knows it is offline.
+ *
+ * Two things are filled in at build time by vite.config.ts: the list of files
+ * that make up the entry — precached here, so a repeat visit loads from this
+ * cache rather than the network — and a version taken from those file names, so
+ * a deploy replaces the previous cache instead of keeping it for ever.
  */
-const CACHE = 'flashcards-shell-v1';
+const CACHE = 'flashcards-shell-dev';
 const SHELL = ['/', '/index.html'];
+/** Replaced at build time with the emitted entry chunk and stylesheet. */
+const PRECACHE = [];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(CACHE)
-      .then((cache) => cache.addAll(SHELL))
+      .then((cache) => cache.addAll([...SHELL, ...PRECACHE]))
       .catch(() => undefined)
       .then(() => self.skipWaiting()),
   );
