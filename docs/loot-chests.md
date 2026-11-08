@@ -4,7 +4,7 @@ A collectible chest system for the vocabulary app: keys open chests, what falls
 out stays in a collection, duplicates turn into shards, and shards buy more
 keys. The rolls happen on the server; the browser only draws what it is told.
 
-Schema version: **17** (`supabase/migrations/20261104090000_gacha.sql`).
+Schema version: **22** (`supabase/migrations/20261104090000_gacha.sql`).
 
 ## Where the pieces live
 
